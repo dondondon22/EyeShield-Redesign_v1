@@ -211,23 +211,3 @@ class UserManager:
         return success
 
 
-# ============================================================
-# LEGACY FUNCTIONS (for backward compatibility)
-# ============================================================
-
-def init_db():
-    """Initialize database (legacy function)"""
-    UserManager._init_db()
-
-
-def create_user(username: str, password: str, role: str = "clinician") -> bool:
-    """Create a user (legacy function)"""
-    return UserManager.create_user(username, password, role)
-
-
-def verify_user(username: str, password: str) -> Optional[str]:
-    """Verify user (legacy function)"""
-    return UserManager.verify_user(username, password)
-
-# ============================================================
-# INITIALIZE DATABASE ON MODULE LOAD   

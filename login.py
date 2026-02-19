@@ -6,7 +6,10 @@ Handles user authentication and login window.
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QLineEdit, QVBoxLayout, QMessageBox
 from PySide6.QtCore import Qt
 
-from auth import verify_user
+try:
+    from user_auth import verify_user
+except Exception:
+    from .user_auth import verify_user
 
 
 class LoginWindow(QWidget):

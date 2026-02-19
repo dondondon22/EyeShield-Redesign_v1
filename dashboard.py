@@ -13,6 +13,8 @@ from screening import ScreeningPage
 from patient_records import PatientRecordsPage
 from reports import ReportsPage
 from users import UsersPage
+from settings import SettingsPage
+from help_support import HelpSupportPage
 
 
 class EyeShieldApp(QMainWindow):
@@ -28,13 +30,75 @@ class EyeShieldApp(QMainWindow):
         self.setMinimumSize(1350, 850)
 
         root = QWidget()
-        root_layout = QHBoxLayout(root)
+        root_layout = QVBoxLayout(root)
 
-        # Create sidebar
-        sidebar = self.create_sidebar()
-        root_layout.addWidget(sidebar)
+        # Create top navigation bar
+        nav_bar = QWidget()
+        nav_layout = QHBoxLayout(nav_bar)
+        nav_layout.setContentsMargins(10, 10, 10, 10)
+        nav_layout.setSpacing(10)
+        nav_bar.setStyleSheet("background: #f8f9fa; border-bottom: 1px solid #dee2e6;")
 
-        # Create main content area
+
+        # App title
+        title_label = QLabel("EyeShield EMR")
+        title_label.setStyleSheet("color: #007bff; font-size: 22px; font-weight: bold; margin-right: 30px;")
+        nav_layout.addWidget(title_label)
+
+        # Navigation buttons with icons and small text labels below
+        def nav_button_with_label(icon, text):
+            w = QWidget()
+            v = QVBoxLayout(w)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(0)
+            btn = QPushButton(icon)
+            btn.setStyleSheet(self.get_nav_button_style(icon_only=True))
+            btn.setFixedSize(36, 36)
+            label = QLabel(text)
+            label.setAlignment(Qt.AlignHCenter)
+            label.setStyleSheet("font-size: 10px; color: #495057; margin-top: 0px;")
+            v.addWidget(btn)
+            v.addWidget(label)
+            return w, btn
+
+        navs = [
+            ("📊", "Dashboard"),
+            ("🩺", "Screening"),
+            ("📁", "Records"),
+            ("📄", "Reports"),
+            ("👥", "Users"),
+            ("⚙️", "Settings"),
+            ("❓", "Help")
+        ]
+        nav_widgets = []
+        nav_buttons = []
+        for icon, text in navs:
+            w, btn = nav_button_with_label(icon, text)
+            nav_layout.addWidget(w)
+            nav_widgets.append(w)
+            nav_buttons.append(btn)
+
+
+        # User info on the right
+        nav_layout.addStretch()
+        user_info = QLabel(f"👤 {self.username} ({self.role})")
+        user_info.setStyleSheet("color: #495057; font-size: 12px; font-weight: 500; margin-left: 18px; margin-right: 8px;")
+        nav_layout.addWidget(user_info)
+
+        # Connect buttons
+        nav_buttons[0].clicked.connect(lambda: self.pages.setCurrentIndex(0))
+        nav_buttons[1].clicked.connect(lambda: self.pages.setCurrentIndex(1))
+        nav_buttons[2].clicked.connect(lambda: self.pages.setCurrentIndex(2))
+        nav_buttons[3].clicked.connect(lambda: self.pages.setCurrentIndex(3))
+        nav_buttons[4].clicked.connect(lambda: self.pages.setCurrentIndex(4))
+        nav_buttons[5].clicked.connect(lambda: self.pages.setCurrentIndex(5))
+        nav_buttons[6].clicked.connect(lambda: self.pages.setCurrentIndex(6))
+
+        # (All navigation button connections are now handled via nav_buttons list above)
+
+        root_layout.addWidget(nav_bar)
+
+        # Main content area
         main = QWidget()
         main.setStyleSheet("background: #f8f9fa;")
         main_layout = QVBoxLayout(main)
@@ -47,6 +111,8 @@ class EyeShieldApp(QMainWindow):
         self.patient_records_page = PatientRecordsPage()
         self.reports_page = ReportsPage()
         self.users_page = UsersPage()
+        self.settings_page = SettingsPage()
+        self.help_support_page = HelpSupportPage()
 
         # Dashboard is created after the other pages so it can be refreshed
         self.dashboard_page = self.create_dashboard_page()
@@ -62,69 +128,18 @@ class EyeShieldApp(QMainWindow):
         self.pages.addWidget(self.patient_records_page)
         self.pages.addWidget(self.reports_page)
         self.pages.addWidget(self.users_page)
+        self.pages.addWidget(self.settings_page)
+        self.pages.addWidget(self.help_support_page)
 
         main_layout.addWidget(self.pages)
-
         root_layout.addWidget(main)
         self.setCentralWidget(root)
 
-    def create_sidebar(self):
-        """Create sidebar with navigation buttons"""
-        sidebar = QWidget()
-        sidebar.setFixedWidth(250)
-        sidebar.setStyleSheet("""
-            QWidget {
-                background: #f8f9fa;
-                border-right: 1px solid #dee2e6;
-            }
-        """)
-
-        s = QVBoxLayout(sidebar)
-        s.setContentsMargins(0, 20, 0, 20)
-
-        # Title
-        title_label = QLabel("EyeShield EMR")
-        title_label.setStyleSheet("""
-            color: #007bff;
-            font-size: 22px;
-            font-weight: bold;
-            qproperty-alignment: AlignCenter;
-            margin-bottom: 10px;
-        """)
-        s.addWidget(title_label)
-
-        # Navigation buttons
-        btn_dash = QPushButton("📊 Dashboard")
-        btn_dash.setStyleSheet(self.get_nav_button_style())
-
-        btn_screen = QPushButton("🩺 New Screening")
-        btn_screen.setStyleSheet(self.get_nav_button_style())
-
-        btn_pat = QPushButton("📁 Patient Records")
-        btn_pat.setStyleSheet(self.get_nav_button_style())
-
-        btn_rep = QPushButton("📄 Reports")
-        btn_rep.setStyleSheet(self.get_nav_button_style())
-
-        btn_users = QPushButton("👥 Users")
-        btn_users.setStyleSheet(self.get_nav_button_style())
-
-        for b in [btn_dash, btn_screen, btn_pat, btn_rep, btn_users]:
-            s.addWidget(b)
-
-        s.addStretch()
-
-        # Connect buttons
-        btn_dash.clicked.connect(lambda: self.pages.setCurrentIndex(0))
-        btn_screen.clicked.connect(lambda: self.pages.setCurrentIndex(1))
-        btn_pat.clicked.connect(lambda: self.pages.setCurrentIndex(2))
-        btn_rep.clicked.connect(lambda: self.pages.setCurrentIndex(3))
-        btn_users.clicked.connect(lambda: self.pages.setCurrentIndex(4))
-
-        return sidebar
+    # Sidebar removed; navigation is now in the top bar
 
     def create_dashboard_page(self):
         """Create dashboard page"""
+        from datetime import datetime
         page = QWidget()
         page.setStyleSheet("background: #f8f9fa;")
         layout = QVBoxLayout(page)
@@ -142,76 +157,35 @@ class EyeShieldApp(QMainWindow):
         """)
         welcome_layout = QVBoxLayout(welcome_widget)
 
-        welcome_title = QLabel(f"Welcome back, Dr. {self.username}")
-        welcome_title.setStyleSheet("""
-            color: white;
-            font-size: 24px;
-            font-weight: bold;
-        """)
-
+        welcome_title = QLabel(f"Welcome, {self.username}!")
+        welcome_title.setStyleSheet("color: white; font-size: 24px; font-weight: bold;")
         welcome_subtitle = QLabel("Electronic Medical Records - Diabetic Retinopathy Screening System")
-        welcome_subtitle.setStyleSheet("""
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 14px;
-            margin-top: 5px;
-        """)
+        welcome_subtitle.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 14px; margin-top: 5px;")
 
         welcome_layout.addWidget(welcome_title)
         welcome_layout.addWidget(welcome_subtitle)
         layout.addWidget(welcome_widget)
 
-        # Stats cards
-        cards_container = QWidget()
-        cards_layout = QHBoxLayout(cards_container)
-        cards_layout.setSpacing(20)
+        # Motivational Quote and Today's Date
+        quote_box = QWidget()
+        quote_layout = QVBoxLayout(quote_box)
+        quote_layout.setContentsMargins(0, 0, 0, 0)
 
-        def create_stat_card(title, value_label):
-            card = QWidget()
-            card.setStyleSheet("""
-                QWidget {
-                    background: white;
-                    border-radius: 8px;
-                    border: 1px solid #dee2e6;
-                }
-            """)
-            card.setFixedSize(220, 110)
+        quote = QLabel('"The best way to find yourself is to lose yourself in the service of others."<br><span style=\'color:#007bff;\'>– Mahatma Gandhi</span>')
+        quote.setStyleSheet("font-size: 15px; color: #343a40; font-style: italic; background: white; border-radius: 8px; border: 1px solid #dee2e6; padding: 16px 24px;")
+        quote.setWordWrap(True)
+        quote.setTextFormat(Qt.RichText)
+        quote_layout.addWidget(quote)
 
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(18, 12, 18, 12)
+        today = datetime.now().strftime('%A, %B %d, %Y')
+        date_label = QLabel(f"Today: <b>{today}</b>")
+        date_label.setStyleSheet("font-size: 13px; color: #007bff; margin-top: 4px;")
+        date_label.setTextFormat(Qt.RichText)
+        quote_layout.addWidget(date_label)
 
-            value_label.setStyleSheet("""
-                font-size: 28px;
-                font-weight: bold;
-                color: #007bff;
-                qproperty-alignment: AlignCenter;
-            """)
+        layout.addWidget(quote_box)
 
-            title_label = QLabel(title)
-            title_label.setStyleSheet("""
-                font-size: 12px;
-                color: #6c757d;
-                qproperty-alignment: AlignCenter;
-            """)
-
-            card_layout.addWidget(value_label)
-            card_layout.addWidget(title_label)
-
-            return card
-
-        # Create value labels (will be refreshed dynamically)
-        self.stat_today_value = QLabel("0")
-        self.stat_total_value = QLabel("0")
-        self.stat_images_value = QLabel("0")
-        self.stat_dr_value = QLabel("0")
-
-        cards_layout.addWidget(create_stat_card("Today's Screenings", self.stat_today_value))
-        cards_layout.addWidget(create_stat_card("Total Patients", self.stat_total_value))
-        cards_layout.addWidget(create_stat_card("Images Processed", self.stat_images_value))
-        cards_layout.addWidget(create_stat_card("DR Positive Cases", self.stat_dr_value))
-
-        layout.addWidget(cards_container)
-
-        # Quick Actions
+        # Clinical Actions
         actions_group = QGroupBox("Clinical Actions")
         actions_group.setStyleSheet("""
             QGroupBox {
@@ -229,47 +203,42 @@ class EyeShieldApp(QMainWindow):
                 padding: 0 10px 0 10px;
             }
         """)
-
         actions_layout = QHBoxLayout(actions_group)
         actions_layout.setContentsMargins(20, 40, 20, 20)
         actions_layout.setSpacing(15)
 
-        new_screening_btn = QPushButton("🩺 New Patient Screening")
-        new_screening_btn.setStyleSheet("""
-            QPushButton {
-                background: #28a745;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 12px 18px;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #218838;
-            }
-        """)
-        new_screening_btn.clicked.connect(lambda: self.pages.setCurrentIndex(1))
+        def make_action_btn(label, color, hover):
+            btn = QPushButton(label)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {color};
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 12px 18px;
+                    font-size: 13px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background: {hover}; }}
+            """)
+            return btn
 
-        view_patients_btn = QPushButton("📁 Patient Records")
-        view_patients_btn.setStyleSheet("""
-            QPushButton {
-                background: #007bff;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 12px 18px;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #0056b3;
-            }
-        """)
-        view_patients_btn.clicked.connect(lambda: self.pages.setCurrentIndex(2))
+        btn_new = make_action_btn("🩺 New Patient Screening", "#28a745", "#218838")
+        btn_new.clicked.connect(lambda: self.pages.setCurrentIndex(1))
 
-        actions_layout.addWidget(new_screening_btn)
-        actions_layout.addWidget(view_patients_btn)
+        btn_records = make_action_btn("📁 Patient Records", "#007bff", "#0056b3")
+        btn_records.clicked.connect(lambda: self.pages.setCurrentIndex(2))
+
+        btn_reports = make_action_btn("📄 Reports", "#17a2b8", "#117a8b")
+        btn_reports.clicked.connect(lambda: self.pages.setCurrentIndex(3))
+
+        btn_users = make_action_btn("👥 Users", "#6f42c1", "#563d7c")
+        btn_users.clicked.connect(lambda: self.pages.setCurrentIndex(4))
+
+        actions_layout.addWidget(btn_new)
+        actions_layout.addWidget(btn_records)
+        actions_layout.addWidget(btn_reports)
+        actions_layout.addWidget(btn_users)
         actions_layout.addStretch()
 
         layout.addWidget(actions_group)
@@ -309,31 +278,12 @@ class EyeShieldApp(QMainWindow):
         return page
 
     def refresh_dashboard(self):
-        """Refresh dashboard stats and recent activity from patient records"""
+        """Refresh recent activity from patient records"""
         try:
             table = self.patient_records_page.patient_table
             total = table.rowCount()
-
-            # Simple heuristic: today's screenings = total (no date tracking yet)
-            todays = total
-
-            # DR positive: check Result column (index 12 in expanded table)
-            dr_count = 0
             results_idx = 12
-            for r in range(total):
-                item = table.item(r, results_idx)
-                if item and 'dr' in item.text().lower():
-                    dr_count += 1
 
-            # Images processed: use total for now
-            images = total
-
-            self.stat_today_value.setText(str(todays))
-            self.stat_total_value.setText(str(total))
-            self.stat_images_value.setText(str(images))
-            self.stat_dr_value.setText(str(dr_count))
-
-            # Recent activity: show up to 5 latest
             recent_lines = []
             for r in range(total - 1, max(-1, total - 6), -1):
                 pid_item = table.item(r, 0)
@@ -354,22 +304,43 @@ class EyeShieldApp(QMainWindow):
             pass
 
     @staticmethod
-    def get_nav_button_style():
-        """Get navigation button stylesheet"""
-        return """
-            QPushButton {
-                color: #495057;
-                text-align: left;
-                padding: 15px 20px;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: 500;
-                margin: 2px 15px;
-                background: transparent;
-            }
-            QPushButton:hover {
-                background: #e9ecef;
-                color: #007bff;
-            }
-        """
+    def get_nav_button_style(icon_only=False):
+        """Get navigation button stylesheet. If icon_only, use smaller font and center icon."""
+        if icon_only:
+            return """
+                QPushButton {
+                    color: #495057;
+                    text-align: center;
+                    padding: 8px 10px;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 18px;
+                    font-weight: 500;
+                    margin: 2px 6px;
+                    min-width: 36px;
+                    min-height: 36px;
+                    background: transparent;
+                }
+                QPushButton:hover {
+                    background: #e9ecef;
+                    color: #007bff;
+                }
+            """
+        else:
+            return """
+                QPushButton {
+                    color: #495057;
+                    text-align: left;
+                    padding: 15px 20px;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 14px;
+                    font-weight: 500;
+                    margin: 2px 15px;
+                    background: transparent;
+                }
+                QPushButton:hover {
+                    background: #e9ecef;
+                    color: #007bff;
+                }
+            """

@@ -6,9 +6,9 @@ Handles patient records display and management.
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit, QHBoxLayout, QPushButton, QFileDialog, QDialog, QTextEdit
 )
+from PySide6.QtGui import QFont
 import sqlite3
 from auth import DB_FILE
-
 
 class PatientRecordsPage(QWidget):
     """Patient records page with search, export, and detail view"""
@@ -17,25 +17,33 @@ class PatientRecordsPage(QWidget):
         super().__init__()
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         title = QLabel("Patients / Screenings")
-        title.setStyleSheet("font-size:20px;font-weight:bold;")
+        title.setStyleSheet("font-size:20px;font-weight:bold;margin-bottom:4px;")
         layout.addWidget(title)
 
         # Search bar and export button
         top_bar = QHBoxLayout()
+        top_bar.setSpacing(8)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by name, ID, or result...")
+        self.search_input.setFixedWidth(260)
+        self.search_input.setStyleSheet("padding: 5px 10px; border-radius: 5px; font-size: 14px;")
         self.search_input.textChanged.connect(self.filter_table)
         top_bar.addWidget(self.search_input)
 
+        top_bar.addStretch(1)
+
         export_btn = QPushButton("Export to CSV")
+        export_btn.setStyleSheet("padding: 6px 16px; font-size: 14px; border-radius: 5px;")
         export_btn.clicked.connect(self.export_to_csv)
         top_bar.addWidget(export_btn)
 
         layout.addLayout(top_bar)
 
-        # Expanded columns to match ScreeningPage fields
+        # Patient table setup
         self.patient_table = QTableWidget(0, 14)
         self.patient_table.setHorizontalHeaderLabels([
             "Patient ID",
@@ -54,6 +62,16 @@ class PatientRecordsPage(QWidget):
             "Confidence"
         ])
         self.patient_table.cellDoubleClicked.connect(self.show_details_dialog)
+        self.patient_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.patient_table.setAlternatingRowColors(True)
+        self.patient_table.setStyleSheet(
+            "QTableWidget { font-size: 14px; background: #fafbfc; } "
+            "QHeaderView::section { background: #f5f5f5; color: #222; font-weight: bold; font-size: 14px; padding: 6px 0; border: none; } "
+            "QTableWidget::item:selected { background: #e3f2fd; } "
+        )
+        self.patient_table.verticalHeader().setVisible(False)
+        self.patient_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.patient_table.setSelectionMode(QTableWidget.SingleSelection)
         layout.addWidget(self.patient_table)
 
         self._all_records = []
