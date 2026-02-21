@@ -15,25 +15,31 @@ import user_store
 
 class UserManager:
     """User management class."""
-    def create_user(self, username, password, role):
+    @staticmethod
+    def create_user(username, password, role):
         """Create a new user."""
-        return True
+        return user_store.add_user(username, password, role)
 
-    def get_all_users(self):
+    @staticmethod
+    def get_all_users():
         """Get all users."""
-        return [("user1", "clinician"), ("user2", "admin"), ("user3", "viewer")]
+        users = user_store.get_all_users()
+        return [(user["username"], user["role"]) for user in users]
 
-    def delete_user(self, username):
+    @staticmethod
+    def delete_user(username):
         """Delete a user."""
-        return True
+        return user_store.delete_user(username)
 
-    def update_user_role(self, username, new_role):
+    @staticmethod
+    def update_user_role(username, new_role):
         """Update role for a user."""
-        return True
+        return False
 
-    def reset_password(self, username, new_password):
+    @staticmethod
+    def reset_password(username, new_password):
         """Reset password for a user."""
-        return True
+        return False
 
 class NewUserDialog(QDialog):
     """Modal dialog for creating a new user."""

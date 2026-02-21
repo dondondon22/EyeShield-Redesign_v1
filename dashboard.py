@@ -147,6 +147,7 @@ class EyeShieldApp(QMainWindow):
         self.screening_page.patient_records_page = self.patient_records_page
         # Let patient records notify the app when rows are added
         self.patient_records_page.parent_app = self
+        self.users_page.parent_app = self
 
         self.pages.addWidget(self.dashboard_page)
         self.pages.addWidget(self.screening_page)

@@ -1,55 +1,48 @@
-
-import json
 import os
+
+from auth import UserManager as AuthUserManager
 
 class UserStore:
     USER_FILE = "users_data.json"
-    DEFAULT_ADMIN = {"username": "admin", "password": "admin", "role": "admin"}
 
     @classmethod
     def load_users(cls):
-        if not os.path.exists(cls.USER_FILE):
-            cls.save_users([cls.DEFAULT_ADMIN])
-            return [cls.DEFAULT_ADMIN]
-        with open(cls.USER_FILE, "r", encoding="utf-8") as f:
-            users = json.load(f)
-        if not users:
-            cls.save_users([cls.DEFAULT_ADMIN])
-            return [cls.DEFAULT_ADMIN]
-        return users
+        users = AuthUserManager.get_all_users()
+        return [{"username": username, "role": role} for username, role in users]
 
     @classmethod
     def save_users(cls, users):
-        with open(cls.USER_FILE, "w", encoding="utf-8") as f:
-            json.dump(users, f, indent=2)
+        return users
 
     @classmethod
     def add_user(cls, username, password, role):
+        return AuthUserManager.create_user(username, password, role)
+
+    @classmethod
+    def _get_user_role(cls, username):
         users = cls.load_users()
-        if any(u["username"] == username for u in users):
-            return False
-        users.append({"username": username, "password": password, "role": role})
-        cls.save_users(users)
-        return True
+        for user in users:
+            if user.get("username") == username:
+                return user.get("role")
+        return None
+
+    @classmethod
+    def _count_admins(cls):
+        users = cls.load_users()
+        return sum(1 for user in users if user.get("role") == "admin")
 
     @classmethod
     def delete_user(cls, username):
-        users = cls.load_users()
-        user_to_delete = next((u for u in users if u["username"] == username), None)
-        if not user_to_delete:
+        role = cls._get_user_role(username)
+        if role is None:
             return False
-        # Block admin-to-admin deletion always (unless self)
-        if user_to_delete["role"] == "admin":
-            # Try to get current user from environment variable (set by app), fallback to block all except self
-            import os
+        if role == "admin":
             current_username = os.environ.get("EYESHIELD_CURRENT_USER")
-            if current_username is None or username != current_username:
+            if current_username and current_username != username:
                 return False
-        new_users = [u for u in users if u["username"] != username]
-        if len(new_users) == len(users):
-            return False
-        cls.save_users(new_users)
-        return True
+            if cls._count_admins() <= 1:
+                return False
+        return AuthUserManager.delete_user(username)
 
     @classmethod
     def get_all_users(cls):

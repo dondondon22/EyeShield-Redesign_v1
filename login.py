@@ -3,6 +3,8 @@ Login module for EyeShield EMR application.
 Handles user authentication and login window.
 """
 
+import os
+
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QLineEdit, QVBoxLayout, QMessageBox
 from PySide6.QtCore import Qt
 
@@ -132,6 +134,8 @@ class LoginWindow(QWidget):
         )
 
         if role:
+            os.environ["EYESHIELD_CURRENT_USER"] = self.username_input.text().strip()
+            os.environ["EYESHIELD_CURRENT_ROLE"] = role
             self.main = EyeShieldApp(self.username_input.text(), role)
             self.main.show()
             self.close()
