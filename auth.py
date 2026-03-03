@@ -340,4 +340,28 @@ class UserManager:
         conn.close()
         return success
 
+    @staticmethod
+    def reset_password(username: str, new_password: str) -> bool:
+        """Reset a user's password"""
+        if not username or not new_password:
+            return False
+
+        conn = get_connection()
+        cur = conn.cursor()
+
+        pw_hash = PasswordManager.hash_password(new_password)
+
+        try:
+            cur.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (pw_hash, username),
+            )
+            conn.commit()
+            success = cur.rowcount > 0
+        except sqlite3.Error:
+            success = False
+
+        conn.close()
+        return success
+
 

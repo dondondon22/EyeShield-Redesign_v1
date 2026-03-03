@@ -48,9 +48,19 @@ class UserStore:
     def get_all_users(cls):
         return cls.load_users()
 
+    @classmethod
+    def reset_password(cls, username, new_password):
+        return AuthUserManager.reset_password(username, new_password)
+
+    @classmethod
+    def update_user_role(cls, username, new_role):
+        return AuthUserManager.update_user_role(username, new_role)
+
 # For backward compatibility with existing code
 load_users = UserStore.load_users
 save_users = UserStore.save_users
 add_user = UserStore.add_user
 delete_user = UserStore.delete_user
 get_all_users = UserStore.get_all_users
+reset_password = UserStore.reset_password
+update_user_role = UserStore.update_user_role

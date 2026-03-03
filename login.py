@@ -116,6 +116,9 @@ class LoginWindow(QWidget):
         """)
         btn.clicked.connect(self.handle_login)
 
+        self.username_input.returnPressed.connect(self.password_input.setFocus)
+        self.password_input.returnPressed.connect(self.handle_login)
+
         form_layout.addWidget(self.username_input)
         form_layout.addWidget(self.password_input)
         form_layout.addWidget(btn)

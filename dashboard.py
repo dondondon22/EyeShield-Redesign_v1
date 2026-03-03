@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt
 from screening import ScreeningPage
 from reports import ReportsPage
 from users import UsersPage
-from settings import SettingsPage
+from settings import SettingsPage, DARK_STYLESHEET
 from help_support import HelpSupportPage
 from camera import CameraPage
 from auth import DB_FILE
@@ -30,6 +30,8 @@ class EyeShieldApp(QMainWindow):
 
         self.username = username
         self.role = role
+        self._dark_mode = False
+        self._saved_styles = {}
 
         self.setWindowTitle("EyeShield – DR Screening")
         self.setMinimumSize(1350, 850)
@@ -85,6 +87,8 @@ class EyeShieldApp(QMainWindow):
             nav_buttons.append(btn)
             nav_labels.append(label)
 
+        self.nav_buttons = nav_buttons
+        self.nav_labels = nav_labels
 
         # User info on the right
         nav_layout.addStretch()
@@ -93,6 +97,7 @@ class EyeShieldApp(QMainWindow):
         nav_layout.addWidget(user_info)
 
         logout_btn = QPushButton("Logout")
+        logout_btn.setObjectName("logoutBtn")
         logout_btn.setStyleSheet("""
             QPushButton {
                 background: #dc3545;
@@ -160,6 +165,12 @@ class EyeShieldApp(QMainWindow):
         root_layout.addWidget(main)
         self.setCentralWidget(root)
         self.refresh_dashboard()
+        self._set_active_nav(0)
+
+        # Apply saved theme from settings (must run after all pages are parented)
+        saved_theme = self.settings_page.theme_combo.currentText()
+        if saved_theme == "Dark":
+            self.apply_theme("Dark")
 
     # Sidebar removed; navigation is now in the top bar
 
@@ -170,10 +181,121 @@ class EyeShieldApp(QMainWindow):
         self.pages.setCurrentIndex(index)
 
     def _on_page_changed(self, index):
+        self._set_active_nav(index)
         if index == 2:
             self.camera_page.enter_page()
         else:
             self.camera_page.leave_page()
+        if index == 0:
+            self.refresh_dashboard()
+
+    def _set_active_nav(self, index: int):
+        """Highlight the active navigation button and dim the rest."""
+        if not hasattr(self, "nav_buttons"):
+            return
+        dark = getattr(self, '_dark_mode', False)
+        if dark:
+            active_btn_style = """
+                QPushButton {
+                    color: #89b4fa;
+                    text-align: center;
+                    padding: 7px 9px;
+                    border: 1px solid transparent;
+                    border-radius: 8px;
+                    font-size: 18px;
+                    font-weight: 500;
+                    margin: 2px 6px;
+                    min-width: 40px;
+                    min-height: 40px;
+                    background: #313244;
+                }
+                QPushButton:hover { background: #3a3a4f; }
+            """
+            inactive_btn_style = """
+                QPushButton {
+                    color: #a6adc8;
+                    text-align: center;
+                    padding: 7px 9px;
+                    border: 1px solid transparent;
+                    border-radius: 8px;
+                    font-size: 18px;
+                    font-weight: 500;
+                    margin: 2px 6px;
+                    min-width: 40px;
+                    min-height: 40px;
+                    background: transparent;
+                }
+                QPushButton:hover {
+                    background: #45475a;
+                    color: #89b4fa;
+                }
+            """
+            active_label = "font-size: 11px; color: #89b4fa; margin-top: 0px;"
+            inactive_label = "font-size: 11px; color: #a6adc8; margin-top: 0px;"
+        else:
+            active_btn_style = """
+                QPushButton {
+                    color: #007bff;
+                    text-align: center;
+                    padding: 7px 9px;
+                    border: 1px solid transparent;
+                    border-radius: 8px;
+                    font-size: 18px;
+                    font-weight: 500;
+                    margin: 2px 6px;
+                    min-width: 40px;
+                    min-height: 40px;
+                    background: #e8f0fe;
+                }
+                QPushButton:hover { background: #dbe4f8; }
+            """
+            inactive_btn_style = self.get_nav_button_style(icon_only=True)
+            active_label = "font-size: 11px; color: #007bff; margin-top: 0px;"
+            inactive_label = "font-size: 11px; color: #495057; margin-top: 0px;"
+
+        for i, btn in enumerate(self.nav_buttons):
+            if i == index:
+                btn.setStyleSheet(active_btn_style)
+            elif btn.isEnabled():
+                btn.setStyleSheet(inactive_btn_style)
+        for i, label in enumerate(self.nav_labels):
+            if i == index:
+                label.setStyleSheet(active_label)
+            elif self.nav_buttons[i].isEnabled():
+                label.setStyleSheet(inactive_label)
+
+    def apply_theme(self, theme: str):
+        """Apply theme across the entire application by clearing local stylesheets."""
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+
+        if theme == "Dark":
+            if self._dark_mode:
+                return
+            self._dark_mode = True
+            # Save and clear all local stylesheets so app-level takes over
+            self._saved_styles = {}
+            for widget in self.findChildren(QWidget):
+                ss = widget.styleSheet()
+                if ss:
+                    self._saved_styles[id(widget)] = (widget, ss)
+                    widget.setStyleSheet("")
+            app.setStyleSheet(DARK_STYLESHEET)
+        else:
+            if not self._dark_mode:
+                return
+            self._dark_mode = False
+            app.setStyleSheet("")
+            # Restore original local stylesheets
+            for _, (widget, ss) in self._saved_styles.items():
+                try:
+                    widget.setStyleSheet(ss)
+                except RuntimeError:
+                    pass  # widget was deleted
+            self._saved_styles = {}
+
+        current_idx = self.pages.currentIndex()
+        self._set_active_nav(current_idx)
 
     def handle_logout(self):
         reply = QMessageBox.question(
@@ -487,8 +609,8 @@ class EyeShieldApp(QMainWindow):
                 QPushButton {
                     color: #495057;
                     text-align: center;
-                    padding: 8px 10px;
-                    border: none;
+                    padding: 7px 9px;
+                    border: 1px solid transparent;
                     border-radius: 8px;
                     font-size: 18px;
                     font-weight: 500;

@@ -34,12 +34,12 @@ class UserManager:
     @staticmethod
     def update_user_role(username, new_role):
         """Update role for a user."""
-        return False
+        return user_store.update_user_role(username, new_role)
 
     @staticmethod
     def reset_password(username, new_password):
         """Reset password for a user."""
-        return False
+        return user_store.reset_password(username, new_password)
 
 class NewUserDialog(QDialog):
     """Modal dialog for creating a new user."""
@@ -98,6 +98,78 @@ class NewUserDialog(QDialog):
             self.accept()
         else:
             QMessageBox.warning(self, "Error", "Could not create user (may already exist).")
+
+
+class ChangeRoleDialog(QDialog):
+    """Modal dialog for changing a user's role."""
+
+    def __init__(self, username, current_role, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Change Role \u2014 {username}")
+        self.setModal(True)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Choose a new role for <b>{username}</b>:"))
+        self.role_input = QComboBox()
+        self.role_input.addItems(["clinician", "admin", "viewer"])
+        self.role_input.setCurrentText(current_role)
+        layout.addWidget(self.role_input)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("Apply")
+        ok_btn.setAutoDefault(True)
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def selected_role(self):
+        return self.role_input.currentText()
+
+
+class ResetPasswordDialog(QDialog):
+    """Modal dialog for resetting a user's password."""
+
+    def __init__(self, username, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Reset Password \u2014 {username}")
+        self.setModal(True)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Set a new password for <b>{username}</b>:"))
+        self.pw_input = QLineEdit()
+        self.pw_input.setPlaceholderText("New password")
+        self.pw_input.setEchoMode(QLineEdit.Password)
+        self.confirm_input = QLineEdit()
+        self.confirm_input.setPlaceholderText("Confirm password")
+        self.confirm_input.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.pw_input)
+        layout.addWidget(self.confirm_input)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("Reset")
+        ok_btn.setAutoDefault(True)
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self._validate)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        self.confirm_input.returnPressed.connect(self._validate)
+
+    def _validate(self):
+        if not self.pw_input.text():
+            QMessageBox.warning(self, "Empty Password", "Password cannot be empty.")
+            return
+        if self.pw_input.text() != self.confirm_input.text():
+            QMessageBox.warning(self, "Mismatch", "Passwords do not match.")
+            return
+        self.accept()
+
+    def new_password(self):
+        return self.pw_input.text()
 
 
 class UsersPage(QWidget):
@@ -184,11 +256,17 @@ class UsersPage(QWidget):
         users_list_layout.setContentsMargins(0, 0, 0, 0)
         users_list_layout.setSpacing(4)
         users_list_layout.addWidget(self.users_table)
+        change_role_btn = QPushButton("Change Role")
+        change_role_btn.clicked.connect(self.change_selected_role)
+        reset_pw_btn = QPushButton("Reset Password")
+        reset_pw_btn.clicked.connect(self.reset_selected_password)
         delete_user_button = QPushButton("Delete Selected User")
         delete_user_button.clicked.connect(self.delete_user)
         delete_row = QHBoxLayout()
         delete_row.addStretch()
-        delete_row.addWidget(delete_user_button, alignment=Qt.AlignRight)
+        delete_row.addWidget(change_role_btn)
+        delete_row.addWidget(reset_pw_btn)
+        delete_row.addWidget(delete_user_button)
         users_list_layout.addLayout(delete_row)
         grid_layout.addWidget(QLabel("Users List"), 0, 0)
         grid_layout.addWidget(users_list_box, 1, 0)
@@ -347,3 +425,47 @@ class UsersPage(QWidget):
         self.activity_log.setItem(row, 0, QTableWidgetItem(user))
         self.activity_log.setItem(row, 1, QTableWidgetItem(action))
         self.activity_log.setItem(row, 2, QTableWidgetItem(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+    def change_selected_role(self):
+        """Open a dialog to change the role of the selected user."""
+        selected_row = self.users_table.currentRow()
+        if selected_row == -1:
+            QMessageBox.warning(self, "No Selection", "Please select a user to change role.")
+            return
+        username_item = self.users_table.item(selected_row, 0)
+        role_item = self.users_table.item(selected_row, 1)
+        if not username_item or not role_item:
+            return
+        username = username_item.text()
+        role = role_item.text()
+        dlg = ChangeRoleDialog(username, role, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            new_role = dlg.selected_role()
+            if new_role == role:
+                return
+            success = user_store.update_user_role(username, new_role)
+            if success:
+                self.status_label.setText(f"Role updated: {username} \u2192 {new_role}")
+                self.log_activity(username, f"Role changed to {new_role}")
+                self.refresh_users()
+            else:
+                QMessageBox.warning(self, "Error", f"Failed to update role for '{username}'.")
+
+    def reset_selected_password(self):
+        """Open a dialog to reset the password of the selected user."""
+        selected_row = self.users_table.currentRow()
+        if selected_row == -1:
+            QMessageBox.warning(self, "No Selection", "Please select a user to reset password.")
+            return
+        username_item = self.users_table.item(selected_row, 0)
+        if not username_item:
+            return
+        username = username_item.text()
+        dlg = ResetPasswordDialog(username, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            success = user_store.reset_password(username, dlg.new_password())
+            if success:
+                self.status_label.setText(f"Password reset for '{username}'")
+                self.log_activity(username, "Password reset")
+            else:
+                QMessageBox.warning(self, "Error", f"Failed to reset password for '{username}'.")

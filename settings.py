@@ -15,6 +15,203 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+DARK_STYLESHEET = """
+    /* ---- Base ---- */
+    QWidget {
+        background: #1e1e2e;
+        color: #cdd6f4;
+        font-family: "Segoe UI", "Inter", "Arial";
+    }
+    QMainWindow, QStackedWidget {
+        background: #1e1e2e;
+    }
+
+    /* ---- Inputs ---- */
+    QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+        background: #313244;
+        color: #cdd6f4;
+        border: 1px solid #45475a;
+        border-radius: 8px;
+        padding: 8px;
+        selection-background-color: #585b70;
+    }
+    QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
+    QSpinBox:focus, QDoubleSpinBox:focus {
+        border: 1px solid #89b4fa;
+    }
+    QComboBox QAbstractItemView {
+        background: #313244;
+        color: #cdd6f4;
+        selection-background-color: #45475a;
+    }
+
+    /* ---- Tables ---- */
+    QTableWidget {
+        background: #313244;
+        alternate-background-color: #2a2a3c;
+        color: #cdd6f4;
+        gridline-color: #45475a;
+        border: 1px solid #45475a;
+        border-radius: 8px;
+    }
+    QHeaderView::section {
+        background: #363649;
+        color: #bac2de;
+        padding: 8px;
+        border: none;
+        font-weight: 600;
+    }
+    QTableWidget::item {
+        padding: 8px;
+    }
+
+    /* ---- Group boxes ---- */
+    QGroupBox {
+        background: #262637;
+        border: 1px solid #45475a;
+        border-radius: 8px;
+        margin-top: 10px;
+        font-weight: 600;
+        color: #89b4fa;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        left: 12px;
+        padding: 0 8px;
+        color: #89b4fa;
+    }
+
+    /* ---- Buttons ---- */
+    QPushButton {
+        background: #45475a;
+        color: #cdd6f4;
+        border: 1px solid #585b70;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-weight: 600;
+    }
+    QPushButton:hover {
+        background: #585b70;
+    }
+    QPushButton:focus {
+        border: 1px solid #89b4fa;
+    }
+    QPushButton:disabled {
+        background: #313244;
+        color: #6c7086;
+        border: 1px solid #45475a;
+    }
+    QPushButton#primaryAction {
+        background: #89b4fa;
+        color: #1e1e2e;
+        border: 1px solid #74c7ec;
+    }
+    QPushButton#primaryAction:hover {
+        background: #74c7ec;
+    }
+    QPushButton#dangerAction {
+        background: #262637;
+        color: #f38ba8;
+        border: 1px solid #f38ba8;
+    }
+    QPushButton#dangerAction:hover {
+        background: #2e2030;
+    }
+    QPushButton#logoutBtn {
+        background: #f38ba8;
+        color: #1e1e2e;
+        border: 1px solid #eba0ac;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    QPushButton#logoutBtn:hover {
+        background: #eba0ac;
+    }
+
+    /* ---- Labels ---- */
+    QLabel {
+        background: transparent;
+        color: #cdd6f4;
+    }
+    QLabel#tileTitle {
+        color: #a6adc8;
+    }
+    QLabel#statusLabel {
+        color: #a6adc8;
+        font-size: 12px;
+    }
+    QLabel#hintLabel {
+        color: #6c7086;
+    }
+    QLabel#pageHeader {
+        color: #89b4fa;
+    }
+
+    /* ---- Checkboxes ---- */
+    QCheckBox {
+        color: #cdd6f4;
+        spacing: 8px;
+    }
+    QCheckBox::indicator {
+        width: 18px;
+        height: 18px;
+        border: 1px solid #6c7086;
+        border-radius: 4px;
+        background: #313244;
+    }
+    QCheckBox::indicator:checked {
+        background: #89b4fa;
+        border: 1px solid #74c7ec;
+    }
+
+    /* ---- Scroll areas ---- */
+    QScrollArea {
+        background: #1e1e2e;
+        border: none;
+    }
+    QScrollBar:vertical {
+        background: #313244;
+        width: 10px;
+        border-radius: 5px;
+    }
+    QScrollBar::handle:vertical {
+        background: #585b70;
+        border-radius: 5px;
+    }
+
+    /* ---- Calendar ---- */
+    QCalendarWidget {
+        background: #313244;
+        color: #cdd6f4;
+    }
+
+    /* ---- Dashboard tiles ---- */
+    QWidget#dashTile {
+        background: #262637;
+        border: 1px solid #45475a;
+        border-radius: 8px;
+    }
+
+    /* ---- Video widget ---- */
+    QVideoWidget {
+        background: #000000;
+    }
+
+    /* ---- Dialogs / Message boxes ---- */
+    QDialog {
+        background: #1e1e2e;
+    }
+    QMessageBox {
+        background: #1e1e2e;
+    }
+    QMessageBox QLabel {
+        color: #cdd6f4;
+    }
+"""
+
+
 class SettingsPage(QWidget):
     SETTINGS_FILE = "settings_data.json"
 
@@ -226,25 +423,19 @@ class SettingsPage(QWidget):
         return packs.get(language, packs["English"])
 
     def apply_live_preview(self, _value=None):
-        app = QApplication.instance()
-        if app is None:
-            return
-
         theme = self.theme_combo.currentText()
-        if theme == "Dark":
-            app.setStyleSheet("""
-                QWidget { background: #1f232a; color: #e9ecef; }
-                QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget {
-                    background: #2b3038;
-                    color: #e9ecef;
-                    border: 1px solid #495057;
-                }
-                QGroupBox { border: 1px solid #495057; }
-                QPushButton { background: #343a40; color: #f8f9fa; border: 1px solid #495057; }
-            """)
-        else:
-            app.setStyleSheet("")
 
+        # Delegate theme to the main window which clears local styles
+        main_window = self.window()
+        if main_window is not self and hasattr(main_window, 'apply_theme'):
+            main_window.apply_theme(theme)
+        else:
+            # Fallback during init (settings page not yet parented)
+            app = QApplication.instance()
+            if app:
+                app.setStyleSheet(DARK_STYLESHEET if theme == "Dark" else "")
+
+        # Update language labels
         pack = self._language_pack(self.lang_combo.currentText())
         self.title_label.setText(pack["title"])
         self.subtitle_label.setText(pack["subtitle"])
