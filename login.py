@@ -20,7 +20,7 @@ class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("EyeShield EMR – Login")
+        self.setWindowTitle("EyeShield – Login")
         self.setFixedSize(500, 420)
         self.setStyleSheet("""
             QWidget {
@@ -33,7 +33,7 @@ class LoginWindow(QWidget):
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(16)
 
-        title = QLabel("EyeShield EMR")
+        title = QLabel("EyeShield")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("""
             font-size: 28px;

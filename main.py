@@ -11,13 +11,41 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QFontDatabase
+from PySide6.QtSvg import QSvgRenderer
 from auth import UserManager
 from login import LoginWindow
 
 
+def load_svg_icon(svg_path, size=256):
+    """Render an SVG file to a QIcon."""
+    renderer = QSvgRenderer(svg_path)
+    if not renderer.isValid():
+        return QIcon()
+    image = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(QPixmap.fromImage(image))
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # Modern font — Segoe UI is built into Windows 10/11
+    modern_font = QFont("Segoe UI", 10)
+    modern_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    app.setFont(modern_font)
+
+    # Enforce font family globally via stylesheet
+    app.setStyleSheet("* { font-family: 'Segoe UI', 'Inter', 'Helvetica Neue', 'Arial', sans-serif; }")
+
+    # Set application-wide icon
+    import os
+    _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eyeshield_icon.svg")
+    app.setWindowIcon(load_svg_icon(_icon_path))
+    app.setWindowIcon(load_svg_icon(_icon_path))
 
     # Initialize the database
     UserManager._init_db()

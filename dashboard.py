@@ -11,7 +11,9 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QGroupBox, QMessageBox, QGridLayout
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter
+from PySide6.QtSvg import QSvgRenderer
 
 from screening import ScreeningPage
 from reports import ReportsPage
@@ -36,23 +38,47 @@ class EyeShieldApp(QMainWindow):
         self.setWindowTitle("EyeShield – DR Screening")
         self.setMinimumSize(1350, 850)
 
+        # Set app icon
+        import os
+        _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eyeshield_icon.svg")
+        self._app_icon_pixmap = self._load_svg_pixmap(_icon_path, 256)
+        self._app_icon = QIcon(self._app_icon_pixmap)
+        self.setWindowIcon(self._app_icon)
+
         root = QWidget()
         root_layout = QVBoxLayout(root)
 
         # Create top navigation bar
         nav_bar = QWidget()
         nav_bar.setObjectName("navBar")
+        nav_bar.setMinimumHeight(70)
         nav_layout = QHBoxLayout(nav_bar)
-        nav_layout.setContentsMargins(8, 8, 8, 8)
-        nav_layout.setSpacing(8)
-        nav_bar.setStyleSheet("background: #f8f9fa; border-bottom: 1px solid #dee2e6;")
+        nav_layout.setContentsMargins(12, 8, 12, 8)
+        nav_layout.setSpacing(12)
+        nav_bar.setStyleSheet("""
+            QWidget#navBar {
+                background: #f8f9fa;
+                border-bottom: 1px solid #dee2e6;
+            }
+        """)
 
 
-        # App title
-        title_label = QLabel("EyeShield EMR")
+        # App title + icon
+        title_label = QLabel("EyeShield")
         title_label.setObjectName("appTitle")
-        title_label.setStyleSheet("color: #007bff; font-size: 24px; font-weight: 700; margin-right: 24px;")
+        title_label.setStyleSheet("color: #007bff; font-size: 24px; font-weight: 700;")
         nav_layout.addWidget(title_label)
+
+        icon_label = QLabel()
+        icon_pixmap = self._load_svg_pixmap(_icon_path, 256).scaled(
+            QSize(38, 38), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        if not icon_pixmap.isNull():
+            icon_label.setPixmap(icon_pixmap)
+        icon_label.setFixedSize(38, 38)
+        icon_label.setAlignment(Qt.AlignCenter)
+        nav_layout.addWidget(icon_label)
+        nav_layout.addSpacing(20)
 
         # Navigation buttons with icons and small text labels below
         def nav_button_with_label(icon, text):
@@ -174,6 +200,19 @@ class EyeShieldApp(QMainWindow):
         saved_theme = self.settings_page.theme_combo.currentText()
         if saved_theme == "Dark":
             self.apply_theme("Dark")
+
+    @staticmethod
+    def _load_svg_pixmap(svg_path: str, size: int = 64) -> QPixmap:
+        """Render an SVG file to a QPixmap at the requested size."""
+        renderer = QSvgRenderer(svg_path)
+        if not renderer.isValid():
+            return QPixmap()
+        image = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
+        image.fill(0)
+        painter = QPainter(image)
+        renderer.render(painter)
+        painter.end()
+        return QPixmap.fromImage(image)
 
     # Sidebar removed; navigation is now in the top bar
 
