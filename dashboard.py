@@ -3,6 +3,7 @@ Dashboard module for EyeShield EMR application.
 Contains main application window and dashboard functionality.
 """
 
+import contextlib
 import os
 import random
 import sqlite3
@@ -42,7 +43,7 @@ class EyeShieldApp(QMainWindow):
         self.resize(1400, 860)
 
         # Set app icon
-        _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eyeshield_icon.svg")
+        _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", "eyeshield_icon.svg")
         self._app_icon_pixmap = self._load_svg_pixmap(_icon_path, 256)
         self._app_icon = QIcon(self._app_icon_pixmap)
         self.setWindowIcon(self._app_icon)
@@ -79,10 +80,7 @@ class EyeShieldApp(QMainWindow):
         title_label = self.title_label
         title_label.setObjectName("appTitle")
         title_label.setStyleSheet("color: #007bff; font-size: 20px; font-weight: 700; text-decoration: none;")
-        title_font = QFont("Segoe UI Variable", 14)
-        title_font.setBold(True)
-        title_font.setUnderline(False)
-        title_label.setFont(title_font)
+        self._apply_title_label_font(title_label)
         title_label.setFixedWidth(118)
         title_icon_layout.addWidget(title_label)
 
@@ -121,10 +119,7 @@ class EyeShieldApp(QMainWindow):
             label = QLabel(text)
             label.setAlignment(Qt.AlignHCenter)
             label.setFixedWidth(60)
-            lbl_font = QFont("Segoe UI Variable", 8)
-            lbl_font.setUnderline(False)
-            lbl_font.setStrikeOut(False)
-            label.setFont(lbl_font)
+            label.setFont(EyeShieldApp._make_nav_font(8))
             label.setStyleSheet("font-size: 10px; color: #495057; margin-top: 0px; text-decoration: none; border: none;")
 
             v.addWidget(btn, 0, Qt.AlignHCenter)
@@ -368,6 +363,20 @@ class EyeShieldApp(QMainWindow):
                 color = inactive_color
             self._set_button_svg_icon(btn, icon_path, color, icon_size)
 
+    @staticmethod
+    def _apply_title_label_font(label):
+        title_font = QFont("Segoe UI Variable", 14)
+        title_font.setBold(True)
+        title_font.setUnderline(False)
+        label.setFont(title_font)
+
+    @staticmethod
+    def _make_nav_font(size: int) -> QFont:
+        font = QFont("Segoe UI Variable", size)
+        font.setUnderline(False)
+        font.setStrikeOut(False)
+        return font
+
     def _update_logout_icon(self):
         """Render the logout SVG icon using white for the red button."""
         if hasattr(self, "logout_btn"):
@@ -403,10 +412,7 @@ class EyeShieldApp(QMainWindow):
         if hasattr(self, "title_label"):
             self.title_label.setFixedWidth(118)
             self.title_label.setStyleSheet(title_style)
-            title_font = QFont("Segoe UI Variable", 14)
-            title_font.setBold(True)
-            title_font.setUnderline(False)
-            self.title_label.setFont(title_font)
+            self._apply_title_label_font(self.title_label)
         if hasattr(self, "nav_icon_label"):
             self.nav_icon_label.setFixedSize(38, 38)
             self.nav_icon_label.setAlignment(Qt.AlignCenter)
@@ -422,9 +428,7 @@ class EyeShieldApp(QMainWindow):
                 w.setStyleSheet("QWidget { background: transparent; }")
 
         # Re-apply button QSS so nav buttons stay visually consistent across theme switches
-        btn_font = QFont("Segoe UI Variable", 14)
-        btn_font.setUnderline(False)
-        btn_font.setStrikeOut(False)
+        btn_font = self._make_nav_font(14)
         if hasattr(self, "nav_buttons"):
             for btn in self.nav_buttons:
                 btn.setFixedSize(50, 40)
@@ -436,9 +440,7 @@ class EyeShieldApp(QMainWindow):
         self._update_logout_icon()
 
         # Re-apply label QSS + fresh QFont
-        lbl_font = QFont("Segoe UI Variable", 8)
-        lbl_font.setUnderline(False)
-        lbl_font.setStrikeOut(False)
+        lbl_font = self._make_nav_font(8)
         if hasattr(self, "nav_labels"):
             for lbl in self.nav_labels:
                 lbl.setStyleSheet(inactive_lbl)
@@ -570,8 +572,7 @@ class EyeShieldApp(QMainWindow):
             for widget in self.findChildren(QWidget):
                 if id(widget) in nav_protected:
                     continue
-                ss = widget.styleSheet()
-                if ss:
+                if ss := widget.styleSheet():
                     self._saved_styles[id(widget)] = (widget, ss)
                     widget.setStyleSheet("")
             app.setStyleSheet(DARK_STYLESHEET)
@@ -585,10 +586,8 @@ class EyeShieldApp(QMainWindow):
             self._apply_nav_theme(False)
             app.setStyleSheet("")
             for _, (widget, ss) in self._saved_styles.items():
-                try:
+                with contextlib.suppress(RuntimeError):
                     widget.setStyleSheet(ss)
-                except RuntimeError:
-                    pass
             self._saved_styles = {}
             # Re-apply after restore
             self._apply_nav_theme(False)
@@ -980,7 +979,7 @@ class EyeShieldApp(QMainWindow):
         pending_count = 0
         confidence_values = []
         rows = []
-        try:
+        with contextlib.suppress(Exception):
             conn = sqlite3.connect(DB_FILE)
             cur = conn.cursor()
             cur.execute(
@@ -1000,8 +999,6 @@ class EyeShieldApp(QMainWindow):
                 conf_value = self._extract_confidence_value(str(confidence_text or ""))
                 if conf_value is not None:
                     confidence_values.append(conf_value)
-        except Exception:
-            pass
 
         avg_conf = sum(confidence_values) / len(confidence_values) if confidence_values else None
 

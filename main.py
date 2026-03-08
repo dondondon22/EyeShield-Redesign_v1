@@ -45,7 +45,7 @@ if __name__ == "__main__":
 
     # Set application-wide icon
     import os
-    _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eyeshield_icon.svg")
+    _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", "eyeshield_icon.svg")
     app.setWindowIcon(load_svg_icon(_icon_path))
     app.setWindowIcon(load_svg_icon(_icon_path))
 

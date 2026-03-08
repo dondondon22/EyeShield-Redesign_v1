@@ -6,12 +6,31 @@ Handles user authentication and login window.
 import os
 
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QLineEdit, QVBoxLayout, QMessageBox
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtCore import Qt
 
 try:
     from user_auth import verify_user
 except Exception:
     from .user_auth import verify_user
+
+
+def _add_eye_toggle(field):
+    """Attach a show/hide password toggle icon to the trailing edge of a QLineEdit."""
+    import os as _os
+    _icon_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "icons")
+    _show_icon = QIcon(_os.path.join(_icon_dir, "eye_open.svg"))
+    _hide_icon = QIcon(_os.path.join(_icon_dir, "eye_closed.svg"))
+    action = QAction(_show_icon, "", field)
+    action.setCheckable(True)
+    action.setToolTip("Show / hide password")
+
+    def _toggle(visible):
+        action.setIcon(_hide_icon if visible else _show_icon)
+        field.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
+
+    action.toggled.connect(_toggle)
+    field.addAction(action, QLineEdit.TrailingPosition)
 
 
 class LoginWindow(QWidget):
@@ -118,6 +137,7 @@ class LoginWindow(QWidget):
 
         self.username_input.returnPressed.connect(self.password_input.setFocus)
         self.password_input.returnPressed.connect(self.handle_login)
+        _add_eye_toggle(self.password_input)
 
         form_layout.addWidget(self.username_input)
         form_layout.addWidget(self.password_input)

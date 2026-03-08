@@ -14,47 +14,84 @@ class UserStore:
     def save_users(cls, users):
         return users
 
+    @staticmethod
+    def _resolve_actor(acting_username=None, acting_role=None):
+        return (
+            acting_username or os.environ.get("EYESHIELD_CURRENT_USER"),
+            acting_role or os.environ.get("EYESHIELD_CURRENT_ROLE"),
+        )
+
     @classmethod
-    def add_user(cls, username, password, role):
-        return AuthUserManager.create_user(username, password, role)
+    def add_user(
+        cls,
+        username,
+        password,
+        role,
+        acting_username=None,
+        acting_role=None,
+        acting_password=None,
+    ):
+        acting_username, acting_role = cls._resolve_actor(acting_username, acting_role)
+        return AuthUserManager.create_user(
+            username,
+            password,
+            role,
+            acting_username=acting_username,
+            acting_role=acting_role,
+            acting_password=acting_password,
+        )
 
     @classmethod
     def _get_user_role(cls, username):
         users = cls.load_users()
-        for user in users:
-            if user.get("username") == username:
-                return user.get("role")
-        return None
+        return next((user.get("role") for user in users if user.get("username") == username), None)
 
     @classmethod
     def _count_admins(cls):
         users = cls.load_users()
-        return sum(1 for user in users if user.get("role") == "admin")
+        return len([user for user in users if user.get("role") == "admin"])
 
     @classmethod
-    def delete_user(cls, username):
+    def delete_user(cls, username, acting_username=None, acting_role=None):
+        acting_username, acting_role = cls._resolve_actor(acting_username, acting_role)
         role = cls._get_user_role(username)
         if role is None:
             return False
         if role == "admin":
-            current_username = os.environ.get("EYESHIELD_CURRENT_USER")
+            current_username = acting_username
             if current_username and current_username != username:
                 return False
             if cls._count_admins() <= 1:
                 return False
-        return AuthUserManager.delete_user(username)
+        return AuthUserManager.delete_user(
+            username,
+            acting_username=acting_username,
+            acting_role=acting_role,
+        )
 
     @classmethod
     def get_all_users(cls):
         return cls.load_users()
 
     @classmethod
-    def reset_password(cls, username, new_password):
-        return AuthUserManager.reset_password(username, new_password)
+    def reset_password(cls, username, new_password, acting_username=None, acting_role=None):
+        acting_username, acting_role = cls._resolve_actor(acting_username, acting_role)
+        return AuthUserManager.reset_password(
+            username,
+            new_password,
+            acting_username=acting_username,
+            acting_role=acting_role,
+        )
 
     @classmethod
-    def update_user_role(cls, username, new_role):
-        return AuthUserManager.update_user_role(username, new_role)
+    def update_user_role(cls, username, new_role, acting_username=None, acting_role=None):
+        acting_username, acting_role = cls._resolve_actor(acting_username, acting_role)
+        return AuthUserManager.update_user_role(
+            username,
+            new_role,
+            acting_username=acting_username,
+            acting_role=acting_role,
+        )
 
 # For backward compatibility with existing code
 load_users = UserStore.load_users

@@ -3,15 +3,21 @@ Authentication module for EyeShield EMR application.
 Handles user database, login verification, and user management.
 """
 
+import contextlib
 import sqlite3
 import hashlib
 import hmac
 import os
 import json
+import re
 import secrets
 from typing import Optional
 
 DB_FILE = "users.db"
+VALID_ROLES = {"clinician", "admin", "viewer"}
+ADMIN_ROLE = "admin"
+MIN_PASSWORD_LENGTH = 12
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
 
 # ============================================================
@@ -253,22 +259,106 @@ class UserManager:
             print(f"[EyeShield] Username: {username}")
             print(f"[EyeShield] Temporary password: {password}")
             print("[EyeShield] Set EYESHIELD_DEFAULT_ADMIN_PASS to control first-run credentials.")
+
+    @staticmethod
+    def _normalize_role(role: str) -> Optional[str]:
+        normalized_role = str(role or "clinician").strip().lower()
+        return normalized_role if normalized_role in VALID_ROLES else None
+
+    @staticmethod
+    def _is_valid_username(username: str) -> bool:
+        return bool(USERNAME_PATTERN.fullmatch(username))
+
+    @staticmethod
+    def _is_valid_password(password: str) -> bool:
+        if len(password) < MIN_PASSWORD_LENGTH:
+            return False
+
+        checks = [
+            any(char.islower() for char in password),
+            any(char.isupper() for char in password),
+            any(char.isdigit() for char in password),
+            any(not char.isalnum() for char in password),
+        ]
+        return all(checks)
+
+    @staticmethod
+    def _can_manage_users(acting_role: Optional[str]) -> bool:
+        return acting_role == ADMIN_ROLE
+
+    @staticmethod
+    def _count_admins(conn: sqlite3.Connection) -> int:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users WHERE role = ?", (ADMIN_ROLE,))
+        row = cur.fetchone()
+        return row[0] if row else 0
+
+    @staticmethod
+    def _get_user_role(conn: sqlite3.Connection, username: str) -> Optional[str]:
+        cur = conn.cursor()
+        cur.execute("SELECT role FROM users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    def _verify_admin_actor(
+        conn: sqlite3.Connection,
+        acting_username: Optional[str],
+        acting_role: Optional[str],
+        acting_password: Optional[str],
+    ) -> bool:
+        if acting_role != ADMIN_ROLE or not acting_username or not acting_password:
+            return False
+
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT password_hash, role FROM users WHERE username = ?",
+            (acting_username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+
+        password_hash, stored_role = row
+        if stored_role != ADMIN_ROLE:
+            return False
+        return PasswordManager.verify_password(acting_password, password_hash)
     
     @staticmethod
-    def create_user(username: str, password: str, role: str = "clinician") -> bool:
+    def create_user(
+        username: str,
+        password: str,
+        role: str = "clinician",
+        acting_username: Optional[str] = None,
+        acting_role: Optional[str] = None,
+        acting_password: Optional[str] = None,
+    ) -> bool:
         """Create a new user"""
-        if not username or not password:
+        username = username.strip()
+        normalized_role = UserManager._normalize_role(role)
+
+        if not username or not password or not normalized_role:
+            return False
+        if not UserManager._is_valid_username(username):
+            return False
+        if not UserManager._is_valid_password(password):
+            return False
+        if not UserManager._can_manage_users(acting_role):
             return False
         
         conn = get_connection()
         cur = conn.cursor()
+
+        if not UserManager._verify_admin_actor(conn, acting_username, acting_role, acting_password):
+            conn.close()
+            return False
         
         pw_hash = PasswordManager.hash_password(password)
         
         try:
             cur.execute(
                 "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                (username, pw_hash, role)
+                (username, pw_hash, normalized_role)
             )
             conn.commit()
             success = True
@@ -299,15 +389,13 @@ class UserManager:
         
         if PasswordManager.verify_password(password, pw_hash):
             if PasswordManager.needs_upgrade(pw_hash):
-                try:
+                with contextlib.suppress(sqlite3.Error):
                     upgraded_hash = PasswordManager.hash_password(password)
                     cur.execute(
                         "UPDATE users SET password_hash = ? WHERE id = ?",
                         (upgraded_hash, user_id),
                     )
                     conn.commit()
-                except sqlite3.Error:
-                    pass
             conn.close()
             return role
 
@@ -327,22 +415,44 @@ class UserManager:
         return users
     
     @staticmethod
-    def update_user_role(username: str, new_role: str) -> bool:
+    def update_user_role(
+        username: str,
+        new_role: str,
+        acting_username: Optional[str] = None,
+        acting_role: Optional[str] = None,
+    ) -> bool:
         """Update a user's role"""
-        valid_roles = ["clinician", "admin", "viewer"]
-        if new_role not in valid_roles:
+        normalized_role = UserManager._normalize_role(new_role)
+        username = username.strip()
+
+        if not username or not normalized_role:
+            return False
+        if not UserManager._can_manage_users(acting_role):
             return False
         
         conn = get_connection()
         cur = conn.cursor()
+
+        current_role = UserManager._get_user_role(conn, username)
+        if current_role is None:
+            conn.close()
+            return False
+
+        if current_role == normalized_role:
+            conn.close()
+            return True
+
+        if current_role == ADMIN_ROLE and normalized_role != ADMIN_ROLE and UserManager._count_admins(conn) <= 1:
+            conn.close()
+            return False
         
         try:
             cur.execute(
                 "UPDATE users SET role = ? WHERE username = ?",
-                (new_role, username)
+                (normalized_role, username)
             )
             conn.commit()
-            success = True
+            success = cur.rowcount > 0
         except sqlite3.Error:
             success = False
         
@@ -350,15 +460,32 @@ class UserManager:
         return success
     
     @staticmethod
-    def delete_user(username: str) -> bool:
+    def delete_user(
+        username: str,
+        acting_username: Optional[str] = None,
+        acting_role: Optional[str] = None,
+    ) -> bool:
         """Delete a user"""
+        username = username.strip()
+        if not username or not UserManager._can_manage_users(acting_role):
+            return False
+
         conn = get_connection()
         cur = conn.cursor()
+
+        role = UserManager._get_user_role(conn, username)
+        if role is None:
+            conn.close()
+            return False
+
+        if role == ADMIN_ROLE and UserManager._count_admins(conn) <= 1:
+            conn.close()
+            return False
         
         try:
             cur.execute("DELETE FROM users WHERE username = ?", (username,))
             conn.commit()
-            success = True
+            success = cur.rowcount > 0
         except sqlite3.Error:
             success = False
         
@@ -366,9 +493,19 @@ class UserManager:
         return success
 
     @staticmethod
-    def reset_password(username: str, new_password: str) -> bool:
+    def reset_password(
+        username: str,
+        new_password: str,
+        acting_username: Optional[str] = None,
+        acting_role: Optional[str] = None,
+    ) -> bool:
         """Reset a user's password"""
+        username = username.strip()
         if not username or not new_password:
+            return False
+        if not UserManager._can_manage_users(acting_role):
+            return False
+        if not UserManager._is_valid_password(new_password):
             return False
 
         conn = get_connection()
