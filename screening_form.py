@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QLineEdit, QVBoxLayout, QHBoxLayout,
     QFileDialog, QFormLayout, QGroupBox, QComboBox, QDateEdit, QMessageBox,
     QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit, QCalendarWidget, QStackedWidget,
-    QGridLayout, QFrame, QSizePolicy, QScrollArea
+    QGridLayout, QFrame, QSizePolicy, QScrollArea, QSplitter
 )
-from PySide6.QtGui import QPixmap, QFont, QRegularExpressionValidator, QIcon, QPainter, QColor
-from PySide6.QtCore import Qt, QDate, QRegularExpression, QSize
+from PySide6.QtGui import QPixmap, QFont, QRegularExpressionValidator, QIcon, QPainter, QColor, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, QDate, QRegularExpression, QSize, Signal
 
 from screening_styles import (
     SCREENING_PAGE_STYLE,
@@ -33,6 +33,164 @@ from screening_worker import _InferenceWorker
 from screening_widgets import ClickableImageLabel
 from screening_results import ResultsWindow
 from auth import DB_FILE
+
+
+class SymptomTag(QPushButton):
+    """Toggleable pill tag used by the redesigned symptoms section."""
+
+    _OFF = (
+        "QPushButton {"
+        "  background:#ffffff; color:#1f4f77;"
+        "  border:1.5px solid transparent; border-radius:999px;"
+        "  padding:5px 14px; font-size:12px; font-weight:500;"
+        "}"
+        "QPushButton:hover { border-color:#3f7ca7; }"
+    )
+    _ON = (
+        "QPushButton {"
+        "  background:#3f7ca7; color:#ffffff;"
+        "  border:1.5px solid #3f7ca7; border-radius:999px;"
+        "  padding:5px 14px; font-size:12px; font-weight:500;"
+        "}"
+    )
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setCheckable(True)
+        self.setStyleSheet(self._OFF)
+        self.toggled.connect(lambda on: self.setStyleSheet(self._ON if on else self._OFF))
+
+
+class DropZoneLabel(QLabel):
+    """Dashed image drop zone that emits file path on valid image drop."""
+
+    file_dropped = Signal(str)
+
+    _IDLE = (
+        "QLabel { border:2px dashed #c6d2df; border-radius:10px;"
+        " background:#ffffff; color:#3f7ca7;"
+        " font-size:13px; font-weight:500; }"
+    )
+    _HOVER = (
+        "QLabel { border:2px dashed #3f7ca7; border-radius:10px;"
+        " background:#f8fbff; color:#3f7ca7;"
+        " font-size:13px; font-weight:500; }"
+    )
+    _LOADED = (
+        "QLabel { border:2px solid #3f7ca7; border-radius:10px;"
+        " background:#000000; }"
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumHeight(400)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._pixmap_full = QPixmap()
+        self._reset_placeholder()
+
+    def set_image(self, path: str):
+        px = QPixmap(path)
+        if px.isNull():
+            return
+        self._pixmap_full = px
+        self.setStyleSheet(self._LOADED)
+        self.setText("")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._refresh()
+
+    def clear_image(self):
+        self._pixmap_full = QPixmap()
+        self._reset_placeholder()
+
+    def has_image(self) -> bool:
+        return not self._pixmap_full.isNull()
+
+    def _reset_placeholder(self):
+        self.setStyleSheet(self._IDLE)
+        self.setPixmap(QPixmap())
+        self.setText(
+            "Drop fundus image here or click to browse\n\n"
+            "Supports JPG, PNG, JPEG"
+        )
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _refresh(self):
+        if self._pixmap_full.isNull():
+            return
+        scaled = self._pixmap_full.scaled(
+            max(1, self.width() - 4),
+            max(1, self.height() - 4),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self._pixmap_full.isNull():
+            self._refresh()
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.setStyleSheet(self._HOVER)
+
+    def dragLeaveEvent(self, event):
+        self.setStyleSheet(self._LOADED if self.has_image() else self._IDLE)
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if urls:
+            path = urls[0].toLocalFile()
+            if path.lower().endswith((".jpg", ".jpeg", ".png")):
+                self.file_dropped.emit(path)
+        self.setStyleSheet(self._LOADED if self.has_image() else self._IDLE)
+
+
+_REDESIGN_STYLESHEET = """
+QWidget { background:#ffffff; color:#1f2937; font-family:"Segoe UI","Inter","Calibri",sans-serif; font-size:13px; }
+QFrame#card { background:#ffffff; border:1px solid #dde3ea; border-radius:14px; }
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit {
+    background:#ffffff; border:1.5px solid #d3dae3; border-radius:6px; padding:6px 10px;
+    color:#1f2937; min-height:28px; selection-background-color:#3f7ca7;
+}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {
+    border:1.5px solid #3f7ca7; background:#ffffff;
+}
+QLineEdit:read-only { background:#f6f8fb; color:#475569; }
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width:24px;
+    border-left:1px solid #d3dae3;
+    background:#f6f8fb;
+    border-top-right-radius:6px;
+    border-bottom-right-radius:6px;
+}
+QComboBox::down-arrow { width:10px; height:10px; }
+QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width:18px; border:none; background:transparent; }
+QScrollArea { border:none; background:transparent; }
+QScrollBar:vertical { background:#f2f5f8; width:6px; border-radius:3px; }
+QScrollBar::handle:vertical { background:#c2ccd8; border-radius:3px; min-height:20px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+QSplitter::handle { background:#e7ecf1; width:1px; }
+QPushButton#btnPrimary { background:#3f7ca7; color:#ffffff; border:none; border-radius:6px; padding:8px 16px; font-weight:600; font-size:13px; }
+QPushButton#btnPrimary:hover { background:#356c92; }
+QPushButton#btnDanger { background:#fef2f2; color:#ef4444; border:1.5px solid #fecaca; border-radius:6px; padding:8px 16px; font-weight:600; font-size:13px; }
+QPushButton#btnDanger:hover { background:#fee2e2; }
+QPushButton#btnAnalyze {
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #356c92,stop:0.6 #3f7ca7,stop:1 #4e8fb9);
+    color:#ffffff; border:none; border-radius:6px; padding:11px 16px; font-weight:700; font-size:14px;
+}
+QPushButton#btnAnalyze:hover {
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #315f80,stop:1 #3f7ca7);
+}
+QCheckBox { color:#475569; spacing:8px; font-size:12px; }
+QCheckBox::indicator { width:16px; height:16px; border:1.5px solid #94a3b8; border-radius:3px; background:#ffffff; }
+QCheckBox::indicator:checked { background:#3f7ca7; border-color:#3f7ca7; }
+"""
 
 
 class ScreeningPage(QWidget):
@@ -93,336 +251,294 @@ class ScreeningPage(QWidget):
         return QIcon(tinted)
 
     def _apply_ui_polish(self):
-        self.setStyleSheet(SCREENING_PAGE_STYLE)
+        self.setStyleSheet(_REDESIGN_STYLESHEET)
 
     def create_unified_page(self):
-        container = QWidget()
-        root_layout = QHBoxLayout(container)
-        root_layout.setContentsMargins(16, 16, 16, 16)
-        root_layout.setSpacing(14)
+        root = QWidget()
+        root.setStyleSheet(_REDESIGN_STYLESHEET)
+        root_layout = QHBoxLayout(root)
+        root_layout.setContentsMargins(20, 20, 20, 20)
+        root_layout.setSpacing(8)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(10)
+        root_layout.addWidget(splitter)
+
+        def make_card():
+            frame = QFrame()
+            frame.setObjectName("card")
+            layout = QVBoxLayout(frame)
+            layout.setContentsMargins(24, 20, 24, 22)
+            layout.setSpacing(14)
+            return frame, layout
+
+        def section_title(layout, text):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            title = QLabel(text.upper())
+            title.setStyleSheet(
+                "font-size:10px;font-weight:700;letter-spacing:1.4px;"
+                "color:#3f7ca7;background:transparent;"
+            )
+            line = QFrame()
+            line.setFrameShape(QFrame.Shape.HLine)
+            line.setStyleSheet("background:#dde3ea;max-height:1px;")
+            row.addWidget(title)
+            row.addWidget(line, 1)
+            layout.addLayout(row)
+
+        def lbl(text):
+            w = QLabel(text)
+            w.setStyleSheet("font-size:11px;font-weight:500;color:#475569;background:transparent;")
+            return w
+
+        def field(label_text, widget):
+            v = QVBoxLayout()
+            v.setSpacing(5)
+            v.addWidget(lbl(label_text))
+            v.addWidget(widget)
+            return v
+
+        def row2(*fields):
+            h = QHBoxLayout()
+            h.setSpacing(14)
+            for f in fields:
+                h.addLayout(f, 1)
+            return h
+
+        def row3(*fields):
+            h = QHBoxLayout()
+            h.setSpacing(10)
+            for f in fields:
+                h.addLayout(f, 1)
+            return h
 
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setFrameShape(QFrame.Shape.NoFrame)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         left_content = QWidget()
-        left_content_layout = QVBoxLayout(left_content)
-        left_content_layout.setContentsMargins(0, 0, 6, 0)
-        left_content_layout.setSpacing(12)
+        left_content.setStyleSheet("background:transparent;")
+        left_col = QVBoxLayout(left_content)
+        left_col.setContentsMargins(0, 0, 8, 0)
+        left_col.setSpacing(14)
         left_scroll.setWidget(left_content)
-        # Patient Info
-        self._scr_patient_group = QGroupBox("Patient Information")
-        self._scr_patient_group.setMinimumWidth(300)
-        self._scr_patient_group.setMaximumWidth(640)
-        self._scr_patient_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._scr_patient_form = QFormLayout()
-        self._scr_patient_form.setContentsMargins(12, 14, 12, 12)
-        self._scr_patient_form.setHorizontalSpacing(14)
-        self._scr_patient_form.setVerticalSpacing(6)
-        self._scr_patient_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._scr_patient_form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+
+        card1, c1 = make_card()
+        section_title(c1, "Patient Information")
+
         self.p_id = QLineEdit()
         self.p_id.setReadOnly(True)
-        self.p_id.setMinimumHeight(24)
+        self.p_id.setStyleSheet(
+            "QLineEdit{background:#f6f8fb;color:#3f7ca7;border:1px solid #d3dae3;"
+            "border-radius:999px;padding:4px 14px;font-family:monospace;font-size:12px;font-weight:600;}"
+        )
         self.generate_patient_id()
-        self._scr_patient_form.addRow("Patient ID:", self.p_id)
+        pid_row = QHBoxLayout()
+        pid_row.setSpacing(10)
+        pid_row.addWidget(lbl("Patient ID"))
+        pid_row.addWidget(self.p_id, 1)
+        c1.addLayout(pid_row)
+
         self.p_name = QLineEdit()
         self.p_name.setPlaceholderText("Full name")
-        self.p_name.setMinimumHeight(24)
-        self._scr_patient_form.addRow("Name:", self.p_name)
         self.p_dob = QLineEdit()
         self.p_dob.setPlaceholderText("dd/mm/yyyy")
         self.p_dob.setMaxLength(10)
-        self.p_dob.setMinimumHeight(24)
         self._dob_default_style = ""
-        self._dob_invalid_style = """
-            QLineEdit {
-                border: 1.5px solid #dc3545;
-                border-radius: 8px;
-                padding: 8px;
-            }
-        """
-        self.p_dob.setStyleSheet(self._dob_default_style)
+        self._dob_invalid_style = "QLineEdit{border:1.5px solid #ef4444;border-radius:6px;}"
         self.p_dob.textChanged.connect(self._on_dob_text_changed)
-        self._scr_patient_form.addRow("Date of Birth:", self.p_dob)
+        c1.addLayout(row2(field("Full Name", self.p_name), field("Date of Birth", self.p_dob)))
+
         self.p_age = QSpinBox()
         self.p_age.setRange(0, 120)
-        self.p_age.setSuffix(" years")
+        self.p_age.setSuffix(" yrs")
         self.p_age.setReadOnly(True)
         self.p_age.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         self.p_age.setSpecialValueText(" ")
-        self.p_age.setValue(0)
-        self.p_age.setMinimumHeight(24)
-        self._scr_patient_form.addRow("Age:", self.p_age)
+
         self.p_sex = QComboBox()
         self.p_sex.addItems(["", "Male", "Female", "Prefer not to say"])
-        self.p_sex.setMinimumHeight(24)
-        self._scr_patient_form.addRow("Sex:", self.p_sex)
-        self.p_contact = QLineEdit()
-        self.p_contact.setPlaceholderText("Phone or Email")
-        self.p_contact.setMinimumHeight(24)
-        self._scr_patient_form.addRow("Contact:", self.p_contact)
         self.p_eye = QComboBox()
         self.p_eye.addItems(["", "Right Eye", "Left Eye"])
-        self.p_eye.setMinimumHeight(24)
-        self._scr_patient_form.addRow("Eye Screened:", self.p_eye)
-        self._scr_patient_group.setLayout(self._scr_patient_form)
-        # Clinical History
-        self._scr_clinical_group = QGroupBox("Clinical History")
-        self._scr_clinical_group.setMinimumWidth(300)
-        self._scr_clinical_group.setMaximumWidth(640)
-        self._scr_clinical_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._scr_clinical_form = QFormLayout()
+        c1.addLayout(row3(field("Age", self.p_age), field("Sex", self.p_sex), field("Eye to be Screened", self.p_eye)))
+
+        self.p_contact = QLineEdit()
+        self.p_contact.setPlaceholderText("Phone or Email")
+        c1.addLayout(field("Contact", self.p_contact))
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("background:#dde3ea;max-height:1px;margin-top:4px;")
+        c1.addWidget(sep)
+        section_title(c1, "Vital Signs & Symptoms")
+
+        self.va_left = QLineEdit()
+        self.va_left.setPlaceholderText("e.g. 20/20")
+        self.va_right = QLineEdit()
+        self.va_right.setPlaceholderText("e.g. 20/20")
+        c1.addLayout(row2(field("Visual Acuity — Left", self.va_left), field("Visual Acuity — Right", self.va_right)))
+
+        self.bp_systolic = QSpinBox()
+        self.bp_systolic.setRange(0, 300)
+        self.bp_systolic.setSpecialValueText(" ")
+        self.bp_diastolic = QSpinBox()
+        self.bp_diastolic.setRange(0, 200)
+        self.bp_diastolic.setSpecialValueText(" ")
+        bp_w = QWidget()
+        bp_w.setStyleSheet("background:transparent;")
+        bp_h = QHBoxLayout(bp_w)
+        bp_h.setContentsMargins(0, 0, 0, 0)
+        bp_h.setSpacing(6)
+        _sl = QLabel("/")
+        _sl.setStyleSheet("color:#94a3b8;background:transparent;font-size:14px;")
+        _ul = QLabel("mmHg")
+        _ul.setStyleSheet("color:#94a3b8;font-size:11px;background:transparent;")
+        bp_h.addWidget(self.bp_systolic, 1)
+        bp_h.addWidget(_sl)
+        bp_h.addWidget(self.bp_diastolic, 1)
+        bp_h.addWidget(_ul)
+
+        self.fbs = QSpinBox()
+        self.fbs.setRange(0, 600)
+        self.fbs.setSpecialValueText(" ")
+        self.rbs = QSpinBox()
+        self.rbs.setRange(0, 800)
+        self.rbs.setSpecialValueText(" ")
+        bg_w = QWidget()
+        bg_w.setStyleSheet("background:transparent;")
+        bg_h = QHBoxLayout(bg_w)
+        bg_h.setContentsMargins(0, 0, 0, 0)
+        bg_h.setSpacing(6)
+        _fl = QLabel("FBS")
+        _fl.setStyleSheet("font-size:11px;color:#475569;background:transparent;")
+        _rl = QLabel("RBS")
+        _rl.setStyleSheet("font-size:11px;color:#475569;background:transparent;")
+        bg_h.addWidget(_fl)
+        bg_h.addWidget(self.fbs, 1)
+        bg_h.addWidget(_rl)
+        bg_h.addWidget(self.rbs, 1)
+        c1.addLayout(row2(field("Blood Pressure", bp_w), field("Blood Glucose", bg_w)))
+
+        c1.addWidget(lbl("Symptoms"))
+        tags_h = QHBoxLayout()
+        tags_h.setSpacing(8)
+        tags_h.setContentsMargins(0, 0, 0, 0)
+        self.symptom_blurred = SymptomTag("Blurred vision")
+        self.symptom_floaters = SymptomTag("Floaters")
+        self.symptom_flashes = SymptomTag("Flashes")
+        self.symptom_vision_loss = SymptomTag("Vision loss")
+        for t in (self.symptom_blurred, self.symptom_floaters, self.symptom_flashes, self.symptom_vision_loss):
+            tags_h.addWidget(t)
+        self.symptom_other = QLineEdit()
+        self.symptom_other.setPlaceholderText("Other…")
+        self.symptom_other.setStyleSheet(
+            "QLineEdit{background:#ffffff;border:1.5px solid #d3dae3;border-radius:999px;padding:4px 12px;"
+            "font-size:12px;min-height:0;max-width:110px;}QLineEdit:focus{border-color:#3f7ca7;background:#fff;}"
+        )
+        tags_h.addWidget(self.symptom_other)
+        tags_h.addStretch()
+        c1.addLayout(tags_h)
+        left_col.addWidget(card1)
+
+        card2, c2 = make_card()
+        section_title(c2, "Clinical History")
         self.diabetes_type = QComboBox()
         self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Other"])
-        self._scr_clinical_form.addRow("Diabetes Type:", self.diabetes_type)
-
-        # Diagnosis Date field
         self.diabetes_diagnosis_date = QLineEdit()
         self.diabetes_diagnosis_date.setPlaceholderText("dd/mm/yyyy")
         self.diabetes_diagnosis_date.setMaxLength(10)
-        self.diabetes_diagnosis_date.setMinimumHeight(24)
-        self.diabetes_diagnosis_date.setStyleSheet(LINEEDIT_STYLE)
         self.diabetes_diagnosis_date.textChanged.connect(self._on_diagnosis_date_changed)
-        self._scr_clinical_form.addRow("Diagnosis Date:", self.diabetes_diagnosis_date)
+        c2.addLayout(row2(field("Diabetes Type", self.diabetes_type), field("Diagnosis Date", self.diabetes_diagnosis_date)))
 
-        # Duration (now auto-calculated, read-only)
         self.diabetes_duration = QSpinBox()
         self.diabetes_duration.setSuffix(" years")
         self.diabetes_duration.setRange(0, 80)
         self.diabetes_duration.setReadOnly(True)
         self.diabetes_duration.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        self.diabetes_duration.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.diabetes_duration.setStyleSheet(READONLY_SPINBOX_STYLE)
-        self._scr_clinical_form.addRow("Duration:", self.diabetes_duration)
+        self.diabetes_duration.setStyleSheet(
+            "QSpinBox{background:#f6f8fb;color:#475569;border:1.5px solid #d3dae3;border-radius:6px;padding:6px 10px;}"
+        )
         self.hba1c = QDoubleSpinBox()
         self.hba1c.setRange(4.0, 15.0)
         self.hba1c.setDecimals(1)
         self.hba1c.setSuffix(" %")
         self.hba1c.setValue(7.0)
-        self.hba1c.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.hba1c.setStyleSheet(DOUBLESPINBOX_STYLE)
-        self._scr_clinical_form.addRow("HbA1c:", self.hba1c)
+        c2.addLayout(row2(field("Duration", self.diabetes_duration), field("HbA1c (%)", self.hba1c)))
+
         self.prev_treatment = QCheckBox("Previous DR Treatment")
-        self.prev_treatment.setStyleSheet(CHECKBOX_STYLE)
-        self._scr_clinical_form.addRow("", self.prev_treatment)
+        c2.addWidget(self.prev_treatment)
         self.notes = QTextEdit()
-        self.notes.setMaximumHeight(80)
-        self.notes.setMinimumHeight(80)
-        self.notes.setPlaceholderText("Enter clinical notes")
-        self.notes.setStyleSheet(TEXTEDIT_STYLE)
-        self._scr_clinical_form.addRow("Notes:", self.notes)
-        self._scr_clinical_group.setLayout(self._scr_clinical_form)
-        self._apply_flat_form_label_style(self._scr_patient_form)
-        self._apply_flat_form_label_style(self._scr_clinical_form)
+        self.notes.setPlaceholderText("Enter clinical notes…")
+        self.notes.setMinimumHeight(72)
+        self.notes.setMaximumHeight(90)
+        c2.addLayout(field("Clinical Notes", self.notes))
+        left_col.addWidget(card2)
+        left_col.addStretch()
+        splitter.addWidget(left_scroll)
 
-        # Vital Signs & Symptoms
-        self._scr_vitals_group = QGroupBox("Vital Signs & Symptoms")
-        self._scr_vitals_group.setMinimumWidth(300)
-        self._scr_vitals_group.setMaximumWidth(640)
-        self._scr_vitals_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._scr_vitals_form = QFormLayout()
+        card3 = QFrame()
+        card3.setObjectName("card")
+        card3.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        c3 = QVBoxLayout(card3)
+        c3.setContentsMargins(24, 20, 24, 22)
+        c3.setSpacing(12)
+        section_title(c3, "Fundus Image Upload")
 
-        # Visual Acuity (Left / Right)
-        va_layout = QHBoxLayout()
-        self.va_left = QLineEdit()
-        self.va_left.setPlaceholderText("e.g., 20/20")
-        self.va_left.setMaxLength(10)
-        self.va_left.setMinimumHeight(24)
-        self.va_left.setStyleSheet(LINEEDIT_STYLE)
-        self.va_right = QLineEdit()
-        self.va_right.setPlaceholderText("e.g., 20/20")
-        self.va_right.setMaxLength(10)
-        self.va_right.setMinimumHeight(24)
-        self.va_right.setStyleSheet(LINEEDIT_STYLE)
-        va_left_label = QLabel("Left:")
-        va_left_label.setStyleSheet("font-weight: 500;")
-        va_right_label = QLabel("Right:")
-        va_right_label.setStyleSheet("font-weight: 500;")
-        va_layout.addWidget(va_left_label)
-        va_layout.addWidget(self.va_left, 1)
-        va_layout.addSpacing(10)
-        va_layout.addWidget(va_right_label)
-        va_layout.addWidget(self.va_right, 1)
-        self._scr_vitals_form.addRow("Visual Acuity:", va_layout)
+        self.image_label = DropZoneLabel()
+        self.image_label.file_dropped.connect(self._on_image_dropped)
 
-        # Blood Pressure (Systolic / Diastolic)
-        bp_layout = QHBoxLayout()
-        self.bp_systolic = QSpinBox()
-        self.bp_systolic.setRange(0, 250)
-        self.bp_systolic.setSpecialValueText(" ")
-        self.bp_systolic.setMinimumHeight(24)
-        self.bp_systolic.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.bp_systolic.setStyleSheet(SPINBOX_STYLE)
-        self.bp_diastolic = QSpinBox()
-        self.bp_diastolic.setRange(0, 180)
-        self.bp_diastolic.setSpecialValueText(" ")
-        self.bp_diastolic.setMinimumHeight(24)
-        self.bp_diastolic.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.bp_diastolic.setStyleSheet(SPINBOX_STYLE)
-        bp_separator = QLabel("/")
-        bp_separator.setStyleSheet("font-weight: 500;")
-        bp_unit = QLabel("mmHg")
-        bp_unit.setStyleSheet("font-size: 9pt;")
-        bp_layout.addWidget(self.bp_systolic, 1)
-        bp_layout.addWidget(bp_separator)
-        bp_layout.addWidget(self.bp_diastolic, 1)
-        bp_layout.addWidget(bp_unit)
-        bp_layout.addStretch()
-        self._scr_vitals_form.addRow("Blood Pressure:", bp_layout)
+        def _dz_click(event):
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.upload_image()
 
-        # Blood Glucose (FBS / RBS)
-        bg_layout = QHBoxLayout()
-        fbs_label = QLabel("FBS:")
-        fbs_label.setStyleSheet("font-weight: 500;")
-        self.fbs = QSpinBox()
-        self.fbs.setRange(0, 600)
-        self.fbs.setSuffix(" mg/dL")
-        self.fbs.setSpecialValueText(" ")
-        self.fbs.setMinimumHeight(24)
-        self.fbs.setMinimumWidth(110)
-        self.fbs.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.fbs.setStyleSheet(SPINBOX_STYLE)
-        rbs_label = QLabel("RBS:")
-        rbs_label.setStyleSheet("font-weight: 500;")
-        self.rbs = QSpinBox()
-        self.rbs.setRange(0, 800)
-        self.rbs.setSuffix(" mg/dL")
-        self.rbs.setSpecialValueText(" ")
-        self.rbs.setMinimumHeight(24)
-        self.rbs.setMinimumWidth(110)
-        self.rbs.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.rbs.setStyleSheet(SPINBOX_STYLE)
-        bg_layout.addWidget(fbs_label)
-        bg_layout.addWidget(self.fbs)
-        bg_layout.addSpacing(10)
-        bg_layout.addWidget(rbs_label)
-        bg_layout.addWidget(self.rbs)
-        bg_layout.addStretch()
-        self._scr_vitals_form.addRow("Blood Glucose:", bg_layout)
+        self.image_label.mousePressEvent = _dz_click
+        c3.addWidget(self.image_label, 1)
 
-        # Symptoms Checklist
-        symptoms_layout = QVBoxLayout()
-        symptoms_layout.setSpacing(6)
-        self.symptom_blurred = QCheckBox("Blurred vision")
-        self.symptom_blurred.setStyleSheet(CHECKBOX_STYLE)
-        self.symptom_floaters = QCheckBox("Floaters")
-        self.symptom_floaters.setStyleSheet(CHECKBOX_STYLE)
-        self.symptom_flashes = QCheckBox("Flashes")
-        self.symptom_flashes.setStyleSheet(CHECKBOX_STYLE)
-        self.symptom_vision_loss = QCheckBox("Vision loss")
-        self.symptom_vision_loss.setStyleSheet(CHECKBOX_STYLE)
-        symptoms_layout.addWidget(self.symptom_blurred)
-        symptoms_layout.addWidget(self.symptom_floaters)
-        symptoms_layout.addWidget(self.symptom_flashes)
-        symptoms_layout.addWidget(self.symptom_vision_loss)
-        self._scr_vitals_form.addRow("Symptoms:", symptoms_layout)
-
-        self._scr_vitals_group.setLayout(self._scr_vitals_form)
-        self._apply_flat_form_label_style(self._scr_vitals_form)
-
-        # Image Upload
-        self._scr_image_group = QGroupBox("Fundus Image Upload")
-        self._scr_image_group.setMinimumWidth(520)
-        self._scr_image_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        image_layout = QVBoxLayout()
-        image_layout.setContentsMargins(12, 14, 12, 12)
-        image_layout.setSpacing(10)
-        self.image_label = QLabel()
-        self.image_label.setMinimumSize(480, 340)
-        self.image_label.setMaximumHeight(460)
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setWordWrap(True)
-        self._apply_upload_placeholder_style()
-        image_layout.addWidget(self.image_label, 1)
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 2, 0, 0)
-        btn_layout.setSpacing(8)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
         self.btn_upload = QPushButton("Upload Image")
-        self.btn_upload.setObjectName("primaryAction")
-        self.btn_upload.setMinimumHeight(28)
+        self.btn_upload.setObjectName("btnPrimary")
+        self.btn_upload.setMinimumHeight(36)
         self.btn_upload.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        upload_icon = self._resolve_icon_path("upload.svg", "upload.png")
+        upload_icon = self._resolve_icon_path("upload.svg", "camera.svg")
         if upload_icon:
-            self.btn_upload.setIcon(self._tinted_icon(upload_icon, "#ffffff", 20))
-            self.btn_upload.setIconSize(QSize(20, 20))
+            self.btn_upload.setIcon(self._tinted_icon(upload_icon, "#ffffff", 18))
+            self.btn_upload.setIconSize(QSize(18, 18))
         self.btn_upload.clicked.connect(self.upload_image)
         self.btn_clear = QPushButton("Clear")
-        self.btn_clear.setObjectName("dangerAction")
-        self.btn_clear.setMinimumHeight(28)
+        self.btn_clear.setObjectName("btnDanger")
+        self.btn_clear.setMinimumHeight(36)
         self.btn_clear.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        discard_icon = self._resolve_icon_path("discard.svg", "discard.png")
-        if discard_icon:
-            self.btn_clear.setIcon(self._tinted_icon(discard_icon, "#dc3545", 20))
-            self.btn_clear.setIconSize(QSize(20, 20))
+        clear_icon = self._resolve_icon_path("discard.svg")
+        if clear_icon:
+            self.btn_clear.setIcon(self._tinted_icon(clear_icon, "#ef4444", 18))
+            self.btn_clear.setIconSize(QSize(18, 18))
         self.btn_clear.clicked.connect(self.clear_image)
-        btn_layout.addWidget(self.btn_upload)
-        btn_layout.addWidget(self.btn_clear)
-        image_layout.addLayout(btn_layout)
+        btn_row.addWidget(self.btn_upload)
+        btn_row.addWidget(self.btn_clear)
+        c3.addLayout(btn_row)
 
-        analyze_layout = QHBoxLayout()
-        analyze_layout.setContentsMargins(0, 0, 0, 0)
         self.btn_analyze = QPushButton("Analyze Image")
-        self.btn_analyze.setObjectName("primaryAction")
-        self.btn_analyze.setMinimumHeight(32)
-        self.btn_analyze.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_analyze.setObjectName("btnAnalyze")
+        self.btn_analyze.setMinimumHeight(42)
         self.btn_analyze.setEnabled(False)
-        self.btn_analyze.setAutoDefault(True)
-        self.btn_analyze.setDefault(True)
         self.btn_analyze.clicked.connect(self.open_results_window)
-        analyze_layout.addWidget(self.btn_analyze)
-        image_layout.addLayout(analyze_layout)
+        c3.addWidget(self.btn_analyze)
 
-        self._scr_image_group.setLayout(image_layout)
-
-        # Left side remains scrollable in smaller windows.
-        left_content_layout.addWidget(self._scr_patient_group)
-        left_content_layout.addWidget(self._scr_clinical_group)
-        left_content_layout.addWidget(self._scr_vitals_group)
-        left_content_layout.addStretch()
-
-        # Keep form fields compact in width so inputs don't stretch too long.
-        compact_inputs = [
-            self.p_id,
-            self.p_name,
-            self.p_dob,
-            self.p_age,
-            self.p_sex,
-            self.p_contact,
-            self.p_eye,
-            self.diabetes_type,
-            self.diabetes_diagnosis_date,
-            self.diabetes_duration,
-            self.hba1c,
-            self.va_left,
-            self.va_right,
-            self.bp_systolic,
-            self.bp_diastolic,
-            self.fbs,
-            self.rbs,
-            self.notes,
-        ]
-        for widget in compact_inputs:
-            widget.setMaximumWidth(360)
-
-        # Build responsive right column
-        right_col = QWidget()
-        right_col_layout = QVBoxLayout(right_col)
-        right_col_layout.setContentsMargins(0, 0, 0, 0)
-        right_col_layout.setSpacing(12)
-        right_col_layout.addWidget(self._scr_image_group, 1)
-        right_col_layout.addStretch()
-
-        # Keep upload area fixed (not inside scroll).
-        root_layout.addWidget(left_scroll, 1)
-        root_layout.addWidget(right_col, 1)
-
+        splitter.addWidget(card3)
+        splitter.setStretchFactor(0, 6)
+        splitter.setStretchFactor(1, 5)
+        splitter.setSizes([640, 520])
         self._set_tab_order_unified()
-        return container
+        return root
 
     def _apply_upload_placeholder_style(self):
+        if hasattr(self, "image_label") and hasattr(self.image_label, "clear_image"):
+            self.image_label.clear_image()
+            return
         self.image_label.setPixmap(QPixmap())
         self.image_label.setText("Upload a fundus image\nJPG, PNG, JPEG")
         self.image_label.setStyleSheet(
@@ -440,6 +556,8 @@ class ScreeningPage(QWidget):
         )
 
     def _apply_upload_loaded_style(self):
+        if hasattr(self, "image_label") and hasattr(self.image_label, "set_image"):
+            return
         self.image_label.setStyleSheet(
             f"""
             QLabel {{
@@ -485,7 +603,8 @@ class ScreeningPage(QWidget):
         self.setTabOrder(self.symptom_blurred, self.symptom_floaters)
         self.setTabOrder(self.symptom_floaters, self.symptom_flashes)
         self.setTabOrder(self.symptom_flashes, self.symptom_vision_loss)
-        self.setTabOrder(self.symptom_vision_loss, self.btn_upload)
+        self.setTabOrder(self.symptom_vision_loss, self.symptom_other)
+        self.setTabOrder(self.symptom_other, self.btn_upload)
         self.setTabOrder(self.btn_upload, self.btn_clear)
         self.setTabOrder(self.btn_clear, self.btn_analyze)
 
@@ -1002,6 +1121,11 @@ class ScreeningPage(QWidget):
         self.diabetes_duration.setValue(0)
         self.hba1c.setValue(7.0)
         self.prev_treatment.setChecked(False)
+        self.symptom_blurred.setChecked(False)
+        self.symptom_floaters.setChecked(False)
+        self.symptom_flashes.setChecked(False)
+        self.symptom_vision_loss.setChecked(False)
+        self.symptom_other.clear()
         self.notes.clear()
         self.current_image = None
         self._apply_upload_placeholder_style()
@@ -1014,12 +1138,23 @@ class ScreeningPage(QWidget):
 
     def upload_image(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Fundus Image", "", "Images (*.jpg *.png *.jpeg)"
+            self, "Select Fundus Image", "", "Image Files (*.jpg *.jpeg *.png)"
         )
         if path:
             self.current_image = path
-            self._set_preview_image(path)
+            if hasattr(self.image_label, "set_image"):
+                self.image_label.set_image(path)
+            else:
+                self._set_preview_image(path)
             self.btn_analyze.setEnabled(True)
+
+    def _on_image_dropped(self, path: str):
+        self.current_image = path
+        if hasattr(self.image_label, "set_image"):
+            self.image_label.set_image(path)
+        else:
+            self._set_preview_image(path)
+        self.btn_analyze.setEnabled(True)
 
     def screen_another_image(self):
         """Pick a new image from the results page, re-run analysis, update results in place."""
@@ -1055,6 +1190,9 @@ class ScreeningPage(QWidget):
         self._worker.start()
 
     def _set_preview_image(self, path: str):
+        if hasattr(self.image_label, "set_image"):
+            self.image_label.set_image(path)
+            return
         pixmap = QPixmap(path)
         if pixmap.isNull():
             return
@@ -1181,6 +1319,9 @@ class ScreeningPage(QWidget):
             symptoms.append("Flashes")
         if self.symptom_vision_loss.isChecked():
             symptoms.append("Vision loss")
+        symptom_other = self.symptom_other.text().strip()
+        if symptom_other:
+            symptoms.append(f"Other: {symptom_other}")
 
         return {
             "age":            self.p_age.value(),
@@ -1202,7 +1343,10 @@ class ScreeningPage(QWidget):
 
     def clear_image(self):
         self.current_image = None
-        self._apply_upload_placeholder_style()
+        if hasattr(self.image_label, "clear_image"):
+            self.image_label.clear_image()
+        else:
+            self._apply_upload_placeholder_style()
         self.btn_analyze.setEnabled(False)
 
     def save_screening(self, reset_after=True):
@@ -1252,6 +1396,9 @@ class ScreeningPage(QWidget):
         symptom_floaters_flag = "Yes" if self.symptom_floaters.isChecked() else "No"
         symptom_flashes_flag = "Yes" if self.symptom_flashes.isChecked() else "No"
         symptom_vision_loss_flag = "Yes" if self.symptom_vision_loss.isChecked() else "No"
+        symptom_other = self.symptom_other.text().strip()
+        if symptom_other:
+            notes = (notes + f"\nOther symptom: {symptom_other}").strip() if notes else f"Other symptom: {symptom_other}"
 
         patient_data = [
             pid,
@@ -1364,6 +1511,7 @@ class ScreeningPage(QWidget):
         sym_floaters = self.symptom_floaters.isChecked()
         sym_flashes = self.symptom_flashes.isChecked()
         sym_vision_loss = self.symptom_vision_loss.isChecked()
+        sym_other = self.symptom_other.text()
 
         # Preserve first eye result across reset so results page can show bilateral comparison
         saved_first_eye_result = self._first_eye_result
@@ -1405,6 +1553,7 @@ class ScreeningPage(QWidget):
         self.symptom_floaters.setChecked(sym_floaters)
         self.symptom_flashes.setChecked(sym_flashes)
         self.symptom_vision_loss.setChecked(sym_vision_loss)
+        self.symptom_other.setText(sym_other)
 
         # Pre-select the other eye
         self.p_eye.setCurrentText(opposite_eye)

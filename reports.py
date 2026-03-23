@@ -13,9 +13,10 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QGroupBox,
     QTableWidget, QTableWidgetItem, QLineEdit, QComboBox, QHeaderView,
-    QFileDialog, QDialog, QMessageBox,
+    QFileDialog, QDialog, QMessageBox, QMenu,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon
 
 from auth import DB_FILE
 
@@ -208,20 +209,24 @@ class ReportsPage(QWidget):
         top_bar.setSpacing(8)
         top_bar.addWidget(self._rep_title_lbl)
         top_bar.addStretch(1)
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.refresh_report)
         self.export_btn = QPushButton("Export Results")
         self.export_btn.setObjectName("primaryAction")
         self.export_btn.setAutoDefault(True)
         self.export_btn.setDefault(True)
         self.export_btn.clicked.connect(self.export_summary)
         if self.is_admin:
+            self.archive_btn = QPushButton("Archive Selected")
+            self.archive_btn.clicked.connect(self.archive_selected_record)
+            self.archive_btn.setEnabled(False)
+            top_bar.addWidget(self.archive_btn)
+        else:
+            self.archive_btn = None
+        if self.is_admin:
             self.archived_records_btn = QPushButton("Archived Records")
             self.archived_records_btn.clicked.connect(self.open_archived_records_window)
             top_bar.addWidget(self.archived_records_btn)
         else:
             self.archived_records_btn = None
-        top_bar.addWidget(self.refresh_btn)
         top_bar.addWidget(self.export_btn)
         self.report_btn = QPushButton("Generate Report")
         self.report_btn.setEnabled(False)
@@ -248,40 +253,16 @@ class ReportsPage(QWidget):
         self.result_filter.setMinimumHeight(36)
         self.result_filter.currentTextChanged.connect(self.apply_filters)
         cl.addWidget(self.result_filter)
-        self.filtered_count_label = QLabel("0 shown")
+        self.filtered_count_label = QLabel("Total: 0")
         self.filtered_count_label.setObjectName("hintLabel")
+        self.filtered_count_label.setStyleSheet("color:#6c757d;font-size:12px;background:transparent;border:none;padding:0;margin:0;")
         cl.addWidget(self.filtered_count_label)
         root.addWidget(self._controls_group)
-
-        self._stats_group = QGroupBox("")
-        sl = QHBoxLayout(self._stats_group)
-        sl.setContentsMargins(16, 16, 16, 16)
-        sl.setSpacing(16)
-        total_card, self._stat_total_title, self.total_label = self._make_stat_card("Total Screenings", "0")
-        unique_card, self._stat_unique_title, self.unique_patients_label = self._make_stat_card("Unique Patients", "0")
-        no_dr_card, self._stat_no_dr_title, self.no_dr_label = self._make_stat_card("No DR", "0")
-        review_card, self._stat_review_title, self.review_label = self._make_stat_card("Needs Review", "0")
-        hba1c_card, self._stat_hba1c_title, self.hba1c_label = self._make_stat_card("Avg HbA1c", "0.0%")
-        self._stat_cards = [total_card, unique_card, no_dr_card, review_card, hba1c_card]
-        for card in self._stat_cards:
-            sl.addWidget(card)
-        root.addWidget(self._stats_group)
 
         self._results_group = QGroupBox("")
         rl = QVBoxLayout(self._results_group)
         rl.setContentsMargins(16, 16, 16, 16)
         rl.setSpacing(12)
-        if self.is_admin:
-            al = QHBoxLayout()
-            al.setSpacing(8)
-            al.addStretch(1)
-            self.archive_btn = QPushButton("Archive Selected")
-            self.archive_btn.clicked.connect(self.archive_selected_record)
-            self.archive_btn.setEnabled(False)
-            al.addWidget(self.archive_btn)
-            rl.addLayout(al)
-        else:
-            self.archive_btn = None
 
         self.results_table = QTableWidget(0, 6)
         self.results_table.setHorizontalHeaderLabels(["Patient ID","Name","Result","Confidence","Diabetes Type","HbA1c"])
@@ -292,35 +273,59 @@ class ReportsPage(QWidget):
         self.results_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.results_table.setSelectionMode(QTableWidget.SingleSelection)
         self.results_table.itemSelectionChanged.connect(self._update_action_buttons)
+        self.results_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.results_table.customContextMenuRequested.connect(self._open_results_context_menu)
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.results_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         rl.addWidget(self.results_table)
         root.addWidget(self._results_group)
 
-        self.setTabOrder(self.refresh_btn, self.export_btn)
         self.setTabOrder(self.export_btn, self.report_btn)
         self.setTabOrder(self.report_btn, self.search_input)
         self.setTabOrder(self.search_input, self.result_filter)
         self.setTabOrder(self.result_filter, self.results_table)
+        self._setup_action_buttons_ui()
         self.refresh_report()
 
-    def _make_stat_card(self, title, value):
-        c = QWidget()
-        c.setObjectName("dashTile")
-        c.setStyleSheet("background:#fff;border:1px solid #dee2e6;border-radius:8px;")
-        lay = QVBoxLayout(c)
-        lay.setContentsMargins(16, 12, 16, 12)
-        lay.setSpacing(8)
-        tl = QLabel(title)
-        tl.setObjectName("tileTitle")
-        tl.setStyleSheet("font-size:12px;font-weight:600;color:#6c757d;")
-        vl = QLabel(value)
-        vl.setObjectName("statValue")
-        vl.setStyleSheet("font-size:18px;font-weight:700;color:#343a40;")
-        lay.addWidget(tl)
-        lay.addWidget(vl)
-        return c, tl, vl
+    def _icon_path(self, filename: str) -> str:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
+
+    def _set_button_icon(self, button: QPushButton, icon_name: str):
+        icon_file = self._icon_path(icon_name)
+        if os.path.exists(icon_file):
+            button.setIcon(QIcon(icon_file))
+            button.setIconSize(QSize(18, 18))
+
+    def _setup_action_buttons_ui(self):
+        self._set_button_icon(self.export_btn, "export.svg")
+        self._set_button_icon(self.report_btn, "generate_report.svg")
+        self.export_btn.setText("Export")
+        self.report_btn.setText("Report")
+        self.export_btn.setToolTip("Export currently visible report rows to CSV")
+        self.report_btn.setToolTip("Generate a detailed PDF report for the selected patient")
+        if self.archived_records_btn is not None:
+            self._set_button_icon(self.archived_records_btn, "archives.svg")
+            self.archived_records_btn.setText("Archived Records")
+            self.archived_records_btn.setToolTip("Open archived records and restore or delete entries")
+        if self.archive_btn is not None:
+            self._set_button_icon(self.archive_btn, "archive.svg")
+            self.archive_btn.setText("Archive")
+            self.archive_btn.setToolTip("Archive the selected active patient record")
+
+        top_icon_buttons = [self.export_btn, self.report_btn]
+        if self.archive_btn is not None:
+            top_icon_buttons.append(self.archive_btn)
+        if self.archived_records_btn is not None:
+            top_icon_buttons.append(self.archived_records_btn)
+
+        for button in top_icon_buttons:
+            button.setMinimumHeight(34)
+            button.setStyleSheet(
+                "QPushButton{background:#0d6efd;color:#ffffff;border:1px solid #0b5ed7;border-radius:8px;padding:6px 10px;font-weight:600;}"
+                "QPushButton:hover{background:#0b5ed7;}"
+                "QPushButton:disabled{background:#6ea8fe;border:1px solid #6ea8fe;}"
+            )
 
     def refresh_report(self):
         try:
@@ -392,26 +397,34 @@ class ReportsPage(QWidget):
             self.results_table.setItem(i, 4, QTableWidgetItem(str(row["diabetes_type"] or "")))
             self.results_table.setItem(i, 5, QTableWidgetItem(str(row["hba1c"] or "")))
         self.results_table.setSortingEnabled(True)
-        self.filtered_count_label.setText(f"{len(self._filtered_rows)} shown")
+        self.filtered_count_label.setText(f"Total: {len(self._filtered_rows)}")
         self._update_action_buttons()
 
     def _update_summary_cards(self, rows):
         total = len(rows)
-        unique = len({str(r["patient_id"]).strip() for r in rows if str(r["patient_id"]).strip()})
-        no_dr = sum(1 for r in rows if "no dr" in str(r["result"] or "").lower())
-        hba1c_vals = []
-        for r in rows:
-            try:
-                hba1c_vals.append(float(str(r["hba1c"] or "").replace("%","").strip()))
-            except ValueError:
-                pass
-        avg = (sum(hba1c_vals)/len(hba1c_vals)) if hba1c_vals else 0.0
-        self._summary_cache = {"total_screenings":total,"unique_patients":unique,"no_dr":no_dr,"needs_review":max(0,total-no_dr),"avg_hba1c":round(avg,1)}
-        self.total_label.setText(str(total))
-        self.unique_patients_label.setText(str(unique))
-        self.no_dr_label.setText(str(no_dr))
-        self.review_label.setText(str(max(0,total-no_dr)))
-        self.hba1c_label.setText(f"{avg:.1f}%")
+        self._summary_cache = {"total_screenings": total}
+
+    def _open_results_context_menu(self, pos):
+        item = self.results_table.itemAt(pos)
+        if item is None:
+            return
+        self.results_table.selectRow(item.row())
+        record = self._get_selected_record()
+        if not record:
+            return
+
+        menu = QMenu(self)
+        generate_action = menu.addAction("Generate Report")
+        archive_action = None
+        if self.is_admin:
+            archive_action = menu.addAction("Archive Record")
+            archive_action.setEnabled(not bool(record.get("archived_at")))
+
+        chosen = menu.exec(self.results_table.viewport().mapToGlobal(pos))
+        if chosen == generate_action:
+            self.generate_report()
+        elif archive_action is not None and chosen == archive_action:
+            self.archive_selected_record()
 
     def _get_selected_record(self):
         r = self.results_table.currentRow()
@@ -531,20 +544,9 @@ class ReportsPage(QWidget):
         pack = get_pack(language)
         self._rep_title_lbl.setText(pack["rep_title"])
         self._rep_subtitle_lbl.setText("")
-        self.refresh_btn.setText(pack["rep_refresh"])
-        self.export_btn.setText(pack["rep_export"])
-        if self.archived_records_btn is not None:
-            self.archived_records_btn.setText(pack["rep_archived"])
-        if self.archive_btn is not None:
-            self.archive_btn.setText(pack["rep_archive_sel"])
         self._controls_group.setTitle("")
-        self._stats_group.setTitle("")
         self._results_group.setTitle("")
-        self._stat_total_title.setText(pack["rep_stat_total"])
-        self._stat_unique_title.setText(pack["rep_stat_unique"])
-        self._stat_no_dr_title.setText(pack["rep_stat_no_dr"])
-        self._stat_review_title.setText(pack["rep_stat_review"])
-        self._stat_hba1c_title.setText(pack["rep_stat_hba1c"])
+        self._setup_action_buttons_ui()
 
     # ── Report generation ──────────────────────────────────────────────────────
 

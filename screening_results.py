@@ -198,6 +198,7 @@ class ResultsWindow(QWidget):
         preview_row.setSpacing(12)
 
         source_group = QGroupBox("Source Image")
+        source_group.setObjectName("resultGroupCard")
         source_layout = QVBoxLayout(source_group)
         source_layout.setContentsMargins(14, 16, 14, 14)
         source_layout.setSpacing(10)
@@ -209,6 +210,7 @@ class ResultsWindow(QWidget):
         source_layout.addWidget(self.source_label)
 
         heatmap_group = QGroupBox("Heatmap Output")
+        heatmap_group.setObjectName("resultGroupCard")
         heatmap_layout = QVBoxLayout(heatmap_group)
         heatmap_layout.setContentsMargins(14, 16, 14, 14)
         heatmap_layout.setSpacing(10)
@@ -338,6 +340,7 @@ class ResultsWindow(QWidget):
         layout.addLayout(main_row, 1)
 
         explanation_group = QGroupBox("Clinical Summary")
+        explanation_group.setObjectName("resultGroupCard")
         explanation_layout = QVBoxLayout(explanation_group)
         explanation_layout.setContentsMargins(14, 16, 14, 14)
         explanation_layout.setSpacing(10)
@@ -350,6 +353,108 @@ class ResultsWindow(QWidget):
         self.explanation_hint.setWordWrap(True)
         explanation_layout.addWidget(self.explanation_hint)
         layout.addWidget(explanation_group)
+
+        self.setStyleSheet("""
+            QWidget {
+                background: #ffffff;
+                color: #1f2937;
+                font-family: 'Segoe UI', 'Calibri', 'Inter', sans-serif;
+            }
+            QLabel#pageHeader {
+                font-size: 24px;
+                font-weight: 700;
+                color: #0f3d66;
+            }
+            QLabel#pageSubtitle {
+                color: #6b7280;
+                font-size: 12px;
+            }
+            QGroupBox#resultGroupCard {
+                background: #ffffff;
+                border: 1px solid #dbe3ec;
+                border-radius: 10px;
+                margin-top: 10px;
+                font-weight: 700;
+                color: #334155;
+            }
+            QGroupBox#resultGroupCard::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #3f4f63;
+                background: #ffffff;
+            }
+            QFrame#resultStatCard {
+                background: #ffffff;
+                border: 1px solid #dbe3ec;
+                border-radius: 10px;
+            }
+            QLabel#resultStatTitle {
+                color: #6b7280;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QLabel#resultStatValue {
+                color: #111827;
+                font-size: 18px;
+                font-weight: 700;
+            }
+            QFrame#actionRail {
+                background: #ffffff;
+                border: 1px solid #dbe3ec;
+                border-radius: 10px;
+            }
+            QLabel#statusLabel {
+                color: #6b7280;
+                font-size: 11px;
+            }
+            QLabel#successLabel {
+                color: #166534;
+            }
+            QLabel#errorLabel {
+                color: #b91c1c;
+            }
+            QPushButton {
+                background: #e5e7eb;
+                color: #1f2937;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #dbe1e9;
+            }
+            QPushButton:disabled {
+                background: #eef2f7;
+                color: #94a3b8;
+                border-color: #dbe3ec;
+            }
+            QPushButton#primaryAction {
+                background: #0f5f9d;
+                color: #ffffff;
+                border: 1px solid #0b4f83;
+            }
+            QPushButton#primaryAction:hover {
+                background: #0d5288;
+            }
+            QPushButton#secondaryAction {
+                background: #eef6fb;
+                color: #0f5f9d;
+                border: 1px solid #b7d3ea;
+            }
+            QPushButton#secondaryAction:hover {
+                background: #e3f0f9;
+            }
+            QPushButton#dangerAction {
+                background: #fff1f2;
+                color: #b91c1c;
+                border: 1px solid #fecdd3;
+            }
+            QPushButton#dangerAction:hover {
+                background: #ffe4e6;
+            }
+        """)
 
     def _is_dark_theme(self) -> bool:
         bg = self.palette().color(QPalette.ColorRole.Window)
@@ -745,325 +850,232 @@ class ResultsWindow(QWidget):
                 doc.addResource(QTextDocument.ImageResource, QUrl("hmap_img"), hmap_px)
             heatmap_img_html = '<img src="hmap_img" style="max-width:320px; max-height:260px;" />'
 
-        # Check for bilateral (dual-eye) data
-        first_eye = None
-        first_source_html = ""
-        first_heatmap_html = ""
-        if self.parent_page and hasattr(self.parent_page, '_first_eye_result'):
-            first_eye = self.parent_page._first_eye_result
+        # Report-tab-matching palette and structure
+        _COL = {
+            "No DR": "#166534",
+            "Mild DR": "#92400e",
+            "Moderate DR": "#9a3412",
+            "Severe DR": "#991b1b",
+            "Proliferative DR": "#7f1d1d",
+        }
+        _BG = {
+            "No DR": "#f0fdf4",
+            "Mild DR": "#fefce8",
+            "Moderate DR": "#fff7ed",
+            "Severe DR": "#fff1f2",
+            "Proliferative DR": "#fff1f2",
+        }
+        _BORDER = {
+            "No DR": "#16a34a",
+            "Mild DR": "#d97706",
+            "Moderate DR": "#ea580c",
+            "Severe DR": "#dc2626",
+            "Proliferative DR": "#dc2626",
+        }
+        _REC = {
+            "No DR": "Annual screening recommended",
+            "Mild DR": "6&#8211;12 month follow-up",
+            "Moderate DR": "Ophthalmology referral within 3 months",
+            "Severe DR": "Urgent ophthalmology referral",
+            "Proliferative DR": "Immediate ophthalmology referral",
+        }
+        _SUM = {
+            "No DR": "No signs of diabetic retinopathy were detected in this fundus image. Continue standard diabetes management, maintain optimal glycaemic and blood pressure control, and schedule routine annual retinal screening.",
+            "Mild DR": "Early microaneurysms consistent with mild non-proliferative diabetic retinopathy (NPDR) were identified. Intensify glycaemic and blood pressure management. A follow-up retinal examination in 6&#8211;12 months is recommended.",
+            "Moderate DR": "Features consistent with moderate non-proliferative diabetic retinopathy (NPDR) were detected, including microaneurysms, haemorrhages, and/or hard exudates. Referral to an ophthalmologist within 3 months is advised. Reassess systemic metabolic control.",
+            "Severe DR": "Findings consistent with severe non-proliferative diabetic retinopathy (NPDR) were detected. The risk of progression to proliferative disease within 12 months is high. Urgent ophthalmology referral is required.",
+            "Proliferative DR": "Proliferative diabetic retinopathy (PDR) was detected &#8212; a sight-threatening condition. Immediate ophthalmology referral is required for evaluation and potential intervention, such as laser photocoagulation or intravitreal anti-VEGF therapy.",
+        }
+        gc = _COL.get(result_raw, "#1e3a5f")
+        gbg = _BG.get(result_raw, "#f8faff")
+        gb = _BORDER.get(result_raw, "#2563eb")
+        rec = _REC.get(result_raw, "Consult a qualified clinician")
+        summary = _SUM.get(result_raw, "Please consult a qualified ophthalmologist.")
+        conf_display = confidence_display
 
-        if first_eye and first_eye.get('image_path'):
-            fe_img = first_eye['image_path']
-            if os.path.isfile(fe_img):
-                fe_px = QPixmap(fe_img).scaled(
-                    280, 220, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-                )
-                try:
-                    doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl("fe_src_img"), fe_px)
-                except AttributeError:
-                    doc.addResource(QTextDocument.ImageResource, QUrl("fe_src_img"), fe_px)
-                first_source_html = '<img src="fe_src_img" style="max-width:280px; max-height:220px;" />'
-
-        if first_eye and first_eye.get('heatmap_path'):
-            fe_hmap = first_eye['heatmap_path']
-            if os.path.isfile(fe_hmap):
-                fe_hpx = QPixmap(fe_hmap).scaled(
-                    280, 220, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-                )
-                try:
-                    doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl("fe_hmap_img"), fe_hpx)
-                except AttributeError:
-                    doc.addResource(QTextDocument.ImageResource, QUrl("fe_hmap_img"), fe_hpx)
-                first_heatmap_html = '<img src="fe_hmap_img" style="max-width:280px; max-height:220px;" />'
-
-        is_bilateral = bool(first_eye and first_eye.get('result') and first_eye.get('eye'))
-
-        bilateral_second_eye_label_html = (
-            '<div class="section-title" style="font-size:9pt;color:#374151;margin-top:10px;border:none;padding:0;">'
-            + escape(self._current_eye_label or '')
-            + '</div>'
-            if is_bilateral
-            else ''
-        )
-        bilateral_first_eye_header_html = (
-            '<div style="font-size:9pt;font-weight:600;color:#374151;margin-bottom:4px;">'
-            + escape(first_eye.get('eye', 'First Eye'))
-            + '</div>'
-            if is_bilateral
-            else ''
-        )
-        bilateral_first_eye_images_html = ''
-        if is_bilateral:
-            first_source_block = first_source_html or "<div class='img-placeholder'>Source image not available</div>"
-            first_heatmap_block = first_heatmap_html or "<div class='img-placeholder'>Heatmap not available</div>"
-            bilateral_first_eye_images_html = (
-                '<table class="img-table"><tr><td>'
-                + first_source_block
-                + '<div class="img-caption">Source Fundus Image</div></td><td>'
-                + first_heatmap_block
-                + '<div class="img-caption">Grad-CAM++ Heatmap</div></td></tr></table>'
+        def sec(title):
+            return (
+                f'<table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 10px;">'
+                f'<tr>'
+                f'<td width="3" bgcolor="#2563eb" style="border-radius:2px;">&nbsp;</td>'
+                f'<td width="10">&nbsp;</td>'
+                f'<td style="font-size:8pt;font-weight:bold;color:#374151;letter-spacing:1.5px;white-space:nowrap;text-transform:uppercase;">{title}</td>'
+                f'<td width="14">&nbsp;</td>'
+                f'<td style="border-bottom:1px solid #e5e7eb;">&nbsp;</td>'
+                f'</tr></table>'
             )
-        bilateral_second_eye_header_html = (
-            '<div style="font-size:9pt;font-weight:600;color:#374151;margin-top:8px;margin-bottom:4px;">'
-            + escape(self._current_eye_label or 'Second Eye')
-            + '</div>'
-            if is_bilateral
-            else ''
-        )
+
+        def img_cell(caption, placeholder_text, image_html):
+            body = image_html or placeholder_text
+            return (
+                f'<table width="100%" cellpadding="0" cellspacing="0" '
+                f'style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">'
+                f'<tr><td height="180" bgcolor="#f9fafb" align="center" valign="middle" '
+                f'style="font-size:9pt;color:#9ca3af;font-style:italic;padding:16px;">'
+                f'{body}</td></tr>'
+                f'<tr><td bgcolor="#f3f4f6" style="border-top:1px solid #e5e7eb;padding:6px 12px;'
+                f'font-size:7.5pt;font-weight:bold;color:#6b7280;text-align:center;'
+                f'letter-spacing:0.8px;text-transform:uppercase;">{caption}</td></tr>'
+                f'</table>'
+            )
+
+        def info_row(cells, bg="#ffffff"):
+            tds = "".join(
+                f'<td width="25%" bgcolor="{bg}" style="padding:10px 14px;border-right:1px solid #e5e7eb;'
+                f'border-bottom:1px solid #e5e7eb;vertical-align:top;">'
+                f'<div style="font-size:7.5pt;font-weight:bold;color:#9ca3af;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">{lbl}</div>'
+                f'<div style="font-size:10pt;font-weight:600;color:#111827;line-height:1.4;">{val}</div>'
+                f'</td>'
+                for lbl, val in cells
+            )
+            return f'<tr>{tds}</tr>'
+
+        def vrow(label, value):
+            return (
+                f'<tr>'
+                f'<td style="padding:9px 14px;font-size:9.5pt;color:#6b7280;font-weight:500;border-bottom:1px solid #f3f4f6;">{label}</td>'
+                f'<td style="padding:9px 14px;font-size:9.5pt;color:#111827;font-weight:700;text-align:right;border-bottom:1px solid #f3f4f6;">{value}</td>'
+                f'</tr>'
+            )
 
         html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{
-    font-family: 'Segoe UI', 'Calibri', Arial, sans-serif;
-    font-size: 10.5pt;
-    color: #1f2937;
-    background: #ffffff;
-    line-height: 1.55;
-}}
-.page-header {{
-    background: #0f3d66;
-    color: #ffffff;
-    padding: 16px 24px 14px 24px;
-}}
-.page-header .brand {{ font-size: 16pt; font-weight: 700; letter-spacing: 0.4px; }}
-.page-header .brand-sub {{ font-size: 9pt; color: #93c5fd; margin-top: 2px; }}
-.page-header .meta {{ font-size: 9pt; color: #bfdbfe; margin-top: 6px; line-height: 1.6; }}
-.body {{ padding: 16px 24px 20px 24px; }}
-.section-title {{
-    font-size: 10pt;
-    font-weight: 700;
-    color: #0f3d66;
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
-    border-bottom: 1.5px solid #dbeafe;
-    padding-bottom: 4px;
-    margin: 14px 0 8px 0;
-}}
-.info-grid {{ width: 100%; border-collapse: collapse; }}
-.info-grid td {{
-    vertical-align: top;
-    padding: 3px 10px 3px 0;
-    font-size: 10pt;
-    width: 33.3%;
-}}
-.lbl {{ color: #6b7280; font-weight: 600; font-size: 9pt; white-space: nowrap; }}
-.val {{ color: #111827; font-weight: 500; }}
-.result-banner {{
-    background: {grade_bg};
-    border-left: 5px solid {grade_color};
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 0;
-}}
-.result-grade {{ font-size: 14pt; font-weight: 700; color: {grade_color}; }}
-.result-meta {{ font-size: 9.5pt; color: #374151; margin-top: 4px; }}
-.result-rec {{ font-size: 9.5pt; font-weight: 600; color: {grade_color}; margin-top: 4px; }}
-.two-col {{ width: 100%; border-collapse: collapse; }}
-.two-col td {{ vertical-align: top; padding: 0; }}
-.two-col td:first-child {{ width: 52%; padding-right: 12px; }}
-.two-col td:last-child {{ width: 48%; }}
-.vitals-box {{
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    padding: 10px 12px;
-}}
-.vitals-inner {{ width: 100%; border-collapse: collapse; font-size: 9.5pt; }}
-.vitals-inner td {{ padding: 3px 0; border-bottom: 1px solid #f1f5f9; }}
-.vitals-inner tr:last-child td {{ border-bottom: none; }}
-.vitals-lbl {{ color: #6b7280; font-weight: 600; }}
-.vitals-val {{ color: #111827; font-weight: 500; text-align: right; }}
-.symptom-pill {{
-    display: inline-block;
-    background: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #fca5a5;
-    border-radius: 999px;
-    padding: 2px 9px;
-    font-size: 8.5pt;
-    font-weight: 600;
-    margin: 2px 3px 2px 0;
-}}
-.img-table {{ width: 100%; border-collapse: collapse; margin-top: 6px; }}
-.img-table td {{
-    width: 50%;
-    border: 1px solid #e2e8f0;
-    text-align: center;
-    padding: 8px;
-    vertical-align: middle;
-    background: #f8fafc;
-}}
-.img-placeholder {{
-    min-height: 110px;
-    padding-top: 40px;
-    font-size: 9pt;
-    color: #94a3b8;
-    border: 1.5px dashed #cbd5e1;
-    border-radius: 4px;
-    background: #f1f5f9;
-}}
-.img-caption {{ margin-top: 6px; font-size: 9pt; color: #6b7280; font-weight: 600; }}
-.analysis-box {{
-    background: #f0f7ff;
-    border: 1px solid #bfdbfe;
-    border-radius: 6px;
-    padding: 11px 14px;
-    font-size: 10pt;
-    line-height: 1.65;
-    color: #1e3a5f;
-    margin-top: 8px;
-}}
-.notes-box {{
-    background: #fafafa;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-    padding: 8px 12px;
-    font-size: 9.5pt;
-    color: #374151;
-    margin-top: 4px;
-    min-height: 36px;
-}}
-.footer {{
-    margin-top: 14px;
-    padding-top: 8px;
-    border-top: 1px solid #e5e7eb;
-    font-size: 8.5pt;
-    color: #6b7280;
-    line-height: 1.6;
-}}
-.footer-brand {{ text-align: center; margin-top: 6px; font-size: 8pt; color: #9ca3af; }}
-</style>
-</head>
-<body>
+<html><head><meta charset="utf-8"><style>
+body{{font-family:'Segoe UI','Calibri',Arial,sans-serif;font-size:10pt;color:#111827;
+     background:#ffffff;margin:0;padding:0;line-height:1.5;}}
+</style></head><body>
 
-<div class="page-header">
-    <div class="brand">{escape(clinic_name)}</div>
-    <div class="brand-sub">Diabetic Retinopathy Screening Report</div>
-    <div class="meta">Generated: {report_date} &nbsp;|&nbsp; Screened by: {screened_by}</div>
-</div>
-
-<div class="body">
-
-<div class="section-title">Patient Information</div>
-<table class="info-grid">
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td bgcolor="#0a2540" align="center" style="padding:12px 24px 10px;">
+    <div style="font-size:20pt;font-weight:bold;color:#ffffff;letter-spacing:1px;">Patient Record</div>
+</td></tr>
+<tr><td bgcolor="#0d2d4a">
+    <table width="100%" cellpadding="0" cellspacing="0">
     <tr>
-        <td><span class="lbl">Patient Name</span><br><span class="val">{esc(self._current_patient_name)}</span></td>
-        <td><span class="lbl">Record No.</span><br><span class="val">{esc(patient_id)}</span></td>
-        <td><span class="lbl">Report Date</span><br><span class="val">{report_date}</span></td>
+        <td style="padding:8px 24px;font-size:8.5pt;color:#94a3b8;">
+            <b style="color:#cbd5e1;">Generated:</b> {report_date}
+        </td>
+        <td style="padding:8px 24px;font-size:8.5pt;color:#94a3b8;text-align:right;">
+            <b style="color:#cbd5e1;">Screened by:</b> {screened_by}
+        </td>
     </tr>
-    <tr>
-        <td><span class="lbl">Date of Birth</span><br><span class="val">{esc(dob)}</span></td>
-        <td><span class="lbl">Age</span><br><span class="val">{esc_or_dash(age)}</span></td>
-        <td><span class="lbl">Sex</span><br><span class="val">{esc_or_dash(sex)}</span></td>
-    </tr>
-    <tr>
-        <td><span class="lbl">Contact</span><br><span class="val">{esc_or_dash(contact)}</span></td>
-        <td><span class="lbl">Eye Screened</span><br><span class="val">{'Both Eyes (Bilateral)' if is_bilateral else esc_or_dash(self._current_eye_label)}</span></td>
-        <td></td>
-    </tr>
+    </table>
+</td></tr>
 </table>
 
-<div class="section-title">Clinical History</div>
-<table class="info-grid">
-    <tr>
-        <td><span class="lbl">Diabetes Type</span><br><span class="val">{esc_or_dash(diabetes_type)}</span></td>
-        <td><span class="lbl">Duration</span><br><span class="val">{duration_disp}</span></td>
-        <td><span class="lbl">HbA1c</span><br><span class="val">{esc_or_dash(hba1c_disp)}</span></td>
-    </tr>
-    <tr>
-        <td><span class="lbl">Previous DR Treatment</span><br><span class="val">{esc_or_dash(prev_tx)}</span></td>
-        <td></td>
-        <td></td>
-    </tr>
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="padding:18px 0 24px;">
+
+{sec("Patient Information")}
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border:1px solid #e5e7eb;border-radius:8px;border-collapse:collapse;overflow:hidden;">
+{info_row([("Full Name", esc(self._current_patient_name)), ("Date of Birth", esc(dob)), ("Age", esc(age)), ("Sex", esc(sex))], "#ffffff")}
+{info_row([("Record No.", esc(patient_id)), ("Contact", esc(contact)), ("Eye Screened", esc(self._current_eye_label or "—")), ("Screening Date", report_date)], "#f9fafb")}
 </table>
 
-<div class="section-title">Screening Results &amp; Vital Signs</div>
-{'<div class="section-title" style="font-size:9pt;color:#374151;margin-top:6px;border:none;padding:0;">' + escape(first_eye.get('eye','')) + '</div>' if is_bilateral else ''}
-{'<table class="two-col"><tr><td>' if is_bilateral else ''}
-{'<div class="result-banner" style="background:' + grade_bg_map.get(first_eye.get('result',''),'#f3f4f6') + ';border-left:5px solid ' + DR_COLORS.get(first_eye.get('result',''),'#374151') + ';">' if is_bilateral else ''}
-{'<div class="result-grade" style="color:' + DR_COLORS.get(first_eye.get('result',''),'#374151') + ';">' + escape(first_eye.get('result','')) + '</div>' if is_bilateral else ''}
-{'<div class="result-meta">Confidence: ' + escape(first_eye.get('confidence','')) + '</div>' if is_bilateral else ''}
-{'<div class="result-rec" style="color:' + DR_COLORS.get(first_eye.get('result',''),'#374151') + ';">&#8594; ' + escape(DR_RECOMMENDATIONS.get(first_eye.get('result',''),'Consult a clinician')) + '</div>' if is_bilateral else ''}
-{'</div></td></tr></table>' if is_bilateral else ''}
+{sec("Clinical History")}
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border:1px solid #e5e7eb;border-radius:8px;border-collapse:collapse;overflow:hidden;">
+{info_row([("Diabetes Type", esc(diabetes_type)), ("Duration", duration_disp), ("HbA1c", esc_or_dash(hba1c_disp)), ("Previous DR Treatment", esc(prev_tx))], "#ffffff")}
+</table>
 
-{bilateral_second_eye_label_html}
-<table class="two-col">
+{sec("Screening Results &amp; Vital Signs")}
+<table width="100%" cellpadding="0" cellspacing="0">
 <tr>
-    <td>
-        <div class="result-banner">
-            <div class="result-grade">{escape(result_raw) if result_raw else "&mdash;"}</div>
-            <div class="result-meta">Confidence: {confidence_display}</div>
-            <div class="result-rec">&#8594; {recommendation}</div>
+<td width="50%" valign="top" style="padding-right:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="border:1px solid {gb};border-left:4px solid {gb};
+                  border-radius:8px;background:{gbg};">
+    <tr><td style="padding:16px 18px;">
+        <div style="display:inline-block;background:{gb};color:#ffffff;font-size:7.5pt;
+                    font-weight:bold;letter-spacing:1px;text-transform:uppercase;
+                    padding:3px 9px;border-radius:4px;margin-bottom:12px;">AI Classification</div>
+        <div style="font-size:17pt;font-weight:800;color:{gc};line-height:1.15;margin-bottom:4px;">
+            {escape(result_raw) if result_raw else "&#8212;"}
         </div>
-    </td>
-    <td>
-        <div class="vitals-box">
-            <table class="vitals-inner">
-                <tr>
-                    <td class="vitals-lbl">Blood Pressure</td>
-                    <td class="vitals-val">{bp_display}</td>
-                </tr>
-                <tr>
-                    <td class="vitals-lbl">Visual Acuity (L / R)</td>
-                    <td class="vitals-val">{esc_or_dash(va_left)} / {esc_or_dash(va_right)}</td>
-                </tr>
-                <tr>
-                    <td class="vitals-lbl">Fasting Blood Sugar</td>
-                    <td class="vitals-val">{fbs_disp}</td>
-                </tr>
-                <tr>
-                    <td class="vitals-lbl">Random Blood Sugar</td>
-                    <td class="vitals-val">{rbs_disp}</td>
-                </tr>
-            </table>
-            <div style="margin-top:8px; font-size:8.5pt; color:#6b7280; font-weight:600;">REPORTED SYMPTOMS</div>
-            <div style="margin-top:4px;">{symptom_html}</div>
-        </div>
-    </td>
+        <div style="font-size:9pt;color:#6b7280;margin-bottom:12px;">Confidence: {conf_display}</div>
+        <div style="border-top:1px solid {gb};opacity:0.25;margin-bottom:12px;"></div>
+        <div style="font-size:7.5pt;font-weight:bold;color:{gc};letter-spacing:1px;
+                    text-transform:uppercase;margin-bottom:4px;opacity:0.8;">Recommendation</div>
+        <div style="font-size:9.5pt;font-weight:700;color:{gc};">&#8594;&nbsp;{rec}</div>
+    </td></tr>
+    </table>
+</td>
+<td width="50%" valign="top" style="padding-left:12px;">
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+    <tr><td bgcolor="#1e3a5f" style="padding:9px 14px;font-size:8pt;font-weight:bold;
+            color:#93c5fd;letter-spacing:1.2px;text-transform:uppercase;">Vital Signs</td></tr>
+    <tr><td style="padding:0;">
+        <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#ffffff">
+        {vrow("Blood Pressure", bp_display)}
+        {vrow("Visual Acuity (L / R)", f"{esc_or_dash(va_left)}&nbsp;/&nbsp;{esc_or_dash(va_right)}")}
+        {vrow("Fasting Blood Sugar", fbs_disp)}
+        <tr>
+        <td style="padding:9px 14px;font-size:9.5pt;color:#6b7280;font-weight:500;">Random Blood Sugar</td>
+        <td style="padding:9px 14px;font-size:9.5pt;color:#111827;font-weight:700;text-align:right;">{rbs_disp}</td>
+        </tr>
+        </table>
+    </td></tr>
+    <tr><td bgcolor="#f9fafb" style="padding:9px 14px;border-top:1px solid #e5e7eb;">
+        <div style="font-size:7.5pt;font-weight:bold;color:#9ca3af;letter-spacing:1px;
+                    text-transform:uppercase;margin-bottom:6px;">Reported Symptoms</div>
+        <div>{symptom_html}</div>
+    </td></tr>
+    </table>
+</td>
 </tr>
 </table>
 
-<div class="section-title">Image Results</div>
-{bilateral_first_eye_header_html}
-{bilateral_first_eye_images_html}
-{bilateral_second_eye_header_html}
-<table class="img-table">
-    <tr>
-        <td>
-            {source_img_html}
-            <div class="img-caption">Source Fundus Image</div>
-        </td>
-        <td>
-            {heatmap_img_html}
-            <div class="img-caption">Grad-CAM++ Heatmap Overlay</div>
-        </td>
-    </tr>
+{sec("Image Results")}
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr>
+<td width="50%" valign="top" style="padding-right:12px;">
+    {img_cell("Source Fundus Image", "Source image not stored in this record", source_img_html)}
+</td>
+<td width="50%" valign="top" style="padding-left:12px;">
+    {img_cell("Grad-CAM++ Heatmap", "Heatmap not stored in this record", heatmap_img_html)}
+</td>
+</tr>
 </table>
 
-<div class="section-title">Clinical Analysis</div>
-<div class="analysis-box">{explanation_html}</div>
+{sec("Clinical Analysis")}
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border:1px solid #bfdbfe;border-left:4px solid #2563eb;
+              border-radius:0 8px 8px 0;background:#eff6ff;">
+<tr><td style="padding:14px 18px;font-size:10pt;line-height:1.75;color:#1e3a5f;">{summary}</td></tr>
+</table>
 
-<div class="section-title">Clinical Notes</div>
-<div class="notes-box">{notes_disp}</div>
+{sec("Clinical Notes")}
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
+<tr><td style="padding:12px 16px;font-size:10pt;color:#374151;
+            font-style:italic;line-height:1.65;min-height:40px;">{notes_disp}</td></tr>
+</table>
 
-<div class="footer">
-    Screened by: <strong>{screened_by}</strong> &nbsp;|&nbsp; Generated: {report_date}<br>
-    This report supports clinical decision-making and does not replace professional medical evaluation.
-    Results are generated by an AI model and must be reviewed by a qualified clinician.
-</div>
-<div class="footer-brand">EyeShield EMR &mdash; {escape(clinic_name)}</div>
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="margin-top:24px;border-top:2px solid #e5e7eb;padding-top:14px;">
+<tr>
+<td valign="top" style="font-size:8pt;color:#9ca3af;line-height:1.8;">
+    <span style="color:#6b7280;font-weight:600;">Screened by:</span>&nbsp;{screened_by}&nbsp;&nbsp;
+    <span style="color:#6b7280;font-weight:600;">Generated:</span>&nbsp;{report_date}<br>
+    <i>This report is AI-assisted and does not replace the judgment of a licensed clinician.
+    All findings must be reviewed and confirmed by a qualified healthcare professional
+    before any clinical action is taken.</i>
+</td>
+<td valign="top" align="right">
+</td>
+</tr>
+</table>
 
-</div>
-</body>
-</html>"""
+</td></tr>
+</table>
+
+</body></html>"""
 
         doc.setHtml(html)
 
         writer = QPdfWriter(path)
+        writer.setResolution(150)
         try:
             writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
         except Exception:
