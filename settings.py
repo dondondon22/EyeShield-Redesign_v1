@@ -11,9 +11,15 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QPushButton,
     QComboBox,
+    QLineEdit,
+    QCheckBox,
     QMessageBox,
     QFrame,
+    QScrollArea,
 )
+
+import user_store
+from user_auth import get_user_profile
 
 DARK_STYLESHEET = """
     /* ---- Base ---- */
@@ -320,6 +326,19 @@ class SettingsPage(QWidget):
                 padding: 8px 10px;
                 min-height: 20px;
             }
+            QLineEdit {
+                background: #ffffff;
+                border: 1px solid #bfd0e0;
+                border-radius: 10px;
+                padding: 10px 12px;
+                min-height: 24px;
+            }
+            QLineEdit:hover {
+                border: 1px solid #90b4db;
+            }
+            QLineEdit:focus {
+                border: 1px solid #0b63ce;
+            }
             QComboBox:hover {
                 border: 1px solid #90b4db;
             }
@@ -361,10 +380,18 @@ class SettingsPage(QWidget):
             }
         """)
         _outer = QVBoxLayout(self)
-        _outer.setContentsMargins(18, 18, 18, 18)
-        _outer.setSpacing(14)
+        _outer.setContentsMargins(0, 0, 0, 0)
+        _outer.setSpacing(0)
 
-        layout = _outer
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+
+        content = QWidget()
+        self.scroll_area.setWidget(content)
+        _outer.addWidget(self.scroll_area)
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(14)
 
@@ -391,6 +418,53 @@ class SettingsPage(QWidget):
         pref_layout.addWidget(self.language_label)
         pref_layout.addWidget(self.lang_combo)
 
+        self.account_group = QGroupBox("My Account")
+        account_layout = QVBoxLayout(self.account_group)
+        account_layout.setSpacing(8)
+
+        self.display_name_label = QLabel("Display Name:")
+        self.display_name_label.setObjectName("fieldLabel")
+        self.display_name_input = QLineEdit()
+        self.display_name_input.setPlaceholderText("Display name")
+        account_layout.addWidget(self.display_name_label)
+        account_layout.addWidget(self.display_name_input)
+
+        self.dr_prefix_check = QCheckBox("Add Dr.")
+        self.dr_prefix_check.setStyleSheet("margin-top: -2px; margin-bottom: 4px;")
+        account_layout.addWidget(self.dr_prefix_check)
+
+        self.username_label = QLabel("Username:")
+        self.username_label.setObjectName("fieldLabel")
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Username")
+        account_layout.addWidget(self.username_label)
+        account_layout.addWidget(self.username_input)
+
+        self.new_password_label = QLabel("New Password (optional):")
+        self.new_password_label.setObjectName("fieldLabel")
+        self.new_password_input = QLineEdit()
+        self.new_password_input.setPlaceholderText("Leave blank to keep current password")
+        self.new_password_input.setEchoMode(QLineEdit.Password)
+        account_layout.addWidget(self.new_password_label)
+        account_layout.addWidget(self.new_password_input)
+
+        self.current_password_label = QLabel("Current Password (required):")
+        self.current_password_label.setObjectName("fieldLabel")
+        self.current_password_input = QLineEdit()
+        self.current_password_input.setPlaceholderText("Enter current password to confirm")
+        self.current_password_input.setEchoMode(QLineEdit.Password)
+        account_layout.addWidget(self.current_password_label)
+        account_layout.addWidget(self.current_password_input)
+
+        account_btn_row = QHBoxLayout()
+        account_btn_row.addStretch(1)
+        self.account_save_btn = QPushButton("Update Account")
+        self.account_save_btn.setObjectName("primaryAction")
+        self.account_save_btn.clicked.connect(self.update_account)
+        account_btn_row.addWidget(self.account_save_btn)
+        account_layout.addLayout(account_btn_row)
+
+        layout.addWidget(self.account_group)
         layout.addWidget(pref_group)
 
         # ── Action buttons (right after preferences) ──────────────────────
@@ -470,6 +544,7 @@ class SettingsPage(QWidget):
         self.load_settings()
         self.theme_combo.currentTextChanged.connect(self.apply_live_preview)
         self.lang_combo.currentTextChanged.connect(self.apply_live_preview)
+        self._configure_account_section()
 
         self.theme_combo.setFocus()
         self.setTabOrder(self.theme_combo, self.lang_combo)
@@ -477,6 +552,32 @@ class SettingsPage(QWidget):
         self.setTabOrder(self.reset_btn, self.save_btn)
 
         layout.addStretch()
+
+    def _active_role(self) -> str:
+        main_window = self.window()
+        role = getattr(main_window, "role", None) if main_window is not self else None
+        return str(role or os.environ.get("EYESHIELD_CURRENT_ROLE") or "").strip().lower()
+
+    def _active_username(self) -> str:
+        main_window = self.window()
+        username = getattr(main_window, "username", None) if main_window is not self else None
+        return str(username or os.environ.get("EYESHIELD_CURRENT_USER") or "").strip()
+
+    def _configure_account_section(self):
+        role = self._active_role()
+        show_account = role == "clinician"
+        self.account_group.setVisible(show_account)
+        if not show_account:
+            return
+
+        username = self._active_username()
+        profile = get_user_profile(username) or {}
+        display_name = str(profile.get("display_name") or username)
+        self.display_name_input.setText(display_name)
+        self.dr_prefix_check.setChecked(display_name.strip().lower().startswith("dr. "))
+        self.username_input.setText(str(profile.get("username") or username))
+        self.new_password_input.clear()
+        self.current_password_input.clear()
 
     def _language_pack(self, language: str) -> dict:
         from translations import get_pack
@@ -568,6 +669,62 @@ class SettingsPage(QWidget):
         except OSError as err:
             self.status_label.setText("Save failed")
             QMessageBox.warning(self, "Settings", f"Failed to save settings: {err}")
+
+    def update_account(self):
+        if self._active_role() != "clinician":
+            QMessageBox.warning(self, "Account", "Only clinicians can update this section.")
+            return
+
+        current_username = self._active_username()
+        new_display_name = self.display_name_input.text().strip()
+        new_username = self.username_input.text().strip()
+        new_password = self.new_password_input.text()
+        current_password = self.current_password_input.text()
+
+        if self.dr_prefix_check.isChecked() and new_display_name:
+            if not new_display_name.lower().startswith("dr. "):
+                new_display_name = f"Dr. {new_display_name}"
+
+        if not new_display_name:
+            QMessageBox.warning(self, "Account", "Display name cannot be empty.")
+            return
+        if not new_username:
+            QMessageBox.warning(self, "Account", "Username cannot be empty.")
+            return
+        if not current_password:
+            QMessageBox.warning(self, "Account", "Enter your current password to continue.")
+            return
+
+        ok, message, updated_username = user_store.update_own_account(
+            current_username=current_username,
+            current_password=current_password,
+            new_display_name=new_display_name,
+            new_username=new_username,
+            new_password=new_password,
+        )
+        if not ok:
+            QMessageBox.warning(self, "Account", message)
+            return
+
+        updated_username = str(updated_username or current_username)
+        os.environ["EYESHIELD_CURRENT_USER"] = updated_username
+        os.environ["EYESHIELD_CURRENT_NAME"] = new_display_name
+
+        main_window = self.window()
+        if main_window is not self:
+            if hasattr(main_window, "username"):
+                main_window.username = updated_username
+            if hasattr(main_window, "display_name"):
+                main_window.display_name = new_display_name
+            if hasattr(main_window, "user_info_label"):
+                display_title = getattr(main_window, "display_title", "")
+                main_window.user_info_label.setText(f"  {new_display_name}  •  {display_title}  ")
+
+        self.current_password_input.clear()
+        self.new_password_input.clear()
+        self.username_input.setText(updated_username)
+        self.status_label.setText("Account updated")
+        QMessageBox.information(self, "Account", message)
 
     def reset_defaults(self):
         defaults = self._default_settings()

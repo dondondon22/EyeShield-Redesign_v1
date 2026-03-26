@@ -757,6 +757,86 @@ class UserManager:
         return success
 
     @staticmethod
+    def update_own_account(
+        current_username: str,
+        current_password: str,
+        new_display_name: str,
+        new_username: Optional[str] = None,
+        new_password: Optional[str] = None,
+    ) -> tuple[bool, str, Optional[str]]:
+        """Allow a signed-in user to update own account details after password confirmation."""
+        current_username = str(current_username or "").strip()
+        current_password = str(current_password or "")
+        target_username = str(new_username or current_username).strip()
+        target_display_name = str(new_display_name or "").strip()
+        target_new_password = str(new_password or "").strip()
+
+        if not current_username or not current_password:
+            return False, "Current credentials are required.", None
+        if not target_display_name:
+            return False, "Display name cannot be empty.", None
+        if not UserManager._is_valid_username(target_username):
+            return False, "Username must be 3-32 chars and use only letters, numbers, _ . -", None
+
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT password_hash FROM users WHERE username = ?",
+            (current_username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return False, "Current user was not found.", None
+
+        if not PasswordManager.verify_password(current_password, row[0]):
+            conn.close()
+            return False, "Current password is incorrect.", None
+
+        if target_username != current_username:
+            cur.execute("SELECT 1 FROM users WHERE username = ?", (target_username,))
+            if cur.fetchone():
+                conn.close()
+                return False, "That username is already taken.", None
+
+        pw_hash_to_save = row[0]
+        if target_new_password:
+            if target_new_password.lower() == target_username.lower():
+                conn.close()
+                return False, "Username and password cannot be the same.", None
+            if not UserManager._is_valid_password(target_new_password):
+                conn.close()
+                return False, (
+                    "Password must be 12+ chars with uppercase, lowercase, number, and symbol."
+                ), None
+            pw_hash_to_save = PasswordManager.hash_password(target_new_password)
+
+        try:
+            cur.execute(
+                """
+                UPDATE users
+                SET username = ?, display_name = ?, password_hash = ?
+                WHERE username = ?
+                """,
+                (target_username, target_display_name, pw_hash_to_save, current_username),
+            )
+            conn.commit()
+            success = cur.rowcount > 0
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False, "That username is already taken.", None
+        except sqlite3.Error:
+            conn.close()
+            return False, "Unable to save account changes.", None
+
+        conn.close()
+        if not success:
+            return False, "No account changes were applied.", None
+
+        UserManager.add_activity_log(target_username, "Profile updated")
+        return True, "Account updated successfully.", target_username
+
+    @staticmethod
     def add_activity_log(username: str, action: str, action_time: Optional[str] = None) -> bool:
         username = str(username or "").strip()
         action = str(action or "").strip()
