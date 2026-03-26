@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QCheckBox,
     QMessageBox,
+    QInputDialog,
     QFrame,
     QScrollArea,
 )
@@ -448,14 +449,6 @@ class SettingsPage(QWidget):
         account_layout.addWidget(self.new_password_label)
         account_layout.addWidget(self.new_password_input)
 
-        self.current_password_label = QLabel("Current Password (required):")
-        self.current_password_label.setObjectName("fieldLabel")
-        self.current_password_input = QLineEdit()
-        self.current_password_input.setPlaceholderText("Enter current password to confirm")
-        self.current_password_input.setEchoMode(QLineEdit.Password)
-        account_layout.addWidget(self.current_password_label)
-        account_layout.addWidget(self.current_password_input)
-
         account_btn_row = QHBoxLayout()
         account_btn_row.addStretch(1)
         self.account_save_btn = QPushButton("Update Account")
@@ -577,7 +570,6 @@ class SettingsPage(QWidget):
         self.dr_prefix_check.setChecked(display_name.strip().lower().startswith("dr. "))
         self.username_input.setText(str(profile.get("username") or username))
         self.new_password_input.clear()
-        self.current_password_input.clear()
 
     def _language_pack(self, language: str) -> dict:
         from translations import get_pack
@@ -679,7 +671,16 @@ class SettingsPage(QWidget):
         new_display_name = self.display_name_input.text().strip()
         new_username = self.username_input.text().strip()
         new_password = self.new_password_input.text()
-        current_password = self.current_password_input.text()
+
+        current_password, confirmed = QInputDialog.getText(
+            self,
+            "Confirm Account Update",
+            "Enter your current password to continue:",
+            QLineEdit.Password,
+        )
+        if not confirmed:
+            return
+        current_password = str(current_password or "")
 
         if self.dr_prefix_check.isChecked() and new_display_name:
             if not new_display_name.lower().startswith("dr. "):
@@ -720,7 +721,6 @@ class SettingsPage(QWidget):
                 display_title = getattr(main_window, "display_title", "")
                 main_window.user_info_label.setText(f"  {new_display_name}  •  {display_title}  ")
 
-        self.current_password_input.clear()
         self.new_password_input.clear()
         self.username_input.setText(updated_username)
         self.status_label.setText("Account updated")
