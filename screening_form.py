@@ -176,7 +176,100 @@ class ModernCalendarDateEdit(QDateEdit):
         cal = QCalendarWidget(self)
         cal.setGridVisible(False)
         cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        cal.setMinimumSize(410, 320)
+        cal.currentPageChanged.connect(self._sync_year_dropdown)
         self.setCalendarWidget(cal)
+
+        # Build the custom year dropdown once the calendar nav is initialized.
+        QTimer.singleShot(0, self._setup_year_dropdown)
+
+    def _setup_year_dropdown(self):
+        cal = self.calendarWidget()
+        if not cal:
+            return
+
+        nav = cal.findChild(QWidget, "qt_calendar_navigationbar")
+        if not nav:
+            QTimer.singleShot(0, self._setup_year_dropdown)
+            return
+
+        year_spin = nav.findChild(QSpinBox, "qt_calendar_yearedit")
+        if not year_spin:
+            return
+
+        year_combo = nav.findChild(QComboBox, "qt_calendar_yearcombo")
+        if year_combo is None:
+            year_combo = QComboBox(nav)
+            year_combo.setObjectName("qt_calendar_yearcombo")
+            year_combo.setMinimumWidth(92)
+            year_combo.setMaxVisibleItems(12)
+            year_combo.setEditable(False)
+            year_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+
+            for year in range(self._min_date.year(), self._max_date.year() + 1):
+                year_combo.addItem(str(year), year)
+
+            year_combo.currentIndexChanged.connect(self._on_year_dropdown_changed)
+
+            nav_layout = nav.layout()
+            if nav_layout is not None:
+                idx = nav_layout.indexOf(year_spin)
+                if idx >= 0:
+                    nav_layout.insertWidget(idx, year_combo)
+                else:
+                    nav_layout.addWidget(year_combo)
+
+        # Hide spinbox so year changes are done from dropdown.
+        year_spin.hide()
+        year_spin.setEnabled(False)
+
+        # Hide the default year text button so only the dropdown is visible.
+        year_button = nav.findChild(QWidget, "qt_calendar_yearbutton")
+        if year_button is not None:
+            year_button.hide()
+            year_button.setEnabled(False)
+        self._sync_year_dropdown()
+
+    def _sync_year_dropdown(self, year: int | None = None, _month: int | None = None):
+        cal = self.calendarWidget()
+        if not cal:
+            return
+
+        if year is None:
+            year = cal.yearShown()
+
+        nav = cal.findChild(QWidget, "qt_calendar_navigationbar")
+        if not nav:
+            return
+
+        year_combo = nav.findChild(QComboBox, "qt_calendar_yearcombo")
+        if not year_combo:
+            return
+
+        idx = year_combo.findData(int(year))
+        if idx >= 0 and year_combo.currentIndex() != idx:
+            prev_state = year_combo.blockSignals(True)
+            year_combo.setCurrentIndex(idx)
+            year_combo.blockSignals(prev_state)
+
+    def _on_year_dropdown_changed(self, index: int):
+        cal = self.calendarWidget()
+        if not cal or index < 0:
+            return
+
+        nav = cal.findChild(QWidget, "qt_calendar_navigationbar")
+        if not nav:
+            return
+
+        year_combo = nav.findChild(QComboBox, "qt_calendar_yearcombo")
+        if not year_combo:
+            return
+
+        year = year_combo.itemData(index)
+        if year is None:
+            return
+
+        cal.setCurrentPage(int(year), cal.monthShown())
 
     def apply_theme(self, dark: bool):
         if dark:
@@ -213,15 +306,16 @@ class ModernCalendarDateEdit(QDateEdit):
             }}
             QDateEdit::drop-down {{
                 subcontrol-origin: padding;
-                subcontrol-position: center right;
-                width: 32px;
-                border: none;
-                background: transparent;
+                subcontrol-position: top right;
+                width: 24px;
+                border-left: 1px solid {border};
+                background: {d_bg};
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
             }}
             QDateEdit::down-arrow {{
-                image: url("{arrow}");
-                width: 13px;
-                height: 9px;
+                width: 10px;
+                height: 10px;
             }}
         """)
 
@@ -303,6 +397,30 @@ class ModernCalendarDateEdit(QDateEdit):
                 border-radius: 5px;
                 padding: 2px 6px;
             }}
+            QCalendarWidget QComboBox#qt_calendar_yearcombo {{
+                background: {c_bg};
+                color: {c_text};
+                border: 1px solid {c_border};
+                border-radius: 5px;
+                padding: 2px 20px 2px 8px;
+                min-width: 76px;
+            }}
+            QCalendarWidget QComboBox#qt_calendar_yearcombo::drop-down {{
+                border: none;
+                width: 18px;
+            }}
+            QCalendarWidget QComboBox#qt_calendar_yearcombo::down-arrow {{
+                image: url("{arrow}");
+                width: 9px;
+                height: 6px;
+            }}
+            QCalendarWidget QComboBox#qt_calendar_yearcombo QAbstractItemView {{
+                background: {menu_bg};
+                color: {c_text};
+                border: 1px solid {c_border};
+                selection-background-color: {sel_bg};
+                selection-color: {sel_fg};
+            }}
 
             /* ── Day grid ── */
             QCalendarWidget QAbstractItemView {{
@@ -318,8 +436,10 @@ class ModernCalendarDateEdit(QDateEdit):
             }}
             QCalendarWidget QTableView {{
                 alternate-background-color: {c_bg};
+                border: none;
             }}
             QCalendarWidget QTableView::item {{
+                border: none;
                 border-radius: 5px;
                 padding: 3px;
                 margin: 1px;
@@ -336,7 +456,10 @@ class ModernCalendarDateEdit(QDateEdit):
                 color: #9aa5b1;
             }}
             QCalendarWidget QTableView::item:today {{
-                border: 1.5px solid {today};
+                border: none;
+                background: {d_bg};
+                color: {c_text};
+                font-weight: 600;
                 border-radius: 5px;
             }}
 
@@ -345,6 +468,8 @@ class ModernCalendarDateEdit(QDateEdit):
                 alternate-background-color: {c_bg};
             }}
         """)
+
+        self._setup_year_dropdown()
 
 
 _REDESIGN_STYLESHEET = """
@@ -364,20 +489,15 @@ QDateEdit {
 QDateEdit::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width:28px;
-    border-left:1px solid #9fb4cc;
-    background:#e8f1ff;
+    width:24px;
+    border-left:1px solid #d3dae3;
+    background:#f6f8fb;
     border-top-right-radius:6px;
     border-bottom-right-radius:6px;
 }
 QDateEdit::down-arrow {
-    image:none;
-    width:0;
-    height:0;
-    border-left:5px solid transparent;
-    border-right:5px solid transparent;
-    border-top:7px solid #3f7ca7;
-    margin-right:7px;
+    width:10px;
+    height:10px;
 }
 QComboBox::drop-down {
     subcontrol-origin: padding;
@@ -389,21 +509,6 @@ QComboBox::drop-down {
     border-bottom-right-radius:6px;
 }
 QComboBox::down-arrow { width:10px; height:10px; }
-QComboBox#sexDropdown, QComboBox#eyeDropdown, QComboBox#diabetesTypeDropdown {
-    padding-right: 34px;
-}
-QComboBox#sexDropdown::drop-down, QComboBox#eyeDropdown::drop-down, QComboBox#diabetesTypeDropdown::drop-down {
-    width: 28px;
-    border-left: 1px solid #9fb4cc;
-    background: #e8f1ff;
-    border-top-right-radius: 6px;
-    border-bottom-right-radius: 6px;
-}
-QComboBox#sexDropdown::down-arrow, QComboBox#eyeDropdown::down-arrow, QComboBox#diabetesTypeDropdown::down-arrow {
-    width: 12px;
-    height: 12px;
-    margin-right: 6px;
-}
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width:18px; border:none; background:transparent; }
 QScrollArea { border:none; background:transparent; }
 QScrollBar:vertical { background:#f2f5f8; width:6px; border-radius:3px; }

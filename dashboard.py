@@ -1276,27 +1276,27 @@ class EyeShieldApp(QMainWindow):
 
         # Theme palette
         if dark:
-            bg_page = "#0f1720"
-            card_bg = "#17212b"
-            card_border = "#2a3948"
-            text_primary = "#e8eef5"
-            text_secondary = "#b8c7d9"
-            text_muted = "#7f93a8"
-            accent_blue = "#5aa9ff"
+            bg_page = "#0b1321"
+            card_bg = "#152235"
+            card_border = "transparent"
+            text_primary = "#e6edf7"
+            text_secondary = "#b7c6da"
+            text_muted = "#8799b1"
+            accent_blue = "#6db6ff"
             sev_green = "#4dd4ac"
-            hero_grad_start = "#182738"
-            hero_grad_end = "#111e2d"
+            hero_grad_start = "#1a2c43"
+            hero_grad_end = "#102036"
         else:
-            bg_page = "#f3f7fb"
-            card_bg = "white"
-            card_border = "#dbe4f0"
-            text_primary = "#102a43"
-            text_secondary = "#486581"
-            text_muted = "#7b8794"
-            accent_blue = "#0f6cbd"
+            bg_page = "#eef4fb"
+            card_bg = "#ffffff"
+            card_border = "transparent"
+            text_primary = "#11283f"
+            text_secondary = "#3f5f80"
+            text_muted = "#6e829a"
+            accent_blue = "#0e6fcd"
             sev_green = "#2d9d78"
-            hero_grad_start = "#eef6ff"
-            hero_grad_end = "#e4f0ff"
+            hero_grad_start = "#f2f7ff"
+            hero_grad_end = "#e5f1ff"
 
         severity_colors = {
             "No DR": sev_green,
@@ -1332,8 +1332,8 @@ class EyeShieldApp(QMainWindow):
             hero_card.setStyleSheet(
                 "QWidget#heroCard {"
                 f" background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {hero_grad_start}, stop:1 {hero_grad_end});"
-                f" border: 1px solid {card_border};"
-                " border-radius: 14px;"
+                " border: none;"
+                " border-radius: 16px;"
                 "}"
             )
 
@@ -1351,14 +1351,14 @@ class EyeShieldApp(QMainWindow):
             self.dashboard_date_label.setText(today)
             self.dashboard_date_label.setStyleSheet(
                 f"color: {accent_blue}; font-size: 13px; font-weight: 700;"
-                f"border: 1px solid {accent_blue}; border-radius: 12px;"
-                "padding: 6px 12px; background: transparent;"
+                "border: none; border-radius: 0px;"
+                "padding: 0px; background: transparent;"
             )
         if hasattr(self, "welcome_role_label"):
             self.welcome_role_label.setStyleSheet(
                 f"color: {text_secondary}; font-size: 12px; font-weight: 700;"
-                f"border: 1px solid {card_border}; border-radius: 10px;"
-                "padding: 2px 10px; background: transparent;"
+                "border: none; border-radius: 0px;"
+                "padding: 0px; background: transparent;"
             )
 
         # KPI cards
@@ -1372,8 +1372,8 @@ class EyeShieldApp(QMainWindow):
             if card:
                 card.setStyleSheet(
                     f"QWidget#{obj_name} {{ background: {card_bg};"
-                    f"  border: 1px solid {card_border}; border-left: 4px solid {accent};"
-                    f"  border-radius: 10px; }}"
+                    f"  border: none; border-top: 3px solid {accent};"
+                    f"  border-radius: 12px; }}"
                 )
             title_w = self.findChild(QLabel, f"{obj_name}_title")
             if title_w:
@@ -1406,7 +1406,7 @@ class EyeShieldApp(QMainWindow):
         if availability_card:
             availability_card.setStyleSheet(
                 f"QWidget#availabilityCard {{ background: {card_bg};"
-                f"  border: 1px solid {card_border}; border-radius: 10px; }}"
+                "  border: none; border-radius: 12px; }}"
             )
         if hasattr(self, "_dash_availability_title_lbl"):
             self._dash_availability_title_lbl.setStyleSheet(
@@ -1442,7 +1442,7 @@ class EyeShieldApp(QMainWindow):
         severity_card = self.findChild(QWidget, "severityCard")
         if severity_card:
             severity_card.setStyleSheet(
-                "QWidget#severityCard { background: transparent; border: none; }"
+                f"QWidget#severityCard {{ background: {card_bg}; border: none; border-radius: 12px; }}"
             )
         if hasattr(self, "_dash_severity_title_lbl"):
             self._dash_severity_title_lbl.setStyleSheet(
@@ -1470,7 +1470,7 @@ class EyeShieldApp(QMainWindow):
                 bar.setValue(count)
                 bar.setStyleSheet(
                     f"QProgressBar {{"
-                    f" background: {'#eef2f6' if not dark else '#243241'};"
+                    f" background: {'#e8eef5' if not dark else '#22344a'};"
                     f" border: 0; border-radius: 6px;"
                     f" }}"
                     f"QProgressBar::chunk {{"
@@ -1487,7 +1487,7 @@ class EyeShieldApp(QMainWindow):
         recent_card = self.findChild(QWidget, "recentCard")
         if recent_card:
             recent_card.setStyleSheet(
-                "QWidget#recentCard { background: transparent; border: none; }"
+                f"QWidget#recentCard {{ background: {card_bg}; border: none; border-radius: 12px; }}"
             )
         if hasattr(self, "_dash_recent_title_lbl"):
             self._dash_recent_title_lbl.setStyleSheet(
@@ -1550,8 +1550,15 @@ class EyeShieldApp(QMainWindow):
                     result = self._normalize_severity_label(row_data[2]) or "Pending"
                     
                     item_w = QWidget()
+                    item_w.setStyleSheet(
+                        "QWidget {"
+                        "background: transparent;"
+                        "border: none;"
+                        "border-radius: 0px;"
+                        "}"
+                    )
                     item_v = QVBoxLayout(item_w)
-                    item_v.setContentsMargins(0, 4, 0, 4)
+                    item_v.setContentsMargins(10, 8, 10, 8)
                     item_v.setSpacing(4)
                     
                     name_lbl = QLabel(name)
@@ -1582,11 +1589,6 @@ class EyeShieldApp(QMainWindow):
                     item_v.addLayout(sub_row)
                     
                     self.recent_list_layout.addWidget(item_w)
-                    
-                    line = QWidget()
-                    line.setFixedHeight(1)
-                    line.setStyleSheet(f"background: {card_border};")
-                    self.recent_list_layout.addWidget(line)
 
 
     @staticmethod
