@@ -12,10 +12,11 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QStackedWidget, QGroupBox, QMessageBox, QProgressBar, QSizePolicy
+    QStackedWidget, QGroupBox, QMessageBox, QProgressBar, QSizePolicy,
+    QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QSize, QByteArray
-from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor
+from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication
 from PySide6.QtSvg import QSvgRenderer
 
 from screening import ScreeningPage
@@ -52,8 +53,15 @@ class EyeShieldApp(QMainWindow):
         self._current_language = "English"
 
         self.setWindowTitle("EyeShield – DR Screening")
-        self.setMinimumSize(1100, 700)
-        self.resize(1400, 860)
+        self.setMinimumSize(900, 560)
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            target_width = min(1400, max(1024, int(available.width() * 0.95)))
+            target_height = min(860, max(620, int(available.height() * 0.92)))
+            self.resize(target_width, target_height)
+        else:
+            self.resize(1280, 720)
 
         # Set app icon
         _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", "eyeshield_icon.svg")
@@ -962,7 +970,19 @@ class EyeShieldApp(QMainWindow):
         page = QWidget()
         page.setObjectName("dashboardPage")
         page.setStyleSheet("QWidget#dashboardPage { background: #f8f9fa; }")
-        layout = QVBoxLayout(page)
+        outer_layout = QVBoxLayout(page)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer_layout.addWidget(scroll)
+
+        content = QWidget()
+        scroll.setWidget(content)
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
 

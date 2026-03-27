@@ -14,10 +14,11 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QCheckBox,
     QMessageBox,
-    QInputDialog,
     QFrame,
     QScrollArea,
+    QDialog,
 )
+from PySide6.QtGui import QAction, QIcon
 
 import user_store
 from user_auth import get_user_profile
@@ -281,8 +282,27 @@ DARK_STYLESHEET = """
 """
 
 
+def _add_eye_toggle(field: QLineEdit):
+    """Attach a show/hide password toggle icon to a QLineEdit."""
+    icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+    show_icon = QIcon(os.path.join(icon_dir, "eye_open.svg"))
+    hide_icon = QIcon(os.path.join(icon_dir, "eye_closed.svg"))
+
+    action = QAction(show_icon, "", field)
+    action.setCheckable(True)
+    action.setToolTip("Show / hide password")
+
+    def _toggle(visible: bool):
+        action.setIcon(hide_icon if visible else show_icon)
+        field.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
+
+    action.toggled.connect(_toggle)
+    field.addAction(action, QLineEdit.TrailingPosition)
+
+
 class SettingsPage(QWidget):
     SETTINGS_FILE = "settings_data.json"
+    CONFIG_FILE = "config.json"
 
     def __init__(self):
         super().__init__()
@@ -419,6 +439,38 @@ class SettingsPage(QWidget):
         pref_layout.addWidget(self.language_label)
         pref_layout.addWidget(self.lang_combo)
 
+        self.admin_contact_group = QGroupBox("Admin Contact (Login Page)")
+        admin_contact_layout = QVBoxLayout(self.admin_contact_group)
+        admin_contact_layout.setSpacing(8)
+
+        self.admin_contact_name_label = QLabel("Admin Name:")
+        self.admin_contact_name_label.setObjectName("fieldLabel")
+        self.admin_contact_name_input = QLineEdit()
+        self.admin_contact_name_input.setPlaceholderText("Name shown in Contact Admin")
+        admin_contact_layout.addWidget(self.admin_contact_name_label)
+        admin_contact_layout.addWidget(self.admin_contact_name_input)
+
+        self.admin_contact_email_label = QLabel("Admin Email:")
+        self.admin_contact_email_label.setObjectName("fieldLabel")
+        self.admin_contact_email_input = QLineEdit()
+        self.admin_contact_email_input.setPlaceholderText("admin@example.com")
+        admin_contact_layout.addWidget(self.admin_contact_email_label)
+        admin_contact_layout.addWidget(self.admin_contact_email_input)
+
+        self.admin_contact_phone_label = QLabel("Admin Phone:")
+        self.admin_contact_phone_label.setObjectName("fieldLabel")
+        self.admin_contact_phone_input = QLineEdit()
+        self.admin_contact_phone_input.setPlaceholderText("+63 900 000 0000")
+        admin_contact_layout.addWidget(self.admin_contact_phone_label)
+        admin_contact_layout.addWidget(self.admin_contact_phone_input)
+
+        self.admin_contact_location_label = QLabel("Admin Location:")
+        self.admin_contact_location_label.setObjectName("fieldLabel")
+        self.admin_contact_location_input = QLineEdit()
+        self.admin_contact_location_input.setPlaceholderText("Office / Department")
+        admin_contact_layout.addWidget(self.admin_contact_location_label)
+        admin_contact_layout.addWidget(self.admin_contact_location_input)
+
         self.account_group = QGroupBox("My Account")
         account_layout = QVBoxLayout(self.account_group)
         account_layout.setSpacing(8)
@@ -446,6 +498,7 @@ class SettingsPage(QWidget):
         self.new_password_input = QLineEdit()
         self.new_password_input.setPlaceholderText("Leave blank to keep current password")
         self.new_password_input.setEchoMode(QLineEdit.Password)
+        _add_eye_toggle(self.new_password_input)
         account_layout.addWidget(self.new_password_label)
         account_layout.addWidget(self.new_password_input)
 
@@ -459,6 +512,7 @@ class SettingsPage(QWidget):
 
         layout.addWidget(self.account_group)
         layout.addWidget(pref_group)
+        layout.addWidget(self.admin_contact_group)
 
         # ── Action buttons (right after preferences) ──────────────────────
         button_row = QHBoxLayout()
@@ -538,6 +592,7 @@ class SettingsPage(QWidget):
         self.theme_combo.currentTextChanged.connect(self.apply_live_preview)
         self.lang_combo.currentTextChanged.connect(self.apply_live_preview)
         self._configure_account_section()
+        self._configure_admin_contact_section()
 
         self.theme_combo.setFocus()
         self.setTabOrder(self.theme_combo, self.lang_combo)
@@ -570,6 +625,13 @@ class SettingsPage(QWidget):
         self.dr_prefix_check.setChecked(display_name.strip().lower().startswith("dr. "))
         self.username_input.setText(str(profile.get("username") or username))
         self.new_password_input.clear()
+
+    def _configure_admin_contact_section(self):
+        show_admin_contact = self._active_role() == "admin"
+        self.admin_contact_group.setVisible(show_admin_contact)
+        if not show_admin_contact:
+            return
+        self._load_admin_contact_into_fields()
 
     def _language_pack(self, language: str) -> dict:
         from translations import get_pack
@@ -622,11 +684,116 @@ class SettingsPage(QWidget):
     def _settings_path(self) -> str:
         return os.path.join(os.path.dirname(__file__), self.SETTINGS_FILE)
 
+    def _config_path(self) -> str:
+        return os.path.join(os.path.dirname(__file__), self.CONFIG_FILE)
+
     def _default_settings(self) -> dict:
         return {
             "theme": "Light",
             "language": "English",
         }
+
+    @staticmethod
+    def _default_admin_contact() -> dict:
+        return {
+            "name": "",
+            "email": "",
+            "phone": "",
+            "location": "",
+        }
+
+    def _load_admin_contact_data(self) -> dict:
+        data = self._default_admin_contact()
+        path = self._config_path()
+        if not os.path.exists(path):
+            return data
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                loaded = json.load(file)
+            if isinstance(loaded, dict):
+                contact = loaded.get("admin_contact")
+                if isinstance(contact, dict):
+                    for key in data:
+                        data[key] = str(contact.get(key, "") or "").strip()
+        except (OSError, json.JSONDecodeError):
+            pass
+        return data
+
+    def _load_admin_contact_into_fields(self):
+        contact = self._load_admin_contact_data()
+        self.admin_contact_name_input.setText(contact["name"])
+        self.admin_contact_email_input.setText(contact["email"])
+        self.admin_contact_phone_input.setText(contact["phone"])
+        self.admin_contact_location_input.setText(contact["location"])
+
+    def _save_admin_contact_data(self) -> tuple[bool, str]:
+        path = self._config_path()
+        config = {}
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as file:
+                    loaded = json.load(file)
+                if isinstance(loaded, dict):
+                    config = loaded
+            except (OSError, json.JSONDecodeError):
+                config = {}
+        config["admin_contact"] = {
+            "name": self.admin_contact_name_input.text().strip(),
+            "email": self.admin_contact_email_input.text().strip(),
+            "phone": self.admin_contact_phone_input.text().strip(),
+            "location": self.admin_contact_location_input.text().strip(),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as file:
+                json.dump(config, file, indent=2)
+            return True, ""
+        except OSError as err:
+            return False, str(err)
+
+    def _current_admin_contact_values(self) -> dict:
+        return {
+            "name": self.admin_contact_name_input.text().strip(),
+            "email": self.admin_contact_email_input.text().strip(),
+            "phone": self.admin_contact_phone_input.text().strip(),
+            "location": self.admin_contact_location_input.text().strip(),
+        }
+
+    def _prompt_current_password(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Confirm Account Update")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(360)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        label = QLabel("Enter your current password to continue:")
+        password_input = QLineEdit()
+        password_input.setEchoMode(QLineEdit.Password)
+        password_input.setPlaceholderText("Current password")
+        _add_eye_toggle(password_input)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        cancel_btn = QPushButton("Cancel")
+        ok_btn = QPushButton("Confirm")
+        ok_btn.setObjectName("primaryAction")
+        ok_btn.setDefault(True)
+
+        cancel_btn.clicked.connect(dialog.reject)
+        ok_btn.clicked.connect(dialog.accept)
+        password_input.returnPressed.connect(dialog.accept)
+
+        button_row.addWidget(cancel_btn)
+        button_row.addWidget(ok_btn)
+
+        layout.addWidget(label)
+        layout.addWidget(password_input)
+        layout.addLayout(button_row)
+
+        confirmed = dialog.exec() == QDialog.DialogCode.Accepted
+        return password_input.text(), confirmed
 
     def load_settings(self):
         settings = self._default_settings()
@@ -645,10 +812,29 @@ class SettingsPage(QWidget):
         if saved_language not in {self.lang_combo.itemText(i) for i in range(self.lang_combo.count())}:
             saved_language = "English"
         self.lang_combo.setCurrentText(saved_language)
+        if self._active_role() == "admin":
+            self._load_admin_contact_into_fields()
         self.apply_live_preview()
         self.status_label.setText("Settings loaded")
 
     def save_settings(self):
+        admin_contact_changed = False
+        if self._active_role() == "admin":
+            existing_contact = self._load_admin_contact_data()
+            pending_contact = self._current_admin_contact_values()
+            admin_contact_changed = pending_contact != existing_contact
+            if admin_contact_changed:
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm Admin Contact Update",
+                    "Apply updated Contact Admin details to the login page?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    self.status_label.setText("Save cancelled")
+                    return
+
         settings = {
             "theme": self.theme_combo.currentText(),
             "language": self.lang_combo.currentText(),
@@ -656,8 +842,20 @@ class SettingsPage(QWidget):
         try:
             with open(self._settings_path(), "w", encoding="utf-8") as file:
                 json.dump(settings, file, indent=2)
+            if self._active_role() == "admin":
+                ok, error_message = self._save_admin_contact_data()
+                if not ok:
+                    self.status_label.setText("Save failed")
+                    QMessageBox.warning(self, "Settings", f"Failed to save admin contact: {error_message}")
+                    return
             timestamp = datetime.now().strftime("%I:%M %p").lstrip("0")
             self.status_label.setText(f"Saved locally at {timestamp}")
+            if admin_contact_changed:
+                QMessageBox.information(
+                    self,
+                    "Settings Updated",
+                    "Contact Admin information was updated successfully.",
+                )
         except OSError as err:
             self.status_label.setText("Save failed")
             QMessageBox.warning(self, "Settings", f"Failed to save settings: {err}")
@@ -672,12 +870,7 @@ class SettingsPage(QWidget):
         new_username = self.username_input.text().strip()
         new_password = self.new_password_input.text()
 
-        current_password, confirmed = QInputDialog.getText(
-            self,
-            "Confirm Account Update",
-            "Enter your current password to continue:",
-            QLineEdit.Password,
-        )
+        current_password, confirmed = self._prompt_current_password()
         if not confirmed:
             return
         current_password = str(current_password or "")
@@ -742,4 +935,10 @@ class SettingsPage(QWidget):
         defaults = self._default_settings()
         self.theme_combo.setCurrentText(defaults["theme"])
         self.lang_combo.setCurrentText(defaults["language"])
+        if self._active_role() == "admin":
+            admin_defaults = self._default_admin_contact()
+            self.admin_contact_name_input.setText(admin_defaults["name"])
+            self.admin_contact_email_input.setText(admin_defaults["email"])
+            self.admin_contact_phone_input.setText(admin_defaults["phone"])
+            self.admin_contact_location_input.setText(admin_defaults["location"])
         self.status_label.setText("Defaults restored (not yet saved)")
