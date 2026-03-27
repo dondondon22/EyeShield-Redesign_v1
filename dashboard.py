@@ -4,6 +4,7 @@ Contains main application window and dashboard functionality.
 """
 
 import contextlib
+import json
 import os
 import random
 import re
@@ -26,6 +27,7 @@ from settings import SettingsPage, DARK_STYLESHEET
 from help_support import HelpSupportPage
 from camera import CameraPage
 from auth import DB_FILE
+from user_auth import get_user_profile
 
 
 class EyeShieldApp(QMainWindow):
@@ -1230,6 +1232,33 @@ class EyeShieldApp(QMainWindow):
 
         sidebar_v.addWidget(actions_card)
 
+        # My Availability
+        availability_card = QWidget()
+        availability_card.setObjectName("availabilityCard")
+        availability_v = QVBoxLayout(availability_card)
+        availability_v.setContentsMargins(16, 12, 16, 12)
+        availability_v.setSpacing(8)
+
+        self._dash_availability_title_lbl = QLabel("MY AVAILABILITY")
+        availability_v.addWidget(self._dash_availability_title_lbl)
+
+        self._dash_availability_hint_lbl = QLabel("Your saved weekly clinic schedule")
+        availability_v.addWidget(self._dash_availability_hint_lbl)
+
+        self.availability_days_label = QLabel("Days: Not set")
+        self.availability_days_label.setWordWrap(True)
+        availability_v.addWidget(self.availability_days_label)
+
+        self.availability_time_label = QLabel("Hours: Not set")
+        self.availability_time_label.setWordWrap(True)
+        availability_v.addWidget(self.availability_time_label)
+
+        self.availability_updated_label = QLabel("Update this from Users > Edit Availability")
+        self.availability_updated_label.setWordWrap(True)
+        availability_v.addWidget(self.availability_updated_label)
+
+        sidebar_v.addWidget(availability_card)
+
         # Recent Screenings
         recent_card = QWidget()
         recent_card.setObjectName("recentCard")
@@ -1395,6 +1424,43 @@ class EyeShieldApp(QMainWindow):
         style_kpi("kpiAbnormal", "#f59e0b", self.abnormal_cases_value, str(abnormal_count))
 
         style_kpi("kpiHighRisk", "#dc3545", self.high_risk_cases_value, str(high_risk_count))
+
+        # My availability card
+        availability_card = self.findChild(QWidget, "availabilityCard")
+        if availability_card:
+            availability_card.setStyleSheet(
+                f"QWidget#availabilityCard {{ background: {card_bg};"
+                f"  border: 1px solid {card_border}; border-radius: 12px; }}"
+            )
+        if hasattr(self, "_dash_availability_title_lbl"):
+            self._dash_availability_title_lbl.setStyleSheet(
+                f"color: {text_secondary}; font-size: 10px; font-weight: 700;"
+                "letter-spacing: 0.9px; text-transform: uppercase; background: transparent;"
+            )
+        if hasattr(self, "_dash_availability_hint_lbl"):
+            self._dash_availability_hint_lbl.setStyleSheet(
+                f"color: {text_muted}; font-size: 12px; font-weight: 500; background: transparent;"
+            )
+        if hasattr(self, "availability_days_label"):
+            self.availability_days_label.setStyleSheet(
+                f"font-size: 13px; font-weight: 700; color: {text_primary}; background: transparent;"
+            )
+        if hasattr(self, "availability_time_label"):
+            self.availability_time_label.setStyleSheet(
+                f"font-size: 13px; font-weight: 700; color: {text_primary}; background: transparent;"
+            )
+        if hasattr(self, "availability_updated_label"):
+            self.availability_updated_label.setStyleSheet(
+                f"font-size: 11px; color: {text_muted}; font-weight: 600; background: transparent;"
+            )
+
+        availability_days_text, availability_time_text, availability_updated_text = self._get_dashboard_availability_text()
+        if hasattr(self, "availability_days_label"):
+            self.availability_days_label.setText(f"Days: {availability_days_text}")
+        if hasattr(self, "availability_time_label"):
+            self.availability_time_label.setText(f"Hours: {availability_time_text}")
+        if hasattr(self, "availability_updated_label"):
+            self.availability_updated_label.setText(availability_updated_text)
 
         # Severity chart card
         severity_card = self.findChild(QWidget, "severityCard")
@@ -1604,6 +1670,67 @@ class EyeShieldApp(QMainWindow):
             return float(numeric)
         except ValueError:
             return None
+
+    def _get_dashboard_availability_text(self):
+        profile = get_user_profile(self.username) or {}
+        raw_availability = profile.get("availability_json")
+        if not raw_availability:
+            return "Not set", "Not set", "Update this from Users > Edit Availability"
+
+        try:
+            payload = json.loads(raw_availability) if isinstance(raw_availability, str) else raw_availability
+        except Exception:
+            payload = {}
+
+        if not isinstance(payload, dict):
+            return "Not set", "Not set", "Update this from Users > Edit Availability"
+
+        start_time = str(payload.get("start_time") or "").strip()
+        end_time = str(payload.get("end_time") or "").strip()
+        time_text = "Not set"
+        if start_time and end_time:
+            formatted_start = self._format_availability_time(start_time)
+            formatted_end = self._format_availability_time(end_time)
+            time_text = f"{formatted_start} - {formatted_end}"
+
+        selected_days = payload.get("days") or []
+        weekday_order = [
+            ("mon", "Mon"),
+            ("tue", "Tue"),
+            ("wed", "Wed"),
+            ("thu", "Thu"),
+            ("fri", "Fri"),
+            ("sat", "Sat"),
+            ("sun", "Sun"),
+        ]
+        day_text = "Not set"
+        if isinstance(selected_days, list) and selected_days:
+            selected_set = {str(value).strip().lower() for value in selected_days}
+            ordered_days = [label for key, label in weekday_order if key in selected_set]
+            if ordered_days:
+                day_text = ", ".join(ordered_days)
+
+        updated_at = str(payload.get("updated_at") or "").strip()
+        updated_text = "Update this from Users > Edit Availability"
+        if updated_at:
+            with contextlib.suppress(Exception):
+                parsed_updated_at = datetime.fromisoformat(updated_at)
+                updated_text = f"Last updated: {parsed_updated_at.strftime('%b %d, %Y %I:%M %p')}"
+
+        return day_text, time_text, updated_text
+
+    @staticmethod
+    def _format_availability_time(value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        for candidate, fmt in (
+            (text.upper(), "%I:%M %p"),
+            (text, "%H:%M"),
+        ):
+            with contextlib.suppress(ValueError):
+                return datetime.strptime(candidate, fmt).strftime("%I:%M %p").lstrip("0")
+        return text
 
     @staticmethod
     def get_nav_button_style(icon_only=False):

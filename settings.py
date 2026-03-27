@@ -17,11 +17,23 @@ from PySide6.QtWidgets import (
     QFrame,
     QScrollArea,
     QDialog,
+    QTimeEdit,
 )
 from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import QTime
 
 import user_store
 from user_auth import get_user_profile
+
+_WEEKDAY_OPTIONS = [
+    ("mon", "Monday"),
+    ("tue", "Tuesday"),
+    ("wed", "Wednesday"),
+    ("thu", "Thursday"),
+    ("fri", "Friday"),
+    ("sat", "Saturday"),
+    ("sun", "Sunday"),
+]
 
 DARK_STYLESHEET = """
     /* ---- Base ---- */
@@ -510,7 +522,56 @@ class SettingsPage(QWidget):
         account_btn_row.addWidget(self.account_save_btn)
         account_layout.addLayout(account_btn_row)
 
+        self.schedule_group = QGroupBox("My Schedule")
+        schedule_layout = QVBoxLayout(self.schedule_group)
+        schedule_layout.setSpacing(8)
+
+        self.schedule_hint_label = QLabel("Set your weekly clinic availability shown on your dashboard.")
+        self.schedule_hint_label.setObjectName("metaLabel")
+        self.schedule_hint_label.setWordWrap(True)
+        schedule_layout.addWidget(self.schedule_hint_label)
+
+        schedule_time_row = QHBoxLayout()
+        schedule_time_row.setSpacing(8)
+        self.schedule_start_label = QLabel("From:")
+        self.schedule_start_label.setObjectName("fieldLabel")
+        self.schedule_start_time = QTimeEdit()
+        self.schedule_start_time.setDisplayFormat("hh:mm AP")
+        self.schedule_start_time.setTime(QTime(9, 0))
+        self.schedule_end_label = QLabel("To:")
+        self.schedule_end_label.setObjectName("fieldLabel")
+        self.schedule_end_time = QTimeEdit()
+        self.schedule_end_time.setDisplayFormat("hh:mm AP")
+        self.schedule_end_time.setTime(QTime(17, 0))
+        schedule_time_row.addWidget(self.schedule_start_label)
+        schedule_time_row.addWidget(self.schedule_start_time)
+        schedule_time_row.addSpacing(12)
+        schedule_time_row.addWidget(self.schedule_end_label)
+        schedule_time_row.addWidget(self.schedule_end_time)
+        schedule_time_row.addStretch(1)
+        schedule_layout.addLayout(schedule_time_row)
+
+        self.schedule_days_label = QLabel("Available Days:")
+        self.schedule_days_label.setObjectName("fieldLabel")
+        schedule_layout.addWidget(self.schedule_days_label)
+
+        self.schedule_day_checks = []
+        for idx, (day_key, day_label) in enumerate(_WEEKDAY_OPTIONS):
+            checkbox = QCheckBox(day_label)
+            checkbox.setChecked(idx < 5)
+            self.schedule_day_checks.append((day_key, checkbox))
+            schedule_layout.addWidget(checkbox)
+
+        schedule_btn_row = QHBoxLayout()
+        schedule_btn_row.addStretch(1)
+        self.schedule_save_btn = QPushButton("Update Schedule")
+        self.schedule_save_btn.setObjectName("primaryAction")
+        self.schedule_save_btn.clicked.connect(self.update_schedule)
+        schedule_btn_row.addWidget(self.schedule_save_btn)
+        schedule_layout.addLayout(schedule_btn_row)
+
         layout.addWidget(self.account_group)
+        layout.addWidget(self.schedule_group)
         layout.addWidget(pref_group)
         layout.addWidget(self.admin_contact_group)
 
@@ -592,6 +653,7 @@ class SettingsPage(QWidget):
         self.theme_combo.currentTextChanged.connect(self.apply_live_preview)
         self.lang_combo.currentTextChanged.connect(self.apply_live_preview)
         self._configure_account_section()
+        self._configure_schedule_section()
         self._configure_admin_contact_section()
 
         self.theme_combo.setFocus()
@@ -625,6 +687,13 @@ class SettingsPage(QWidget):
         self.dr_prefix_check.setChecked(display_name.strip().lower().startswith("dr. "))
         self.username_input.setText(str(profile.get("username") or username))
         self.new_password_input.clear()
+
+    def _configure_schedule_section(self):
+        show_schedule = self._active_role() == "clinician"
+        self.schedule_group.setVisible(show_schedule)
+        if not show_schedule:
+            return
+        self._load_schedule_fields()
 
     def _configure_admin_contact_section(self):
         show_admin_contact = self._active_role() == "admin"
@@ -758,6 +827,62 @@ class SettingsPage(QWidget):
             "location": self.admin_contact_location_input.text().strip(),
         }
 
+    @staticmethod
+    def _default_schedule_payload() -> dict:
+        return {
+            "mode": "weekly-template",
+            "start_time": "09:00 AM",
+            "end_time": "05:00 PM",
+            "days": ["mon", "tue", "wed", "thu", "fri"],
+        }
+
+    @staticmethod
+    def _parse_time_value(value: str) -> QTime:
+        text = str(value or "").strip()
+        if not text:
+            return QTime()
+        for fmt in ("hh:mm AP", "h:mm AP", "hh:mm ap", "h:mm ap", "HH:mm"):
+            parsed = QTime.fromString(text, fmt)
+            if parsed.isValid():
+                return parsed
+        return QTime()
+
+    def _load_schedule_fields(self):
+        payload = self._default_schedule_payload()
+        profile = get_user_profile(self._active_username()) or {}
+        raw_availability = profile.get("availability_json")
+        try:
+            loaded = json.loads(raw_availability) if isinstance(raw_availability, str) and raw_availability else raw_availability
+        except Exception:
+            loaded = None
+        if isinstance(loaded, dict):
+            payload.update({
+                "start_time": str(loaded.get("start_time") or payload["start_time"]),
+                "end_time": str(loaded.get("end_time") or payload["end_time"]),
+                "days": loaded.get("days") or payload["days"],
+            })
+
+        start_time = self._parse_time_value(payload.get("start_time"))
+        end_time = self._parse_time_value(payload.get("end_time"))
+        if start_time.isValid():
+            self.schedule_start_time.setTime(start_time)
+        if end_time.isValid():
+            self.schedule_end_time.setTime(end_time)
+
+        selected_days = payload.get("days") or []
+        selected_set = {str(day).strip().lower() for day in selected_days} if isinstance(selected_days, list) else set()
+        for day_key, checkbox in self.schedule_day_checks:
+            checkbox.setChecked(day_key in selected_set)
+
+    def _current_schedule_payload(self) -> dict:
+        return {
+            "mode": "weekly-template",
+            "start_time": self.schedule_start_time.time().toString("hh:mm AP"),
+            "end_time": self.schedule_end_time.time().toString("hh:mm AP"),
+            "days": [day for day, checkbox in self.schedule_day_checks if checkbox.isChecked()],
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
     def _prompt_current_password(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Confirm Account Update")
@@ -814,6 +939,8 @@ class SettingsPage(QWidget):
         self.lang_combo.setCurrentText(saved_language)
         if self._active_role() == "admin":
             self._load_admin_contact_into_fields()
+        if self._active_role() == "clinician":
+            self._load_schedule_fields()
         self.apply_live_preview()
         self.status_label.setText("Settings loaded")
 
@@ -931,6 +1058,42 @@ class SettingsPage(QWidget):
                 f"{message}\n\nDisplay name changes are applied immediately.",
             )
 
+    def update_schedule(self):
+        if self._active_role() != "clinician":
+            QMessageBox.warning(self, "Schedule", "Only clinicians can update this section.")
+            return
+
+        selected_days = [day for day, checkbox in self.schedule_day_checks if checkbox.isChecked()]
+        if not selected_days:
+            QMessageBox.warning(self, "Schedule", "Select at least one available weekday.")
+            return
+        if self.schedule_end_time.time() <= self.schedule_start_time.time():
+            QMessageBox.warning(self, "Schedule", "End time must be later than start time.")
+            return
+
+        availability_json = json.dumps(
+            self._current_schedule_payload(),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        ok, message = user_store.update_own_availability(
+            current_username=self._active_username(),
+            availability_json=availability_json,
+        )
+        if not ok:
+            QMessageBox.warning(self, "Schedule", message)
+            return
+
+        self.status_label.setText("Schedule updated")
+        main_window = self.window()
+        if main_window is not self and hasattr(main_window, "refresh_dashboard"):
+            main_window.refresh_dashboard()
+        QMessageBox.information(
+            self,
+            "Schedule Updated",
+            message,
+        )
+
     def reset_defaults(self):
         defaults = self._default_settings()
         self.theme_combo.setCurrentText(defaults["theme"])
@@ -941,4 +1104,15 @@ class SettingsPage(QWidget):
             self.admin_contact_email_input.setText(admin_defaults["email"])
             self.admin_contact_phone_input.setText(admin_defaults["phone"])
             self.admin_contact_location_input.setText(admin_defaults["location"])
+        if self._active_role() == "clinician":
+            default_schedule = self._default_schedule_payload()
+            start_time = self._parse_time_value(default_schedule["start_time"])
+            end_time = self._parse_time_value(default_schedule["end_time"])
+            if start_time.isValid():
+                self.schedule_start_time.setTime(start_time)
+            if end_time.isValid():
+                self.schedule_end_time.setTime(end_time)
+            selected_days = set(default_schedule["days"])
+            for day_key, checkbox in self.schedule_day_checks:
+                checkbox.setChecked(day_key in selected_days)
         self.status_label.setText("Defaults restored (not yet saved)")
