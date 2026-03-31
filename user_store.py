@@ -3,7 +3,7 @@ import os
 from auth import UserManager as AuthUserManager
 
 class UserStore:
-    USER_FILE = "users_data.json"
+    USER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "users_data.json")
 
     @classmethod
     def load_users(cls):

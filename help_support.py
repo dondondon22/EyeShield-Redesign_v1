@@ -82,7 +82,7 @@ class HelpSupportPage(QWidget):
         default_email = "support@eyeshield.local"
         default_phone = "+1-000-000-0000"
         default_hours = "Mon-Fri, 8:00 AM - 6:00 PM"
-        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "config.json")
         email = default_email
         phone = default_phone
         hours = default_hours

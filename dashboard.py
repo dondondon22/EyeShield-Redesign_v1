@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QGroupBox, QMessageBox, QProgressBar, QSizePolicy,
     QFrame, QMenu, QInputDialog, QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QHeaderView
+    QHeaderView, QDialog
 )
 from PySide6.QtCore import Qt, QSize, QByteArray, QEvent, QTimer, QCoreApplication
 from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication
@@ -1399,251 +1399,180 @@ class EyeShieldApp(QMainWindow):
         subtitle.setStyleSheet("color: #64748b; font-size: 12px; font-weight: 600; background: transparent;")
         layout.addWidget(subtitle)
 
-        stats_row = QHBoxLayout()
-        stats_row.setSpacing(12)
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(8)
+        actions_row.addStretch(1)
 
-        assigned_card = QWidget()
-        assigned_card.setObjectName("refAssignedCard")
-        assigned_card.setStyleSheet(
-            "QWidget#refAssignedCard {"
+        self.referral_inbox_btn = QPushButton("Inbox")
+        self.referral_inbox_btn.setCursor(Qt.PointingHandCursor)
+        self.referral_inbox_btn.setMinimumHeight(32)
+        self.referral_inbox_btn.setStyleSheet(
+            "QPushButton {"
+            "background: #ffffff; color: #1f2937; border: 1px solid #d1dae6;"
+            "border-radius: 7px; padding: 6px 14px; font-weight: 700;"
+            "}"
+            "QPushButton:hover { background: #f8fafc; border-color: #9fb2cc; }"
+        )
+        self.referral_inbox_btn.clicked.connect(self._open_referral_inbox_dialog)
+        actions_row.addWidget(self.referral_inbox_btn)
+        layout.addLayout(actions_row)
+
+        split_row = QHBoxLayout()
+        split_row.setSpacing(12)
+
+        def build_referral_table() -> QTableWidget:
+            table = QTableWidget(0, 6)
+            table.setHorizontalHeaderLabels(
+                ["Patient", "Status", "Urgency", "Referred By", "Assigned To", "Date of Referral"]
+            )
+            table.setAlternatingRowColors(True)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setSelectionMode(QAbstractItemView.SingleSelection)
+            table.setContextMenuPolicy(Qt.CustomContextMenu)
+            table.verticalHeader().setVisible(False)
+            table.verticalHeader().setDefaultSectionSize(34)
+            header = table.horizontalHeader()
+            header.setStretchLastSection(True)
+            header.setSectionResizeMode(0, QHeaderView.Stretch)
+            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+            table.setStyleSheet(
+                """
+                QTableWidget {
+                    border: 1px solid #e5edf7;
+                    border-radius: 8px;
+                    gridline-color: #edf2f7;
+                    background: #ffffff;
+                    alternate-background-color: #f8fbff;
+                    color: #1f2937;
+                    font-size: 11px;
+                }
+                QHeaderView::section {
+                    background: #f1f5f9;
+                    color: #475569;
+                    font-weight: 700;
+                    font-size: 10px;
+                    border: none;
+                    border-right: 1px solid #e2e8f0;
+                    padding: 6px;
+                }
+                """
+            )
+            return table
+
+        assigned_feed_card = QWidget()
+        assigned_feed_card.setObjectName("refAssignedFeedCard")
+        assigned_feed_card.setStyleSheet(
+            "QWidget#refAssignedFeedCard {"
             "background: white; border: 1px solid #dbe3ee; border-radius: 10px;"
             "}"
         )
-        assigned_v = QVBoxLayout(assigned_card)
-        assigned_v.setContentsMargins(14, 10, 14, 10)
-        assigned_v.setSpacing(4)
-        assigned_title = QLabel("ASSIGNED TO ME")
-        assigned_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
-        self.ref_assigned_to_me_value = QLabel("0")
-        self.ref_assigned_to_me_value.setStyleSheet("color: #1f2937; font-size: 24px; font-weight: 800; background: transparent;")
-        assigned_v.addWidget(assigned_title)
-        assigned_v.addWidget(self.ref_assigned_to_me_value)
+        assigned_feed_v = QVBoxLayout(assigned_feed_card)
+        assigned_feed_v.setContentsMargins(14, 12, 14, 12)
+        assigned_feed_v.setSpacing(8)
+        assigned_feed_title = QLabel("ASSIGNED TO ME")
+        assigned_feed_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
+        assigned_feed_v.addWidget(assigned_feed_title)
+        self.referrals_assigned_table = build_referral_table()
+        self.referrals_assigned_table.itemDoubleClicked.connect(
+            lambda item: self._handle_referral_table_double_click(item, self.referrals_assigned_table)
+        )
+        self.referrals_assigned_table.customContextMenuRequested.connect(
+            lambda pos: self._show_referral_table_context_menu(self.referrals_assigned_table, pos)
+        )
+        assigned_feed_v.addWidget(self.referrals_assigned_table)
+        split_row.addWidget(assigned_feed_card, 1)
 
-        created_card = QWidget()
-        created_card.setObjectName("refCreatedCard")
-        created_card.setStyleSheet(
-            "QWidget#refCreatedCard {"
+        created_feed_card = QWidget()
+        created_feed_card.setObjectName("refCreatedFeedCard")
+        created_feed_card.setStyleSheet(
+            "QWidget#refCreatedFeedCard {"
             "background: white; border: 1px solid #dbe3ee; border-radius: 10px;"
             "}"
         )
-        created_v = QVBoxLayout(created_card)
-        created_v.setContentsMargins(14, 10, 14, 10)
-        created_v.setSpacing(4)
-        created_title = QLabel("CREATED BY ME")
-        created_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
-        self.ref_created_by_me_value = QLabel("0")
-        self.ref_created_by_me_value.setStyleSheet("color: #1f2937; font-size: 24px; font-weight: 800; background: transparent;")
-        created_v.addWidget(created_title)
-        created_v.addWidget(self.ref_created_by_me_value)
-
-        kpi_turnaround_card = QWidget()
-        kpi_turnaround_card.setObjectName("refTurnaroundCard")
-        kpi_turnaround_card.setStyleSheet(
-            "QWidget#refTurnaroundCard {"
-            "background: white; border: 1px solid #dbe3ee; border-radius: 10px;"
-            "}"
+        created_feed_v = QVBoxLayout(created_feed_card)
+        created_feed_v.setContentsMargins(14, 12, 14, 12)
+        created_feed_v.setSpacing(8)
+        created_feed_title = QLabel("CREATED BY ME")
+        created_feed_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
+        created_feed_v.addWidget(created_feed_title)
+        self.referrals_created_table = build_referral_table()
+        self.referrals_created_table.itemDoubleClicked.connect(
+            lambda item: self._handle_referral_table_double_click(item, self.referrals_created_table)
         )
-        kpi_turnaround_v = QVBoxLayout(kpi_turnaround_card)
-        kpi_turnaround_v.setContentsMargins(14, 10, 14, 10)
-        kpi_turnaround_v.setSpacing(4)
-        kpi_turnaround_title = QLabel("AVG TURNAROUND (HRS)")
-        kpi_turnaround_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
-        self.ref_avg_turnaround_value = QLabel("0.0")
-        self.ref_avg_turnaround_value.setStyleSheet("color: #1f2937; font-size: 24px; font-weight: 800; background: transparent;")
-        kpi_turnaround_v.addWidget(kpi_turnaround_title)
-        kpi_turnaround_v.addWidget(self.ref_avg_turnaround_value)
-
-        kpi_overdue_card = QWidget()
-        kpi_overdue_card.setObjectName("refOverdueCard")
-        kpi_overdue_card.setStyleSheet(
-            "QWidget#refOverdueCard {"
-            "background: white; border: 1px solid #dbe3ee; border-radius: 10px;"
-            "}"
+        self.referrals_created_table.customContextMenuRequested.connect(
+            lambda pos: self._show_referral_table_context_menu(self.referrals_created_table, pos)
         )
-        kpi_overdue_v = QVBoxLayout(kpi_overdue_card)
-        kpi_overdue_v.setContentsMargins(14, 10, 14, 10)
-        kpi_overdue_v.setSpacing(4)
-        kpi_overdue_title = QLabel("OVERDUE")
-        kpi_overdue_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
-        self.ref_overdue_count_value = QLabel("0")
-        self.ref_overdue_count_value.setStyleSheet("color: #b91c1c; font-size: 24px; font-weight: 800; background: transparent;")
-        kpi_overdue_v.addWidget(kpi_overdue_title)
-        kpi_overdue_v.addWidget(self.ref_overdue_count_value)
+        created_feed_v.addWidget(self.referrals_created_table)
+        split_row.addWidget(created_feed_card, 1)
 
-        kpi_reassign_card = QWidget()
-        kpi_reassign_card.setObjectName("refReassignCard")
-        kpi_reassign_card.setStyleSheet(
-            "QWidget#refReassignCard {"
-            "background: white; border: 1px solid #dbe3ee; border-radius: 10px;"
-            "}"
-        )
-        kpi_reassign_v = QVBoxLayout(kpi_reassign_card)
-        kpi_reassign_v.setContentsMargins(14, 10, 14, 10)
-        kpi_reassign_v.setSpacing(4)
-        kpi_reassign_title = QLabel("REASSIGN RATE")
-        kpi_reassign_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
-        self.ref_reassign_rate_value = QLabel("0%")
-        self.ref_reassign_rate_value.setStyleSheet("color: #1f2937; font-size: 24px; font-weight: 800; background: transparent;")
-        kpi_reassign_v.addWidget(kpi_reassign_title)
-        kpi_reassign_v.addWidget(self.ref_reassign_rate_value)
-
-        stats_row.addWidget(assigned_card, 1)
-        stats_row.addWidget(created_card, 1)
-        stats_row.addWidget(kpi_turnaround_card, 1)
-        stats_row.addWidget(kpi_overdue_card, 1)
-        stats_row.addWidget(kpi_reassign_card, 1)
-        layout.addLayout(stats_row)
-
-        feed_card = QWidget()
-        feed_card.setObjectName("refFeedCard")
-        feed_card.setStyleSheet(
-            "QWidget#refFeedCard {"
-            "background: white; border: 1px solid #dbe3ee; border-radius: 10px;"
-            "}"
-        )
-        feed_v = QVBoxLayout(feed_card)
-        feed_v.setContentsMargins(14, 12, 14, 12)
-        feed_v.setSpacing(8)
-
-        feed_title = QLabel("RECENT REFERRAL ACTIVITY")
-        feed_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
-        feed_v.addWidget(feed_title)
-
-        inbox_controls = QHBoxLayout()
-        inbox_controls.setSpacing(8)
-        self.ref_notification_badge = QLabel("Inbox: 0 unread")
-        self.ref_notification_badge.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; background: transparent;")
-        inbox_controls.addWidget(self.ref_notification_badge)
-        inbox_controls.addStretch(1)
-        self.ref_open_inbox_btn = QPushButton("Open Inbox")
-        self.ref_open_inbox_btn.setObjectName("neutralBtn")
-        self.ref_open_inbox_btn.clicked.connect(self._open_referral_inbox_dialog)
-        self.ref_mark_all_read_btn = QPushButton("Mark All Read")
-        self.ref_mark_all_read_btn.setObjectName("neutralBtn")
-        self.ref_mark_all_read_btn.clicked.connect(self._mark_all_referral_notifications_read)
-        inbox_controls.addWidget(self.ref_open_inbox_btn)
-        inbox_controls.addWidget(self.ref_mark_all_read_btn)
-        feed_v.addLayout(inbox_controls)
-
-        self.referrals_table = QTableWidget(0, 7)
-        self.referrals_table.setHorizontalHeaderLabels(
-            ["Patient", "Status", "Urgency", "Referred By", "Assigned To", "Relation", "Date of Referral"]
-        )
-        self.referrals_table.setAlternatingRowColors(True)
-        self.referrals_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.referrals_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.referrals_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.referrals_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.referrals_table.verticalHeader().setVisible(False)
-        self.referrals_table.verticalHeader().setDefaultSectionSize(34)
-        header = self.referrals_table.horizontalHeader()
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
-        self.referrals_table.setStyleSheet(
-            """
-            QTableWidget {
-                border: 1px solid #e5edf7;
-                border-radius: 8px;
-                gridline-color: #edf2f7;
-                background: #ffffff;
-                alternate-background-color: #f8fbff;
-                color: #1f2937;
-                font-size: 11px;
-            }
-            QHeaderView::section {
-                background: #f1f5f9;
-                color: #475569;
-                font-weight: 700;
-                font-size: 10px;
-                border: none;
-                border-right: 1px solid #e2e8f0;
-                padding: 6px;
-            }
-            """
-        )
-        self.referrals_table.itemDoubleClicked.connect(self._handle_referral_table_double_click)
-        self.referrals_table.customContextMenuRequested.connect(self._show_referral_table_context_menu)
-        self._referral_rows_by_id = {}
-        feed_v.addWidget(self.referrals_table)
-
-        layout.addWidget(feed_card, 1)
+        layout.addLayout(split_row, 1)
         return page
 
     def refresh_referrals_page(self):
         """Refresh referral activity page with private user data."""
-        if not hasattr(self, "referrals_table"):
+        if not hasattr(self, "referrals_assigned_table") or not hasattr(self, "referrals_created_table"):
             return
+
+        unread_notifications = UserManager.get_unread_referral_notifications(self.username, limit=300)
+        unread_count = len(unread_notifications)
+        if hasattr(self, "referral_inbox_btn"):
+            if unread_count > 0:
+                self.referral_inbox_btn.setText(f"Inbox ({unread_count})")
+            else:
+                self.referral_inbox_btn.setText("Inbox")
 
         referrals = UserManager.get_user_referrals(self.username, limit=200)
-        assigned_to_me_count = sum(1 for item in referrals if item.get("relation") == "assigned_to_me")
-        created_by_me_count = sum(1 for item in referrals if item.get("relation") == "created_by_me")
+        assigned_referrals = [item for item in referrals if item.get("relation") == "assigned_to_me"]
+        created_referrals = [item for item in referrals if item.get("relation") == "created_by_me"]
 
-        if hasattr(self, "ref_assigned_to_me_value"):
-            self.ref_assigned_to_me_value.setText(str(assigned_to_me_count))
-        if hasattr(self, "ref_created_by_me_value"):
-            self.ref_created_by_me_value.setText(str(created_by_me_count))
-        kpis = UserManager.get_referral_kpis(self.username) or {}
-        if hasattr(self, "ref_avg_turnaround_value"):
-            self.ref_avg_turnaround_value.setText(str(kpis.get("avg_turnaround_hours", 0.0)))
-        if hasattr(self, "ref_overdue_count_value"):
-            self.ref_overdue_count_value.setText(str(kpis.get("overdue_count", 0)))
-        if hasattr(self, "ref_reassign_rate_value"):
-            self.ref_reassign_rate_value.setText(f"{kpis.get('reassignment_rate_pct', 0.0)}%")
-        unread_count = len(UserManager.get_referral_notifications(self.username, include_read=False, limit=200))
-        if hasattr(self, "ref_notification_badge"):
-            self.ref_notification_badge.setText(f"Inbox: {unread_count} unread")
+        def populate_table(table: QTableWidget, rows: list[dict], empty_message: str):
+            table.clearContents()
+            table.setRowCount(0)
+            if not rows:
+                table.setRowCount(1)
+                empty = QTableWidgetItem(empty_message)
+                empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                table.setItem(0, 0, empty)
+                for col in range(1, table.columnCount()):
+                    cell = QTableWidgetItem("")
+                    cell.setFlags(Qt.ItemIsEnabled)
+                    table.setItem(0, col, cell)
+                return
 
-        self.referrals_table.clearContents()
-        self.referrals_table.setRowCount(0)
-        self._referral_rows_by_id = {}
+            table_rows = rows[:60]
+            table.setRowCount(len(table_rows))
+            for row_index, referral in enumerate(table_rows):
+                patient_name = str(referral.get("patient_name") or "Unknown Patient").strip() or "Unknown Patient"
+                urgency = str(referral.get("urgency") or "normal").capitalize()
+                status_raw = str(referral.get("status") or "pending").strip()
+                status = status_raw.replace("_", " ").title()
+                assigned_at = str(referral.get("assigned_at") or "").strip()
+                assigned_by = str(referral.get("assigned_by") or "").strip()
+                assigned_to = str(referral.get("assigned_to") or "").strip()
+                row_values = [patient_name, status, urgency, assigned_by or "-", assigned_to or "-", assigned_at or "-"]
+                for col_index, value in enumerate(row_values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                    if col_index == 0:
+                        item.setData(Qt.UserRole, referral)
+                    if col_index == 1:
+                        normalized = status_raw.lower()
+                        if normalized in {"pending", "viewed"}:
+                            item.setForeground(QColor("#0e6fcd"))
+                        elif normalized in {"in_review", "reassigned", "rereferred"}:
+                            item.setForeground(QColor("#b45309"))
+                        elif normalized in {"completed", "archived"}:
+                            item.setForeground(QColor("#2e7d32"))
+                    table.setItem(row_index, col_index, item)
+                table.setRowHeight(row_index, 34)
 
-        if not referrals:
-            self.referrals_table.setRowCount(1)
-            empty = QTableWidgetItem("No referral activity for your account yet.")
-            empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            self.referrals_table.setItem(0, 0, empty)
-            for col in range(1, self.referrals_table.columnCount()):
-                cell = QTableWidgetItem("")
-                cell.setFlags(Qt.ItemIsEnabled)
-                self.referrals_table.setItem(0, col, cell)
-            return
-
-        table_referrals = referrals[:30]
-        self.referrals_table.setRowCount(len(table_referrals))
-        for row_index, referral in enumerate(table_referrals):
-            relation = referral.get("relation")
-            relation_text = "Assigned to me" if relation == "assigned_to_me" else "Created by me"
-            patient_name = str(referral.get("patient_name") or "Unknown Patient").strip() or "Unknown Patient"
-            urgency = str(referral.get("urgency") or "normal").capitalize()
-            status_raw = str(referral.get("status") or "pending").strip()
-            status = status_raw.replace("_", " ").title()
-            assigned_at = str(referral.get("assigned_at") or "").strip()
-            assigned_by = str(referral.get("assigned_by") or "").strip()
-            assigned_to = str(referral.get("assigned_to") or "").strip()
-            row_values = [patient_name, status, urgency, assigned_by or "-", assigned_to or "-", relation_text, assigned_at or "-"]
-            for col_index, value in enumerate(row_values):
-                item = QTableWidgetItem(value)
-                item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-                if col_index == 1:
-                    normalized = status_raw.lower()
-                    if normalized in {"pending", "viewed"}:
-                        item.setForeground(QColor("#0e6fcd"))
-                    elif normalized in {"in_review", "reassigned", "rereferred"}:
-                        item.setForeground(QColor("#b45309"))
-                    elif normalized in {"completed", "archived"}:
-                        item.setForeground(QColor("#2e7d32"))
-                self.referrals_table.setItem(row_index, col_index, item)
-
-            self.referrals_table.setRowHeight(row_index, 34)
-            referral_key = str(referral.get("referral_id") or "")
-            if referral_key:
-                self._referral_rows_by_id[referral_key] = referral
+        populate_table(self.referrals_assigned_table, assigned_referrals, "No referrals assigned to you.")
+        populate_table(self.referrals_created_table, created_referrals, "No referrals created by you.")
 
     def _open_referral_details(self, referral: dict):
         patient_name = str(referral.get("patient_name") or "").strip()
@@ -1712,43 +1641,35 @@ class EyeShieldApp(QMainWindow):
         if chosen == reassign_action:
             self._reassign_referral(referral)
 
-    def _referral_for_selected_table_row(self, row_index: int) -> dict | None:
-        if not hasattr(self, "referrals_table"):
+    def _referral_for_selected_table_row(self, table: QTableWidget, row_index: int) -> dict | None:
+        if not table:
             return None
-        if row_index < 0 or row_index >= self.referrals_table.rowCount():
+        if row_index < 0 or row_index >= table.rowCount():
             return None
 
-        patient_item = self.referrals_table.item(row_index, 0)
-        date_item = self.referrals_table.item(row_index, 6)
+        patient_item = table.item(row_index, 0)
         if not patient_item:
             return None
 
-        patient_name = str(patient_item.text() or "").strip()
-        assigned_at = str(date_item.text() if date_item else "").strip()
-        for referral in self._referral_rows_by_id.values():
-            if (
-                str(referral.get("patient_name") or "").strip() == patient_name
-                and str(referral.get("assigned_at") or "").strip() == assigned_at
-            ):
-                return referral
-        return None
+        referral = patient_item.data(Qt.UserRole)
+        return referral if isinstance(referral, dict) else None
 
-    def _handle_referral_table_double_click(self, item: QTableWidgetItem):
-        referral = self._referral_for_selected_table_row(item.row())
+    def _handle_referral_table_double_click(self, item: QTableWidgetItem, table: QTableWidget):
+        referral = self._referral_for_selected_table_row(table, item.row())
         if referral:
             self._open_referral_details(referral)
 
-    def _show_referral_table_context_menu(self, local_pos):
-        if not hasattr(self, "referrals_table"):
+    def _show_referral_table_context_menu(self, table: QTableWidget, local_pos):
+        if not table:
             return
-        item = self.referrals_table.itemAt(local_pos)
+        item = table.itemAt(local_pos)
         if not item:
             return
-        referral = self._referral_for_selected_table_row(item.row())
+        referral = self._referral_for_selected_table_row(table, item.row())
         if not referral:
             return
 
-        self._show_referral_context_menu(self.referrals_table.viewport(), referral, local_pos)
+        self._show_referral_context_menu(table.viewport(), referral, local_pos)
 
     def _apply_referral_status(self, referral: dict, new_status: str, require_note: bool = False):
         referral_id = str(referral.get("referral_id") or "").strip()
@@ -1879,6 +1800,15 @@ class EyeShieldApp(QMainWindow):
         title = QLabel("Referral Notifications")
         title.setStyleSheet("font-size: 15px; font-weight: 700; color: #1f2937;")
         v.addWidget(title)
+        if not notifications:
+            empty_label = QLabel("No referral messages yet. Messages from clinicians will appear here.")
+            empty_label.setWordWrap(True)
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet(
+                "padding: 18px; border: 1px dashed #cbd5e1; border-radius: 8px;"
+                "color: #64748b; background: #f8fafc; font-size: 13px;"
+            )
+            v.addWidget(empty_label)
         table = QTableWidget(0, 5)
         table.setHorizontalHeaderLabels(["Status", "Title", "Message", "Referral ID", "Created At"])
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1912,6 +1842,7 @@ class EyeShieldApp(QMainWindow):
         buttons.addStretch(1)
         mark_selected_btn = QPushButton("Mark Selected Read")
         close_btn = QPushButton("Close")
+        mark_selected_btn.setEnabled(bool(notifications))
         buttons.addWidget(mark_selected_btn)
         buttons.addWidget(close_btn)
         v.addLayout(buttons)

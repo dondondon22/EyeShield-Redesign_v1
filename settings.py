@@ -318,8 +318,8 @@ def _add_eye_toggle(field: QLineEdit):
 
 
 class SettingsPage(QWidget):
-    SETTINGS_FILE = "settings_data.json"
-    CONFIG_FILE = "config.json"
+    SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "settings_data.json")
+    CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "config.json")
 
     def __init__(self):
         super().__init__()

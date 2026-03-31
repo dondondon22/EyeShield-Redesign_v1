@@ -30,23 +30,21 @@ class PatientDetailsDialog(QDialog):
         self.record = patient_record
         self.setWindowTitle(f"Patient Details - {patient_record.get('name', 'Unknown')}")
         self.resize(700, 700)
-        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
-        
-        # Title
+
         title = QLabel(f"{patient_record.get('name', 'N/A')}")
         title.setStyleSheet("font-size:18px;font-weight:700;color:#1f4f77;")
         layout.addWidget(title)
-        
+
         # Create scrollable content area
         from PySide6.QtWidgets import QScrollArea
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(scroll.Shape.NoFrame)
         scroll.setStyleSheet("QScrollArea{border:none;background:transparent;}")
-        
+
         content = QWidget()
         content.setStyleSheet("background:transparent;")
         content_layout = QVBoxLayout(content)
@@ -124,7 +122,16 @@ class PatientDetailsDialog(QDialog):
         
         # Screening Result Section
         add_section("Screening Result")
-        add_field("Result", str(patient_record.get("result") or "N/A"))
+        add_field("AI Classification", str(patient_record.get("ai_classification") or patient_record.get("result") or "N/A"))
+        add_field("Doctor Classification", str(patient_record.get("doctor_classification") or patient_record.get("result") or "N/A"))
+        add_field("Final Diagnosis", "Based on ICDR Severity Scale")
+        add_field("Decision Mode", str(patient_record.get("decision_mode") or "accepted").title())
+        findings_text = str(patient_record.get("doctor_findings") or "").strip()
+        if findings_text:
+            add_field("Doctor Findings", findings_text)
+        override_reason = str(patient_record.get("override_justification") or "").strip()
+        if override_reason:
+            add_field("Override Justification", override_reason)
         add_field("Confidence", str(patient_record.get("confidence") or "N/A"))
         add_field("Screened At", str(patient_record.get("screened_at") or "N/A"))
         add_field("Screened By", str(patient_record.get("original_screener_name") or patient_record.get("original_screener_username") or "N/A"))
@@ -220,7 +227,16 @@ class ReferralDetailDialog(QDialog):
         add_field("Previous DR", str(patient_record.get("prev_dr_stage") or "N/A"))
 
         add_section("Screening Result")
-        add_field("Result", str(patient_record.get("result") or "N/A"))
+        add_field("AI Classification", str(patient_record.get("ai_classification") or patient_record.get("result") or "N/A"))
+        add_field("Doctor Classification", str(patient_record.get("doctor_classification") or patient_record.get("result") or "N/A"))
+        add_field("Final Diagnosis", "Based on ICDR Severity Scale")
+        add_field("Decision Mode", str(patient_record.get("decision_mode") or "accepted").title())
+        findings_text = str(patient_record.get("doctor_findings") or "").strip()
+        if findings_text:
+            add_field("Doctor Findings", findings_text)
+        override_reason = str(patient_record.get("override_justification") or "").strip()
+        if override_reason:
+            add_field("Override Justification", override_reason)
         add_field("Confidence", str(patient_record.get("confidence") or "N/A"))
         add_field("Screened By", str(patient_record.get("original_screener_name") or patient_record.get("original_screener_username") or "N/A"))
         add_field("Screened At", str(patient_record.get("screened_at") or "N/A"))
@@ -694,14 +710,19 @@ class ReportsPage(QWidget):
             cur = conn.cursor()
             cur.execute("""
                 SELECT id, patient_id, name, eyes, screened_at, result, confidence, diabetes_type, hba1c,
+                       ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
                        archived_at, archived_by, archive_reason,
                        original_screener_username, original_screener_name
                 FROM patient_records ORDER BY id DESC
             """)
             rows = [{"id":r[0],"patient_id":r[1],"name":r[2],"eyes":r[3],"screened_at":r[4],"result":r[5],"confidence":r[6],
-                     "diabetes_type":r[7],"hba1c":r[8],"archived_at":r[9],"archived_by":r[10],"archive_reason":r[11],
-                     "original_screener_username":r[12],"original_screener_name":r[13]}
+                     "diabetes_type":r[7],"hba1c":r[8],
+                     "ai_classification":r[9],"doctor_classification":r[10],"decision_mode":r[11],"override_justification":r[12],"final_diagnosis_icdr":r[13],"doctor_findings":r[14],
+                     "archived_at":r[15],"archived_by":r[16],"archive_reason":r[17],
+                     "original_screener_username":r[18],"original_screener_name":r[19]}
                     for r in cur.fetchall()]
+            for row in rows:
+                row["result"] = row.get("final_diagnosis_icdr") or row.get("doctor_classification") or row.get("result") or ""
             conn.close()
         except Exception as err:
             QMessageBox.warning(self, "Reports", f"Failed to load report data: {err}")
@@ -747,7 +768,10 @@ class ReportsPage(QWidget):
             selection_key = f"{key[0]}|{key[1]}|{'-'.join(str(i) for i in record_ids)}"
             eyes_text = "\n".join(str(item.get("eyes") or "—") for item in ordered_rows)
             date_text = "\n".join(str(item.get("screened_at") or "—") for item in ordered_rows)
-            result_text = "\n".join(str(item.get("result") or "—") for item in ordered_rows)
+            result_text = "\n".join(
+                str(item.get("final_diagnosis_icdr") or item.get("doctor_classification") or item.get("result") or "—")
+                for item in ordered_rows
+            )
             confidence_text = "\n".join(str(item.get("confidence") or "—") for item in ordered_rows)
             combined_search = " ".join(
                 [
@@ -757,6 +781,9 @@ class ReportsPage(QWidget):
                     date_text,
                     result_text,
                     confidence_text,
+                    str(primary.get("final_diagnosis_icdr") or ""),
+                    str(primary.get("doctor_classification") or ""),
+                    str(primary.get("doctor_findings") or ""),
                     screened_by_display,
                 ]
             ).lower()
@@ -770,6 +797,11 @@ class ReportsPage(QWidget):
                     "screened_at": date_text,
                     "result": result_text,
                     "confidence": confidence_text,
+                    "final_diagnosis_icdr": primary.get("final_diagnosis_icdr"),
+                    "doctor_classification": primary.get("doctor_classification"),
+                    "decision_mode": primary.get("decision_mode"),
+                    "override_justification": primary.get("override_justification"),
+                    "doctor_findings": primary.get("doctor_findings"),
                     "screened_by": screened_by_display,
                     "diabetes_type": primary.get("diabetes_type"),
                     "hba1c": primary.get("hba1c"),
@@ -972,6 +1004,7 @@ class ReportsPage(QWidget):
                        diabetes_type, duration, hba1c, prev_treatment, notes, 
                        result, confidence, screened_at, archived_at, archived_by, 
                        archive_reason, original_screener_username, original_screener_name,
+                       ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
                        height, weight, bmi, visual_acuity_left, visual_acuity_right,
                        blood_pressure_systolic, blood_pressure_diastolic,
                        fasting_blood_sugar, random_blood_sugar,
@@ -1009,22 +1042,28 @@ class ReportsPage(QWidget):
                 "archive_reason": row[18],
                 "original_screener_username": row[19],
                 "original_screener_name": row[20],
-                "height": row[21],
-                "weight": row[22],
-                "bmi": row[23],
-                "visual_acuity_left": row[24],
-                "visual_acuity_right": row[25],
-                "blood_pressure_systolic": row[26],
-                "blood_pressure_diastolic": row[27],
-                "fasting_blood_sugar": row[28],
-                "random_blood_sugar": row[29],
-                "diabetes_diagnosis_date": row[30],
-                "treatment_regimen": row[31],
-                "prev_dr_stage": row[32],
-                "symptom_blurred_vision": row[33],
-                "symptom_floaters": row[34],
-                "symptom_flashes": row[35],
-                "symptom_vision_loss": row[36],
+                "ai_classification": row[21],
+                "doctor_classification": row[22],
+                "decision_mode": row[23],
+                "override_justification": row[24],
+                "final_diagnosis_icdr": row[25],
+                "doctor_findings": row[26],
+                "height": row[27],
+                "weight": row[28],
+                "bmi": row[29],
+                "visual_acuity_left": row[30],
+                "visual_acuity_right": row[31],
+                "blood_pressure_systolic": row[32],
+                "blood_pressure_diastolic": row[33],
+                "fasting_blood_sugar": row[34],
+                "random_blood_sugar": row[35],
+                "diabetes_diagnosis_date": row[36],
+                "treatment_regimen": row[37],
+                "prev_dr_stage": row[38],
+                "symptom_blurred_vision": row[39],
+                "symptom_floaters": row[40],
+                "symptom_flashes": row[41],
+                "symptom_vision_loss": row[42],
             }
         except Exception as err:
             print(f"Error fetching patient record: {err}")
@@ -1202,9 +1241,13 @@ class ReportsPage(QWidget):
         try:
             with open(path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
-                w.writerow(["Patient ID","Name","Eye Screened","Screening Date","Result","Confidence","Diabetes Type","HbA1c","Record Status","Archived At","Archived By"])
+                w.writerow(["Patient ID","Name","Eye Screened","Screening Date","AI Classification","Doctor Classification","Final Diagnosis (ICDR)","Doctor Findings","Decision Mode","Override Justification","Confidence","Diabetes Type","HbA1c","Record Status","Archived At","Archived By"])
                 for row in self._filtered_rows:
-                    w.writerow([row["patient_id"],row["name"],row.get("eyes", ""),row.get("screened_at", ""),row["result"],row["confidence"],
+                    w.writerow([row["patient_id"],row["name"],row.get("eyes", ""),row.get("screened_at", ""),
+                                row.get("ai_classification",""), row.get("doctor_classification",""), row.get("final_diagnosis_icdr",""),
+                                row.get("doctor_findings",""),
+                                row.get("decision_mode",""), row.get("override_justification",""),
+                                row["confidence"],
                                 row["diabetes_type"],row["hba1c"],
                                 "Archived" if row["archived_at"] else "Active",
                                 row["archived_at"],row["archived_by"]])
@@ -1229,8 +1272,9 @@ class ReportsPage(QWidget):
             cur = conn.cursor()
             cur.execute("""
                 SELECT id, patient_id, name, birthdate, age, sex, contact, eyes,
-                       diabetes_type, duration, hba1c, prev_treatment, notes,
+                      diabetes_type, duration, hba1c, prev_treatment, notes,
                       result, confidence, screened_at,
+                      ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
                        visual_acuity_left, visual_acuity_right,
                        blood_pressure_systolic, blood_pressure_diastolic,
                        fasting_blood_sugar, random_blood_sugar,
@@ -1250,14 +1294,16 @@ class ReportsPage(QWidget):
                 "age":row[4],"sex":row[5],"contact":row[6],"eyes":row[7],
                 "diabetes_type":row[8],"duration":row[9],"hba1c":row[10],
                 "prev_treatment":row[11],"notes":row[12],"result":row[13],"confidence":row[14],"screened_at":row[15],
-                "va_left":row[16],"va_right":row[17],
-                "bp_systolic":row[18],"bp_diastolic":row[19],
-                "fbs":row[20],"rbs":row[21],
-                "symptom_blurred":row[22],"symptom_floaters":row[23],
-                "symptom_flashes":row[24],"symptom_vision_loss":row[25],
-                "source_image_path":row[26],"heatmap_image_path":row[27],
-                "image_sha256":row[28],"image_saved_at":row[29],
-                "original_screener_username":row[30],"original_screener_name":row[31],
+                "ai_classification":row[16],"doctor_classification":row[17],"decision_mode":row[18],
+                "override_justification":row[19],"final_diagnosis_icdr":row[20],"doctor_findings":row[21],
+                "va_left":row[22],"va_right":row[23],
+                "bp_systolic":row[24],"bp_diastolic":row[25],
+                "fbs":row[26],"rbs":row[27],
+                "symptom_blurred":row[28],"symptom_floaters":row[29],
+                "symptom_flashes":row[30],"symptom_vision_loss":row[31],
+                "source_image_path":row[32],"heatmap_image_path":row[33],
+                "image_sha256":row[34],"image_saved_at":row[35],
+                "original_screener_username":row[36],"original_screener_name":row[37],
             }
         except Exception:
             return None
@@ -1470,7 +1516,7 @@ class ReportsPage(QWidget):
         # ── clinic name ───────────────────────────────────────────────────────
         clinic_name = "EyeShield EMR"
         try:
-            cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+            cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "config.json")
             with open(cfg_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             clinic_name = cfg.get("clinic_name") or clinic_name
@@ -1484,7 +1530,13 @@ class ReportsPage(QWidget):
         conf_display = escape(raw_conf) if raw_conf else "&#8212;"
 
         # ── grade maps ────────────────────────────────────────────────────────
-        result_raw = str(full.get("result") or "").strip()
+        ai_result_raw = str(full.get("ai_classification") or full.get("result") or "").strip()
+        doctor_result_raw = str(full.get("doctor_classification") or full.get("result") or "").strip()
+        decision_mode_raw = str(full.get("decision_mode") or "accepted").strip().lower()
+        override_reason_raw = str(full.get("override_justification") or "").strip()
+        final_dx_raw = str(full.get("final_diagnosis_icdr") or doctor_result_raw or ai_result_raw).strip()
+        doctor_findings_raw = str(full.get("doctor_findings") or "").strip()
+        result_raw = final_dx_raw or doctor_result_raw or ai_result_raw
 
         # Recommendation and summary based on result
         if result_raw == "No DR":
@@ -1507,7 +1559,7 @@ class ReportsPage(QWidget):
             summary = "Please consult a qualified ophthalmologist for further evaluation."
 
         referral_destination = "&#8212;"
-        if result_raw in ("Moderate DR", "Severe DR", "Proliferative DR"):
+        if final_dx_raw in ("Moderate DR", "Severe DR", "Proliferative DR"):
             selected_destination = self._prompt_referral_destination()
             if selected_destination is None:
                 return
@@ -1641,7 +1693,9 @@ class ReportsPage(QWidget):
             return rows_html
 
         # Build result badge - minimal style
-        result_label = escape(result_raw) if result_raw else "—"
+        ai_result_label = escape(ai_result_raw) if ai_result_raw else "—"
+        doctor_result_label = escape(doctor_result_raw) if doctor_result_raw else "—"
+        final_dx_label = escape(final_dx_raw) if final_dx_raw else "—"
         if result_raw == "No DR":
             result_badge_color = "#059669"
         elif result_raw == "Mild DR":
@@ -1794,9 +1848,28 @@ class ReportsPage(QWidget):
 
   {sec("AI Classification Result")}
   <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d1d5db;margin-bottom:18px;">
-  {field_row("Classification", result_label)}
+  {field_row("Classification", ai_result_label)}
   {field_row("Confidence", conf_display, False)}
   </table>
+
+  {sec("Doctor Decision")}
+  <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d1d5db;margin-bottom:18px;">
+  {field_row("Doctor Classification", doctor_result_label)}
+  {field_row("Decision Mode", esc(decision_mode_raw.title()))}
+  {field_row("Doctor Findings", esc(doctor_findings_raw or "—"))}
+  {field_row("Final Diagnosis", final_dx_label)}
+  {field_row("Final Diagnosis Scale", "Based on ICDR Severity Scale", False)}
+  </table>
+"""
+        if decision_mode_raw == "override":
+            html += f"""
+  <div style="padding:10px 12px;border:1px solid #fecaca;margin-bottom:18px;background:#fff1f2;">
+    <div style="font-size:8.5pt;color:#7f1d1d;">
+      <b>Override Justification:</b> {esc(override_reason_raw or "No justification provided")}
+    </div>
+  </div>
+"""
+        html += f"""
 
   {sec("Image Results")}
   {image_results_html}
@@ -1950,6 +2023,10 @@ class ReportsPage(QWidget):
         patient_visual_acuity_right = esc(full.get("visual_acuity_right"))
         patient_notes = esc(full.get("notes"))
 
+        referral_image_uri = ""
+        image_path = str(full.get("source_image_path") or "").strip()
+        if image_path and os.path.exists(image_path):
+            referral_image_uri = Path(image_path).resolve().as_uri()
         html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1964,10 +2041,11 @@ class ReportsPage(QWidget):
         line-height: 1.6;
   }}
     .sheet {{ padding: 26px 36px; }}
+    .page-break {{ page-break-before: always; }}
     .header-grid {{ width: 100%; border-collapse: collapse; margin-bottom: 14px; }}
-    .header-grid td {{ width: 50%; vertical-align: top; padding: 0; }}
+    .header-grid td {{ width: 100%; vertical-align: top; padding: 0; }}
     .header-block {{ font-size: 10.8pt; line-height: 1.65; }}
-    .right-meta {{ text-align: right; font-size: 10.8pt; line-height: 1.65; }}
+    .date-line {{ font-size: 10.8pt; line-height: 1.65; margin-bottom: 8px; }}
     .label {{ font-weight: 700; }}
     .subject {{ margin: 14px 0 14px 0; font-size: 11.5pt; font-weight: 700; }}
     .paragraph {{ margin: 0 0 12px 0; text-align: justify; line-height: 1.7; }}
@@ -1981,20 +2059,20 @@ class ReportsPage(QWidget):
     .patient-box td {{ padding: 5px 0; vertical-align: top; font-size: 10pt; line-height: 1.6; }}
     .closing {{ margin-top: 24px; }}
     .signature-line {{ margin-top: 34px; border-top: 1px solid #374151; width: 260px; }}
+    .image-box {{ border: 1px solid #d1d5db; background: #fafafa; padding: 12px 14px; margin: 10px 0 16px 0; }}
+    .image-caption {{ font-size: 9pt; color: #4b5563; margin-top: 8px; text-align: center; }}
 </style>
 </head>
 <body>
 
 <div class=\"sheet\">
+    <div class=\"date-line\"><span class=\"label\">Date:</span> {esc(report_date)}</div>
     <table class=\"header-grid\">
         <tr>
             <td>
                 <div class=\"header-block\"><span class=\"label\">To:</span> {destination_name}</div>
                 <div class=\"header-block\"><span class=\"label\">Department:</span> {destination_dept}</div>
                 <div class=\"header-block\"><span class=\"label\">Attention:</span> {destination_contact}</div>
-            </td>
-            <td>
-                <div class=\"right-meta\"><span class=\"label\">Date:</span> {esc(report_date)}</div>
             </td>
         </tr>
     </table>
@@ -2047,10 +2125,25 @@ class ReportsPage(QWidget):
         <div class=\"signature-line\"></div>
         <div style="margin-top:8px;"><b>{esc(finalized_by_label)}</b></div>
         <div style=\"font-size:10pt;color:#4b5563;\">Referring Clinician</div>
-        <div style="font-size:10pt;color:#4b5563;margin-top:10px;">
-            <span><b>Created by:</b> {esc(created_by_label)}</span><br>
-            <span><b>Finalized by:</b> {esc(finalized_by_label)}</span>
+    </div>
+</div>
+
+<div class="page-break"></div>
+
+<div class="sheet">
+    <div class="subject">Fundus Image Captured</div>
+    <div class="paragraph">
+        The following retinal fundus image was captured during this screening encounter and is attached for specialist reference.
+    </div>
+    <div class="image-box">
+        <div style="text-align:center;background:#ffffff;padding:8px;border:1px solid #e5e7eb;">
+            {f'<img src="{referral_image_uri}" style="max-width:100%;max-height:560px;width:auto;height:auto;" />' if referral_image_uri else '<div style="padding:80px 20px;color:#9ca3af;font-style:italic;">Fundus image not available</div>'}
         </div>
+        <div class="image-caption">Captured fundus image</div>
+    </div>
+    <div style="font-size:10pt;color:#4b5563;margin-top:20px;line-height:1.8;">
+        <span><b>Created by:</b> {esc(created_by_label)}</span><br>
+        <span><b>Finalized by:</b> {esc(finalized_by_label)}</span>
     </div>
 </div>
 

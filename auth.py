@@ -159,6 +159,14 @@ class UserManager:
         "bmi": "TEXT",
         "treatment_regimen": "TEXT",
         "prev_dr_stage": "TEXT",
+        "ai_classification": "TEXT",
+        "doctor_classification": "TEXT",
+        "decision_mode": "TEXT",
+        "override_justification": "TEXT",
+        "final_diagnosis_icdr": "TEXT",
+        "doctor_findings": "TEXT",
+        "decision_by_username": "TEXT",
+        "decision_at": "TEXT",
     }
 
     _REFERRAL_HOSPITAL_COLUMNS = {
@@ -524,7 +532,7 @@ class UserManager:
     @staticmethod
     def _migrate_users_json(conn: sqlite3.Connection) -> None:
         """Migrate legacy JSON users into SQLite (one-time safe import)."""
-        json_path = os.path.join(os.path.dirname(__file__), "users_data.json")
+        json_path = os.path.join(os.path.dirname(__file__), "config", "users_data.json")
         if not os.path.exists(json_path):
             return
 

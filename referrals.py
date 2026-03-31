@@ -102,6 +102,7 @@ class ReferralService:
 
     @staticmethod
     def _migrate_referral_assignments_schema(conn: sqlite3.Connection) -> None:
+        ReferralService._ensure_migration_users_exist(conn)
         cur = conn.cursor()
         cur.execute(
             """
@@ -140,8 +141,8 @@ class ReferralService:
                 id,
                 referral_id,
                 COALESCE(episode_no, 1),
-                assigned_to_username,
-                assigned_by_username,
+                COALESCE(NULLIF(TRIM(assigned_to_username), ''), '__legacy_unknown__'),
+                COALESCE(NULLIF(TRIM(assigned_by_username), ''), '__legacy_unknown__'),
                 assigned_at,
                 status,
                 patient_name,
@@ -152,7 +153,7 @@ class ReferralService:
                 COALESCE(last_status_at, assigned_at),
                 due_at,
                 closed_at,
-                closed_by_username
+                NULLIF(TRIM(closed_by_username), '')
             FROM referral_assignments
             """
         )
@@ -160,6 +161,42 @@ class ReferralService:
         cur.execute("ALTER TABLE referral_assignments_new RENAME TO referral_assignments")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_assignments_referral ON referral_assignments(referral_id, episode_no DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_assignments_assignee_status ON referral_assignments(assigned_to_username, status)")
+
+    @staticmethod
+    def _ensure_migration_users_exist(conn: sqlite3.Connection) -> None:
+        cur = conn.cursor()
+        usernames = set()
+        cur.execute(
+            """
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(assigned_to_username), ''), '__legacy_unknown__')
+            FROM referral_assignments
+            UNION
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(assigned_by_username), ''), '__legacy_unknown__')
+            FROM referral_assignments
+            UNION
+            SELECT DISTINCT NULLIF(TRIM(closed_by_username), '')
+            FROM referral_assignments
+            """
+        )
+        for row in cur.fetchall():
+            username = str(row[0] or "").strip()
+            if username:
+                usernames.add(username)
+
+        if not usernames:
+            return
+
+        for username in sorted(usernames):
+            cur.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+            if cur.fetchone():
+                continue
+            cur.execute(
+                """
+                INSERT INTO users (username, password_hash, role)
+                VALUES (?, ?, 'viewer')
+                """,
+                (username, "!legacy-migrated-user"),
+            )
 
     @staticmethod
     def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -640,7 +677,13 @@ class ReferralService:
             assigned_to = str(row[1] or "").strip()
             episode_no = int(row[2] or 1)
             timestamp = ReferralService._now()
-            entry = f"[{timestamp}] {actor}: {note_text}"
+            try:
+                dt = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                dt = datetime.now()
+            pretty_date = dt.strftime("%Y-%m-%d")
+            pretty_hour = dt.strftime("%H:%M")
+            entry = f"Message on this patient on {pretty_date} at {pretty_hour} by {actor}: {note_text}"
             merged = f"{existing}\n{entry}".strip() if existing else entry
             cur.execute(
                 "UPDATE referral_assignments SET notes = ?, updated_at = ? WHERE referral_id = ? AND episode_no = ?",
@@ -659,7 +702,7 @@ class ReferralService:
                     assigned_to,
                     referral_key,
                     title="Referral note added",
-                    message=f"{actor} added a note to referral {referral_key}.",
+                    message=f"Message on this patient on {pretty_date} at {pretty_hour}: {note_text}",
                 )
             conn.commit()
             success = cur.rowcount > 0

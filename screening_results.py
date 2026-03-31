@@ -23,6 +23,8 @@ from screening_widgets import ClickableImageLabel
 from safety_runtime import can_write_directory, get_free_space_mb, write_activity
 from auth import UserManager
 
+ICDR_OPTIONS = ["No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"]
+
 
 def _generate_explanation(
     result_class: str,
@@ -146,6 +148,10 @@ class ResultsWindow(QWidget):
         self._current_confidence   = ""
         self._current_eye_label    = ""
         self._current_patient_name = ""
+        self._doctor_classification = "Pending"
+        self._decision_mode = "pending"
+        self._override_justification = ""
+        self._doctor_findings = ""
         self._save_state_timer = QTimer(self)
         self._save_state_timer.setSingleShot(True)
         self._save_state_timer.timeout.connect(self._reset_save_button_default)
@@ -345,6 +351,69 @@ class ResultsWindow(QWidget):
         class_layout.addWidget(class_title)
         class_layout.addWidget(self.classification_value)
         class_layout.addWidget(self.classification_subtitle)
+
+        decision_group = QGroupBox("Clinical Decision (ICDR)")
+        decision_group.setObjectName("resultGroupCard")
+        decision_layout = QVBoxLayout(decision_group)
+        decision_layout.setContentsMargins(14, 14, 14, 14)
+        decision_layout.setSpacing(8)
+
+        self.final_dx_label = QLabel("Final Diagnosis: Based on ICDR Severity Scale")
+        self.final_dx_label.setObjectName("resultStatTitle")
+        decision_layout.addWidget(self.final_dx_label)
+
+        ai_row = QHBoxLayout()
+        ai_row.setSpacing(8)
+        ai_tag = QLabel("AI")
+        ai_tag.setObjectName("infoPill")
+        self.ai_classification_value = QLabel("Pending")
+        self.ai_classification_value.setObjectName("resultStatValue")
+        ai_row.addWidget(ai_tag)
+        ai_row.addWidget(self.ai_classification_value, 1)
+        decision_layout.addLayout(ai_row)
+
+        doctor_row = QHBoxLayout()
+        doctor_row.setSpacing(8)
+        doctor_tag = QLabel("Doctor")
+        doctor_tag.setObjectName("savedPill")
+        self.doctor_classification_combo = QComboBox()
+        self.doctor_classification_combo.addItems(ICDR_OPTIONS)
+        self.doctor_classification_combo.currentTextChanged.connect(self._on_doctor_classification_changed)
+        doctor_row.addWidget(doctor_tag)
+        doctor_row.addWidget(self.doctor_classification_combo, 1)
+        decision_layout.addLayout(doctor_row)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        self.accept_ai_btn = QPushButton("Accept AI")
+        self.accept_ai_btn.clicked.connect(self._accept_ai_classification)
+        self.override_ai_btn = QPushButton("Override AI")
+        self.override_ai_btn.clicked.connect(self._prepare_override)
+        action_row.addWidget(self.accept_ai_btn)
+        action_row.addWidget(self.override_ai_btn)
+        decision_layout.addLayout(action_row)
+
+        self.override_reason_label = QLabel("Override justification (required if different from AI):")
+        self.override_reason_label.setObjectName("metaText")
+        self.override_reason_input = QLineEdit()
+        self.override_reason_input.setPlaceholderText("Provide concise clinical justification...")
+        self.override_reason_input.textChanged.connect(self._on_override_reason_changed)
+        decision_layout.addWidget(self.override_reason_label)
+        decision_layout.addWidget(self.override_reason_input)
+
+        self.findings_label = QLabel("Doctor findings and classification comment:")
+        self.findings_label.setObjectName("metaText")
+        self.findings_input = QLineEdit()
+        self.findings_input.setPlaceholderText("Document retinal findings supporting the selected ICDR classification...")
+        self.findings_input.textChanged.connect(self._on_findings_changed)
+        decision_layout.addWidget(self.findings_label)
+        decision_layout.addWidget(self.findings_input)
+
+        self.decision_hint = QLabel("AI is decision support. Doctor classification is the final authority.")
+        self.decision_hint.setObjectName("metaText")
+        self.decision_hint.setWordWrap(True)
+        decision_layout.addWidget(self.decision_hint)
+        layout.addWidget(decision_group)
 
         confidence_card = QFrame()
         confidence_card.setObjectName("resultStatCard")
@@ -879,6 +948,82 @@ class ResultsWindow(QWidget):
     def _acknowledge_uncertainty(self):
         return
 
+    def _accept_ai_classification(self):
+        ai_value = str(self._current_result_class or "").strip()
+        if ai_value in ICDR_OPTIONS:
+            self.doctor_classification_combo.setCurrentText(ai_value)
+            self._doctor_classification = ai_value
+            self._decision_mode = "accepted"
+            self._override_justification = ""
+            self.override_reason_input.clear()
+            self._refresh_decision_ui_state()
+
+    def _prepare_override(self):
+        self._decision_mode = "override"
+        self._refresh_decision_ui_state()
+        self.override_reason_input.setFocus()
+
+    def _on_doctor_classification_changed(self, value: str):
+        chosen = str(value or "").strip()
+        if chosen in ICDR_OPTIONS:
+            self._doctor_classification = chosen
+        ai_value = str(self._current_result_class or "").strip()
+        if self._doctor_classification == ai_value:
+            if self._decision_mode == "override":
+                self._decision_mode = "accepted"
+                self.override_reason_input.clear()
+                self._override_justification = ""
+        else:
+            self._decision_mode = "override"
+        self._refresh_decision_ui_state()
+
+    def _on_override_reason_changed(self, text: str):
+        self._override_justification = str(text or "").strip()
+        self._refresh_decision_ui_state()
+
+    def _on_findings_changed(self, text: str):
+        self._doctor_findings = str(text or "").strip()
+
+    def _refresh_decision_ui_state(self):
+        ai_value = str(self._current_result_class or "").strip()
+        requires_override = self._doctor_classification != ai_value and self._doctor_classification in ICDR_OPTIONS
+        show_override = self._decision_mode == "override" or requires_override
+        self.override_reason_label.setVisible(show_override)
+        self.override_reason_input.setVisible(show_override)
+        if requires_override:
+            self.decision_hint.setText("Override selected. Clinical justification is required before saving.")
+        else:
+            self.decision_hint.setText("AI is decision support. Doctor classification is the final authority.")
+
+    def get_decision_payload(self) -> dict:
+        ai_value = str(self._current_result_class or "").strip()
+        doctor_value = str(self._doctor_classification or "").strip()
+        requires_override = doctor_value and ai_value and doctor_value != ai_value
+        mode = "override" if requires_override else "accepted"
+        override_text = str(self._override_justification or "").strip()
+        return {
+            "ai_classification": ai_value,
+            "doctor_classification": doctor_value,
+            "decision_mode": mode,
+            "override_justification": override_text,
+            "final_diagnosis_icdr": doctor_value,
+            "doctor_findings": str(self._doctor_findings or "").strip(),
+        }
+
+    def validate_decision_before_save(self) -> tuple[bool, str]:
+        payload = self.get_decision_payload()
+        doctor_value = str(payload.get("doctor_classification") or "").strip()
+        if doctor_value not in ICDR_OPTIONS:
+            return False, "Please choose the doctor classification (ICDR)."
+        if payload.get("decision_mode") == "override":
+            justification = str(payload.get("override_justification") or "").strip()
+            if len(justification) < 8:
+                return False, "Override requires a brief clinical justification (at least 8 characters)."
+        findings = str(payload.get("doctor_findings") or "").strip()
+        if len(findings) < 12:
+            return False, "Please enter doctor findings/comment (at least 12 characters)."
+        return True, ""
+
     def set_results(self, patient_name, image_path, result_class="Pending", confidence_text="Pending", eye_label="", first_eye_result=None, heatmap_path="", patient_data=None, heatmap_pending=False):
         is_loading = result_class in ("Analyzing…", "Pending")
         is_busy = is_loading or heatmap_pending
@@ -919,6 +1064,7 @@ class ResultsWindow(QWidget):
 
         # Classification with severity colour
         self.classification_value.setText(result_class)
+        self.ai_classification_value.setText(result_class)
         grade_color = DR_COLORS.get(result_class, "#1f2937")
         self.classification_value.setStyleSheet(f"color:{grade_color};font-size:33px;font-weight:800;")
 
@@ -1019,6 +1165,15 @@ class ResultsWindow(QWidget):
         self._current_confidence   = confidence_text
         self._current_eye_label    = eye_label
         self._current_patient_name = patient_name or ""
+        if result_class in ICDR_OPTIONS:
+            self.doctor_classification_combo.setCurrentText(result_class)
+            self._doctor_classification = result_class
+            self._decision_mode = "accepted"
+            self._override_justification = ""
+            self.override_reason_input.clear()
+            self._doctor_findings = ""
+            self.findings_input.clear()
+        self._refresh_decision_ui_state()
         _report_ready = (
             not is_busy
             and bool(image_path)
@@ -1072,6 +1227,14 @@ class ResultsWindow(QWidget):
 
         if status == "unchanged":
             self._set_save_state("unchanged")
+            return
+
+        if status == "invalid":
+            self._set_save_state("failed", "Please complete required fields before saving.")
+            return
+
+        if status == "cancelled":
+            self._set_save_state("idle")
             return
 
         if status in ("error", "blocked"):
@@ -1261,7 +1424,7 @@ class ResultsWindow(QWidget):
             return escape(v) if v and v not in ("0", "None", "Select") else "&mdash;"
 
         # Clinic branding from config.json
-        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "config.json")
         clinic_name = "EyeShield EMR"
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -1277,6 +1440,11 @@ class ResultsWindow(QWidget):
         confidence_display = escape(raw_confidence) if raw_confidence else "&mdash;"
 
         result_raw = str(self._current_result_class or "").strip()
+        decision = self.get_decision_payload()
+        final_dx = str(decision.get("final_diagnosis_icdr") or result_raw or "").strip()
+        decision_mode = str(decision.get("decision_mode") or "accepted").strip()
+        override_note = str(decision.get("override_justification") or "").strip()
+        findings_note = str(decision.get("doctor_findings") or "").strip()
         grade_color = DR_COLORS.get(result_raw, "#374151")
         grade_bg_map = {
             "No DR": "#d1f5e0",
@@ -1287,7 +1455,7 @@ class ResultsWindow(QWidget):
         }
         grade_bg = grade_bg_map.get(result_raw, "#f3f4f6")
 
-        recommendation = escape(DR_RECOMMENDATIONS.get(result_raw, "Consult a qualified ophthalmologist"))
+        recommendation = escape(DR_RECOMMENDATIONS.get(final_dx or result_raw, "Consult a qualified ophthalmologist"))
 
         explanation_text = (self.explanation.text() or "").strip()
         if explanation_text:
@@ -1638,6 +1806,32 @@ img {{
 {field_row("Confidence", conf_display, False)}
 </table>
 
+{sec("Doctor Decision")}
+<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d1d5db;margin-bottom:18px;">
+{field_row("Decision Mode", esc(decision_mode.title()))}
+{field_row("Doctor Classification", esc(final_dx or "—"))}
+{field_row("Doctor Findings", esc(findings_note or "—"))}
+{field_row("Final Diagnosis", esc("Based on ICDR Severity Scale"), False)}
+</table>
+
+<div style="padding:10px 12px;border:1px solid #d1d5db;margin-bottom:18px;background:#fafafa;">
+    <div style="font-size:8.5pt;color:#374151;">
+        <b>Final Diagnosis: Based on ICDR Severity Scale</b><br>
+        AI output remains visible for transparency and decision support.
+    </div>
+</div>
+
+"""
+        if decision_mode == "override":
+            html += f"""
+<div style="padding:10px 12px;border:1px solid #fecaca;margin-bottom:18px;background:#fff1f2;">
+    <div style="font-size:8.5pt;color:#7f1d1d;">
+        <b>Override Justification:</b> {esc(override_note or "No justification provided")}
+    </div>
+</div>
+"""
+        html += f"""
+
 <!-- Fundus Images -->
 {sec("Fundus Images")}
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:18px;">
@@ -1907,6 +2101,7 @@ img {{
             if screened_by_name and screened_by_title
             else screened_by_name
         )
+        screened_by_label = screened_by_raw if screened_by_raw.lower().startswith("dr.") else f"Dr. {screened_by_raw}"
         doctor_contact = str(profile.get("contact") or "").strip()
 
         # Referral mapping
@@ -1917,7 +2112,8 @@ img {{
             "Severe DR": ("Urgent", "Urgent ophthalmology review is advised due to high progression risk."),
             "Proliferative DR": ("Immediate", "Immediate specialist referral is required for potential sight-threatening disease."),
         }
-        urgency, rationale = referral_map.get(self._current_result_class, ("Clinical Review", "Please evaluate for diabetic retinopathy management."))
+        final_dx = self.get_decision_payload().get("final_diagnosis_icdr") or self._current_result_class
+        urgency, rationale = referral_map.get(final_dx, ("Clinical Review", "Please evaluate for diabetic retinopathy management."))
 
         report_date = datetime.now().strftime("%B %d, %Y")
         screen_date_text = esc(_to_long_date(datetime.now().strftime("%B %d, %Y")))
@@ -1945,6 +2141,10 @@ img {{
         destination_name = esc(hospital_name)
         destination_dept = esc(hospital_dept)
         destination_contact = esc(hospital_contact)
+        referral_image_uri = ""
+        image_path = str(self._current_image_path or "").strip()
+        if image_path and os.path.exists(image_path):
+            referral_image_uri = Path(image_path).resolve().as_uri()
 
         html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -1957,10 +2157,11 @@ body {{
     line-height: 1.6;
 }}
 .sheet {{ padding: 26px 36px; }}
+.page-break {{ page-break-before: always; }}
 .header-grid {{ width: 100%; border-collapse: collapse; margin-bottom: 14px; }}
-.header-grid td {{ width: 50%; vertical-align: top; padding: 0; }}
+.header-grid td {{ width: 100%; vertical-align: top; padding: 0; }}
 .header-block {{ font-size: 10.8pt; line-height: 1.65; }}
-.right-meta {{ text-align: right; font-size: 10.8pt; line-height: 1.65; }}
+.date-line {{ font-size: 10.8pt; line-height: 1.65; margin-bottom: 8px; }}
 .label {{ font-weight: 700; }}
 .subject {{ margin: 14px 0 14px 0; font-size: 11.5pt; font-weight: 700; }}
 .paragraph {{ margin: 0 0 12px 0; text-align: justify; line-height: 1.7; }}
@@ -1974,20 +2175,20 @@ body {{
 .patient-box td {{ padding: 5px 0; vertical-align: top; font-size: 10pt; line-height: 1.6; }}
 .closing {{ margin-top: 24px; }}
 .signature-line {{ margin-top: 34px; border-top: 1px solid #374151; width: 260px; }}
+.image-box {{ border: 1px solid #d1d5db; background: #fafafa; padding: 12px 14px; margin: 10px 0 16px 0; }}
+.image-caption {{ font-size: 9pt; color: #4b5563; margin-top: 8px; text-align: center; }}
 </style>
 </head>
 <body>
 
 <div class="sheet">
+    <div class="date-line"><span class="label">Date:</span> {esc(report_date)}</div>
     <table class="header-grid">
         <tr>
             <td>
                 <div class="header-block"><span class="label">To:</span> {destination_name}</div>
                 <div class="header-block"><span class="label">Department:</span> {destination_dept}</div>
                 <div class="header-block"><span class="label">Attention:</span> {destination_contact}</div>
-            </td>
-            <td>
-                <div class="right-meta"><span class="label">Date:</span> {esc(report_date)}</div>
             </td>
         </tr>
     </table>
@@ -1998,7 +2199,7 @@ body {{
 
     <div class="paragraph">
         I am referring this patient for specialist ophthalmology assessment following diabetic retinopathy screening.
-        The current screening result indicates <b>{esc(self._current_result_class)}</b> with <b>{esc(urgency)}</b> referral priority.
+        The current AI screening result indicates <b>{esc(self._current_result_class)}</b>. Final diagnosis based on ICDR by doctor is <b>{esc(final_dx)}</b> with <b>{esc(urgency)}</b> referral priority.
         Screening was performed on {screen_date_text}.
     </div>
 
@@ -2038,12 +2239,28 @@ body {{
     <div class="closing">
         <div style="margin-bottom:8px;">Sincerely,</div>
         <div class="signature-line"></div>
-        <div style="margin-top:8px;"><b>{esc(screened_by_raw)}</b></div>
+        <div style="margin-top:8px;"><b>{esc(screened_by_label)}</b></div>
         <div style="font-size:10pt;color:#4b5563;">Referring Clinician</div>
-        <div style="font-size:10pt;color:#4b5563;margin-top:10px;">
-            <span><b>Created by:</b> {esc(screened_by_raw)}</span><br>
-            <span><b>Finalized by:</b> {esc(screened_by_raw)}</span>
+    </div>
+</div>
+
+<div class="page-break"></div>
+
+<div class="sheet">
+    <div class="subject">Fundus Image Captured</div>
+    <div class="paragraph">
+        The following retinal fundus image was captured during this screening encounter and is attached for specialist reference.
+    </div>
+    <div class="image-box">
+        <div style="text-align:center;background:#ffffff;padding:8px;border:1px solid #e5e7eb;">
+            {f'<img src="{referral_image_uri}" style="max-width:100%;max-height:560px;width:auto;height:auto;" />' if referral_image_uri else '<div style="padding:80px 20px;color:#9ca3af;font-style:italic;">Fundus image not available</div>'}
         </div>
+        <div class="image-caption">Captured fundus image</div>
+    </div>
+
+    <div style="font-size:10pt;color:#4b5563;margin-top:20px;line-height:1.8;">
+        <span><b>Created by:</b> {esc(screened_by_label)}</span><br>
+        <span><b>Finalized by:</b> {esc(screened_by_label)}</span>
     </div>
 </div>
 
