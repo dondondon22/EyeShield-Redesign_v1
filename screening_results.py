@@ -12,7 +12,8 @@ import re
 
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QScrollArea, QFrame, QProgressBar, QMessageBox, QFileDialog, QStyle, QProgressDialog, QApplication, QDialog
+    QScrollArea, QFrame, QProgressBar, QMessageBox, QFileDialog, QStyle, QProgressDialog, QApplication, QDialog,
+    QComboBox, QLineEdit
 )
 from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QIcon, QPalette, QImage, QPdfWriter, QPageSize, QPageLayout, QTextDocument
 from PySide6.QtCore import Qt, QSize, QEvent, QTimer, QByteArray, QBuffer, QIODevice, QMarginsF
@@ -228,7 +229,7 @@ class ResultsWindow(QWidget):
         action_row.addWidget(self.btn_report)
 
         self.btn_referral = QPushButton("Refer")
-        self.btn_referral.setObjectName("neutralAction")
+        self.btn_referral.setObjectName("referAction")
         self.btn_referral.setMinimumHeight(36)
         self.btn_referral.setIconSize(QSize(18, 18))
         self.btn_referral.setEnabled(False)
@@ -722,6 +723,25 @@ class ResultsWindow(QWidget):
                 background: #f9fafb;
                 border-color: #9ca3af;
             }
+            QPushButton#referAction {
+                background: #ecfeff;
+                color: #0f766e;
+                border: 1px solid #99f6e4;
+                font-weight: 700;
+            }
+            QPushButton#referAction:hover {
+                background: #ccfbf1;
+                border-color: #5eead4;
+            }
+            QPushButton#referAction:pressed {
+                background: #99f6e4;
+                border-color: #2dd4bf;
+            }
+            QPushButton#referAction:disabled {
+                background: #f8fafc;
+                color: #94a3b8;
+                border-color: #e2e8f0;
+            }
             QPushButton#dangerAction {
                 background: #fef2f2;
                 color: #b91c1c;
@@ -771,6 +791,7 @@ class ResultsWindow(QWidget):
     def _apply_action_icons(self):
         self.btn_save.setIcon(self._build_action_icon("save_patient.svg", QStyle.StandardPixmap.SP_DialogSaveButton))
         self.btn_report.setIcon(self._build_action_icon("generate.svg", QStyle.StandardPixmap.SP_ArrowDown))
+        self.btn_referral.setIcon(self._build_action_icon("refer.svg", QStyle.StandardPixmap.SP_CommandLink))
         self.btn_screen_another.setIcon(self._build_action_icon("another_eye.svg", QStyle.StandardPixmap.SP_FileDialogStart))
         self.btn_new.setIcon(self._build_action_icon("new_patient.svg", QStyle.StandardPixmap.SP_FileDialogNewFolder))
         self.btn_back.setIcon(self._build_action_icon("back_to_screening.svg", QStyle.StandardPixmap.SP_ArrowBack))
@@ -1831,6 +1852,10 @@ img {{
             QMessageBox.warning(self, "Generate Referral", "Please save the result before generating a referral")
             return
 
+        destination = self._prompt_referral_destination()
+        if not destination:
+            return
+
         # Get patient data from parent page
         patient_name_raw = str(self._current_patient_name or "Patient").strip()
         default_name = f"EyeShield_Referral_{patient_name_raw}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
@@ -1910,10 +1935,9 @@ img {{
         patient_visual_acuity_right = esc(patient_data.get("visual_acuity_right") or "")
         patient_notes = esc(patient_data.get("notes") or "")
 
-        # Placeholder hospital info - user will select later
-        hospital_name = "Ophthalmology Clinic"
-        hospital_dept = "Ophthalmology Department"
-        hospital_contact = "Ophthalmologist"
+        hospital_name = str(destination.get("hospital_name") or "").strip() or "Ophthalmology Clinic"
+        hospital_dept = str(destination.get("department") or "").strip() or "Ophthalmology Department"
+        hospital_contact = str(destination.get("contact_person") or "").strip() or "Ophthalmologist"
 
         destination_name = esc(hospital_name)
         destination_dept = esc(hospital_dept)
@@ -2041,3 +2065,103 @@ body {{
         doc.print_(writer)
         write_activity("INFO", "REFERRAL_GENERATED", f"path={path}")
         QMessageBox.information(self, "Referral Saved", f"Referral letter saved to:\n{path}")
+
+    def _prompt_referral_destination(self) -> dict | None:
+        hospitals = UserManager.list_referral_hospitals(active_only=True)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Referral Destination")
+        dialog.resize(580, 340)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        subtitle = QLabel("Choose a referral hospital/clinic or use manual entry.")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("color:#4f637a;font-size:12px;")
+        layout.addWidget(subtitle)
+
+        hospital_label = QLabel("Referral Hospital / Clinic")
+        hospital_label.setStyleSheet("font-size:11px;font-weight:700;color:#2f4054;")
+        hospital_combo = QComboBox()
+        hospital_combo.setMinimumHeight(36)
+        for item in hospitals:
+            dept = str(item.get("department") or "").strip()
+            label = str(item.get("hospital_name") or "").strip()
+            if dept:
+                label = f"{label} ({dept})"
+            if item.get("is_default"):
+                label = f"{label}  [Default]"
+            hospital_combo.addItem(label, item)
+        hospital_combo.addItem("Other (manual entry)", None)
+        layout.addWidget(hospital_label)
+        layout.addWidget(hospital_combo)
+
+        manual_wrap = QWidget()
+        manual_layout = QVBoxLayout(manual_wrap)
+        manual_layout.setContentsMargins(0, 0, 0, 0)
+        manual_layout.setSpacing(8)
+
+        manual_layout.addWidget(QLabel("Manual Destination Details"))
+        manual_name = QLineEdit()
+        manual_name.setPlaceholderText("Hospital or clinic name")
+        manual_department = QLineEdit()
+        manual_department.setPlaceholderText("Department (optional)")
+        manual_contact = QLineEdit()
+        manual_contact.setPlaceholderText("Contact person / phone (optional)")
+        manual_layout.addWidget(manual_name)
+        manual_layout.addWidget(manual_department)
+        manual_layout.addWidget(manual_contact)
+        layout.addWidget(manual_wrap)
+
+        action_row = QHBoxLayout()
+        action_row.addStretch(1)
+        cancel_btn = QPushButton("Cancel")
+        continue_btn = QPushButton("Continue")
+        continue_btn.setObjectName("primaryAction")
+        action_row.addWidget(cancel_btn)
+        action_row.addWidget(continue_btn)
+        layout.addLayout(action_row)
+
+        cancel_btn.clicked.connect(dialog.reject)
+        continue_btn.clicked.connect(dialog.accept)
+
+        def _is_manual_selected() -> bool:
+            return hospital_combo.currentData() is None
+
+        def _sync_manual_visibility():
+            manual_wrap.setVisible(_is_manual_selected())
+
+        hospital_combo.currentIndexChanged.connect(_sync_manual_visibility)
+        _sync_manual_visibility()
+
+        while True:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            selected = hospital_combo.currentData()
+            if selected is None:
+                name = manual_name.text().strip()
+                if not name:
+                    QMessageBox.warning(dialog, "Referral Destination", "Hospital/clinic name is required for manual entry.")
+                    continue
+                department = manual_department.text().strip()
+                contact = manual_contact.text().strip()
+                display = name if not department else f"{name} ({department})"
+                return {
+                    "hospital_name": name,
+                    "department": department,
+                    "contact_person": contact,
+                    "display": display,
+                }
+
+            hospital_name = str(selected.get("hospital_name") or "").strip()
+            department = str(selected.get("department") or "").strip()
+            contact = str(selected.get("contact_person") or selected.get("phone") or "").strip()
+            display = hospital_name if not department else f"{hospital_name} ({department})"
+            return {
+                "hospital_name": hospital_name,
+                "department": department,
+                "contact_person": contact,
+                "display": display,
+            }

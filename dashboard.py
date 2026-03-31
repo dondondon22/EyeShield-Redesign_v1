@@ -14,7 +14,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QGroupBox, QMessageBox, QProgressBar, QSizePolicy,
-    QFrame, QMenu
+    QFrame, QMenu, QInputDialog, QTableWidget, QTableWidgetItem, QAbstractItemView,
+    QHeaderView
 )
 from PySide6.QtCore import Qt, QSize, QByteArray, QEvent, QTimer, QCoreApplication
 from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication
@@ -372,7 +373,7 @@ class EyeShieldApp(QMainWindow):
             if result == 1:  # Accept button clicked
                 # Mark all pending referrals as viewed
                 for referral in referrals:
-                    UserManager.update_referral_status(referral["referral_id"], "viewed")
+                    UserManager.update_referral_status(referral["referral_id"], "viewed", self.username)
                 if getattr(dialog, "go_to_referrals", False):
                     self._navigate_to(7)
 
@@ -1454,24 +1455,60 @@ class EyeShieldApp(QMainWindow):
         feed_title.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; background: transparent;")
         feed_v.addWidget(feed_title)
 
-        self.referrals_feed_layout = QVBoxLayout()
-        self.referrals_feed_layout.setContentsMargins(0, 0, 0, 0)
-        self.referrals_feed_layout.setSpacing(6)
-        feed_v.addLayout(self.referrals_feed_layout)
-        feed_v.addStretch(1)
+        self.referrals_table = QTableWidget(0, 7)
+        self.referrals_table.setHorizontalHeaderLabels(
+            ["Patient", "Status", "Urgency", "Referred By", "Assigned To", "Relation", "Date of Referral"]
+        )
+        self.referrals_table.setAlternatingRowColors(True)
+        self.referrals_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.referrals_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.referrals_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.referrals_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.referrals_table.verticalHeader().setVisible(False)
+        self.referrals_table.verticalHeader().setDefaultSectionSize(34)
+        header = self.referrals_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.referrals_table.setStyleSheet(
+            """
+            QTableWidget {
+                border: 1px solid #e5edf7;
+                border-radius: 8px;
+                gridline-color: #edf2f7;
+                background: #ffffff;
+                alternate-background-color: #f8fbff;
+                color: #1f2937;
+                font-size: 11px;
+            }
+            QHeaderView::section {
+                background: #f1f5f9;
+                color: #475569;
+                font-weight: 700;
+                font-size: 10px;
+                border: none;
+                border-right: 1px solid #e2e8f0;
+                padding: 6px;
+            }
+            """
+        )
+        self.referrals_table.itemDoubleClicked.connect(self._handle_referral_table_double_click)
+        self.referrals_table.customContextMenuRequested.connect(self._show_referral_table_context_menu)
+        self._referral_rows_by_id = {}
+        feed_v.addWidget(self.referrals_table)
 
         layout.addWidget(feed_card, 1)
         return page
 
     def refresh_referrals_page(self):
         """Refresh referral activity page with private user data."""
-        if not hasattr(self, "referrals_feed_layout"):
+        if not hasattr(self, "referrals_table"):
             return
-
-        while self.referrals_feed_layout.count():
-            item = self.referrals_feed_layout.takeAt(0)
-            if w := item.widget():
-                w.deleteLater()
 
         referrals = UserManager.get_user_referrals(self.username, limit=200)
         assigned_to_me_count = sum(1 for item in referrals if item.get("relation") == "assigned_to_me")
@@ -1482,70 +1519,233 @@ class EyeShieldApp(QMainWindow):
         if hasattr(self, "ref_created_by_me_value"):
             self.ref_created_by_me_value.setText(str(created_by_me_count))
 
+        self.referrals_table.clearContents()
+        self.referrals_table.setRowCount(0)
+        self._referral_rows_by_id = {}
+
         if not referrals:
-            empty_lbl = QLabel("No referral activity for your account yet.")
-            empty_lbl.setStyleSheet(
-                "font-size: 12px; color: #64748b; font-weight: 600; background: transparent; padding: 6px 0;"
-            )
-            self.referrals_feed_layout.addWidget(empty_lbl)
+            self.referrals_table.setRowCount(1)
+            empty = QTableWidgetItem("No referral activity for your account yet.")
+            empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.referrals_table.setItem(0, 0, empty)
+            for col in range(1, self.referrals_table.columnCount()):
+                cell = QTableWidgetItem("")
+                cell.setFlags(Qt.ItemIsEnabled)
+                self.referrals_table.setItem(0, col, cell)
             return
 
-        for referral in referrals[:12]:
+        table_referrals = referrals[:30]
+        self.referrals_table.setRowCount(len(table_referrals))
+        for row_index, referral in enumerate(table_referrals):
             relation = referral.get("relation")
             relation_text = "Assigned to me" if relation == "assigned_to_me" else "Created by me"
-            relation_color = "#0e6fcd" if relation == "assigned_to_me" else "#2e7d32"
             patient_name = str(referral.get("patient_name") or "Unknown Patient").strip() or "Unknown Patient"
             urgency = str(referral.get("urgency") or "normal").capitalize()
-            status = str(referral.get("status") or "pending").capitalize()
+            status_raw = str(referral.get("status") or "pending").strip()
+            status = status_raw.replace("_", " ").title()
             assigned_at = str(referral.get("assigned_at") or "").strip()
             assigned_by = str(referral.get("assigned_by") or "").strip()
             assigned_to = str(referral.get("assigned_to") or "").strip()
+            row_values = [patient_name, status, urgency, assigned_by or "-", assigned_to or "-", relation_text, assigned_at or "-"]
+            for col_index, value in enumerate(row_values):
+                item = QTableWidgetItem(value)
+                item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                if col_index == 1:
+                    normalized = status_raw.lower()
+                    if normalized in {"pending", "viewed"}:
+                        item.setForeground(QColor("#0e6fcd"))
+                    elif normalized in {"in_review", "reassigned", "rereferred"}:
+                        item.setForeground(QColor("#b45309"))
+                    elif normalized in {"completed", "archived"}:
+                        item.setForeground(QColor("#2e7d32"))
+                self.referrals_table.setItem(row_index, col_index, item)
 
-            row = QWidget()
-            row.setStyleSheet(
-                "QWidget {"
-                "background: #f8fbff;"
-                "border: 1px solid #e5edf7;"
-                "border-radius: 8px;"
-                "}"
-            )
-            row.setCursor(Qt.PointingHandCursor)
-            row.setProperty("patient_name", patient_name)
-            row.mouseDoubleClickEvent = lambda event, pname=patient_name: self._show_referral_details(pname)
-            row.setContextMenuPolicy(Qt.CustomContextMenu)
-            row.customContextMenuRequested.connect(
-                lambda pos, row_widget=row, pname=patient_name: self._show_referral_context_menu(row_widget, pname, pos)
-            )
-            row_v = QVBoxLayout(row)
-            row_v.setContentsMargins(10, 8, 10, 8)
-            row_v.setSpacing(2)
+            self.referrals_table.setRowHeight(row_index, 34)
+            referral_key = str(referral.get("referral_id") or "")
+            if referral_key:
+                self._referral_rows_by_id[referral_key] = referral
 
-            top = QLabel(f"{patient_name} • {urgency} • {status}")
-            top.setStyleSheet("font-size: 12px; font-weight: 700; color: #1f2937; background: transparent;")
-            top.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            row_v.addWidget(top)
+    def _open_referral_details(self, referral: dict):
+        patient_name = str(referral.get("patient_name") or "").strip()
+        if not patient_name:
+            QMessageBox.warning(self, "Referral", "This referral does not contain a valid patient name.")
+            return
 
-            byline = QLabel(f"{relation_text} | {assigned_by} -> {assigned_to}")
-            byline.setStyleSheet(
-                f"font-size: 11px; font-weight: 700; color: {relation_color}; background: transparent;"
-            )
-            byline.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            row_v.addWidget(byline)
+        referral_id = str(referral.get("referral_id") or "").strip()
+        relation = str(referral.get("relation") or "")
+        status = str(referral.get("status") or "").lower()
+        if referral_id and relation == "assigned_to_me" and status == "pending":
+            UserManager.update_referral_status(referral_id, "viewed", self.username)
 
-            if assigned_at:
-                date_lbl = QLabel(assigned_at)
-                date_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #64748b; background: transparent;")
-                date_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-                row_v.addWidget(date_lbl)
+        self._show_referral_details(patient_name)
+        self.refresh_referrals_page()
 
-            self.referrals_feed_layout.addWidget(row)
+    def _show_referral_context_menu(self, row_widget: QWidget, referral: dict, local_pos):
+        patient_name = str(referral.get("patient_name") or "Unknown Patient").strip() or "Unknown Patient"
+        referral_id = str(referral.get("referral_id") or "").strip()
+        relation = str(referral.get("relation") or "")
 
-    def _show_referral_context_menu(self, row_widget: QWidget, patient_name: str, local_pos):
         menu = QMenu(self)
-        action = menu.addAction("View Details")
+        view_action = menu.addAction("View Details")
+        viewed_action = None
+        review_action = None
+        complete_action = None
+        note_action = None
+        reassign_action = None
+
+        if relation == "assigned_to_me" and referral_id:
+            menu.addSeparator()
+            viewed_action = menu.addAction("Mark as Viewed")
+            review_action = menu.addAction("Start Review")
+            complete_action = menu.addAction("Complete Referral")
+            note_action = menu.addAction("Add Clinical Note")
+            menu.addSeparator()
+            reassign_action = menu.addAction("Reassign Referral")
+
         chosen = menu.exec(row_widget.mapToGlobal(local_pos))
-        if chosen == action:
-            self._show_referral_details(patient_name)
+        if chosen == view_action:
+            self._open_referral_details(referral)
+            return
+        if chosen == viewed_action:
+            self._apply_referral_status(referral, "viewed")
+            return
+        if chosen == review_action:
+            self._apply_referral_status(referral, "in_review")
+            return
+        if chosen == complete_action:
+            self._apply_referral_status(referral, "completed", require_note=True)
+            return
+        if chosen == note_action:
+            note, ok = QInputDialog.getMultiLineText(
+                self,
+                "Clinical Note",
+                f"Add note for {patient_name}:",
+                "",
+            )
+            if ok and str(note).strip():
+                if UserManager.append_referral_note(referral_id, self.username, note.strip()):
+                    QMessageBox.information(self, "Referral", "Clinical note saved.")
+                    self.refresh_referrals_page()
+                else:
+                    QMessageBox.warning(self, "Referral", "Unable to save clinical note.")
+            return
+        if chosen == reassign_action:
+            self._reassign_referral(referral)
+
+    def _referral_for_selected_table_row(self, row_index: int) -> dict | None:
+        if not hasattr(self, "referrals_table"):
+            return None
+        if row_index < 0 or row_index >= self.referrals_table.rowCount():
+            return None
+
+        patient_item = self.referrals_table.item(row_index, 0)
+        date_item = self.referrals_table.item(row_index, 6)
+        if not patient_item:
+            return None
+
+        patient_name = str(patient_item.text() or "").strip()
+        assigned_at = str(date_item.text() if date_item else "").strip()
+        for referral in self._referral_rows_by_id.values():
+            if (
+                str(referral.get("patient_name") or "").strip() == patient_name
+                and str(referral.get("assigned_at") or "").strip() == assigned_at
+            ):
+                return referral
+        return None
+
+    def _handle_referral_table_double_click(self, item: QTableWidgetItem):
+        referral = self._referral_for_selected_table_row(item.row())
+        if referral:
+            self._open_referral_details(referral)
+
+    def _show_referral_table_context_menu(self, local_pos):
+        if not hasattr(self, "referrals_table"):
+            return
+        item = self.referrals_table.itemAt(local_pos)
+        if not item:
+            return
+        referral = self._referral_for_selected_table_row(item.row())
+        if not referral:
+            return
+
+        self._show_referral_context_menu(self.referrals_table.viewport(), referral, local_pos)
+
+    def _apply_referral_status(self, referral: dict, new_status: str, require_note: bool = False):
+        referral_id = str(referral.get("referral_id") or "").strip()
+        if not referral_id:
+            QMessageBox.warning(self, "Referral", "Referral ID is missing.")
+            return
+
+        note_text = ""
+        if require_note:
+            note_text, ok = QInputDialog.getMultiLineText(
+                self,
+                "Complete Referral",
+                "Provide completion summary (required):",
+                "",
+            )
+            if not ok:
+                return
+            note_text = str(note_text).strip()
+            if not note_text:
+                QMessageBox.warning(self, "Referral", "Completion summary is required.")
+                return
+
+        if not UserManager.update_referral_status(referral_id, new_status, self.username):
+            QMessageBox.warning(self, "Referral", "Failed to update referral status.")
+            return
+
+        if note_text:
+            UserManager.append_referral_note(referral_id, self.username, note_text)
+
+        self.refresh_referrals_page()
+        QMessageBox.information(self, "Referral", f"Referral marked as {new_status.replace('_', ' ')}.")
+
+    def _reassign_referral(self, referral: dict):
+        referral_id = str(referral.get("referral_id") or "").strip()
+        patient_name = str(referral.get("patient_name") or "Unknown Patient").strip() or "Unknown Patient"
+        if not referral_id:
+            QMessageBox.warning(self, "Referral", "Referral ID is missing.")
+            return
+
+        clinicians = UserManager.list_clinicians(exclude_username=self.username)
+        if not clinicians:
+            QMessageBox.information(self, "Referral", "No other clinicians available for reassignment.")
+            return
+
+        options = [f"{item.get('display_name')} (@{item.get('username')})" for item in clinicians]
+        selected, ok = QInputDialog.getItem(
+            self,
+            "Reassign Referral",
+            f"Select clinician for {patient_name}:",
+            options,
+            0,
+            False,
+        )
+        if not ok or not selected:
+            return
+
+        index = options.index(selected)
+        target = clinicians[index].get("username")
+
+        reason, ok = QInputDialog.getMultiLineText(
+            self,
+            "Reassignment Reason",
+            "Reason for reassignment (required):",
+            "",
+        )
+        if not ok:
+            return
+        reason = str(reason).strip()
+        if not reason:
+            QMessageBox.warning(self, "Referral", "Reassignment reason is required.")
+            return
+
+        if UserManager.reassign_referral(referral_id, target, self.username, reason):
+            QMessageBox.information(self, "Referral", "Referral reassigned successfully.")
+            self.refresh_referrals_page()
+        else:
+            QMessageBox.warning(self, "Referral", "Unable to reassign referral.")
 
     def _show_referral_details(self, patient_name: str):
         """Fetch patient record by name and display referral details with fundus image."""

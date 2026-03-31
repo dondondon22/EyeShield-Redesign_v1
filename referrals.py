@@ -1,0 +1,651 @@
+"""Referral domain service for workflow state, audit events, and notifications."""
+
+import json
+import sqlite3
+from datetime import datetime
+from typing import Callable, Optional
+
+
+class ReferralService:
+    """Encapsulates referral workflow rules and persistence helpers."""
+
+    VALID_URGENCY = {"normal", "urgent", "critical"}
+    STATUS_TRANSITIONS = {
+        "pending": {"viewed", "in_review", "reassigned", "rereferred", "archived"},
+        "viewed": {"in_review", "completed", "reassigned", "rereferred", "archived"},
+        "in_review": {"completed", "reassigned", "rereferred", "archived"},
+        "reassigned": {"viewed", "in_review", "completed", "archived"},
+        "rereferred": {"viewed", "in_review", "completed", "archived"},
+        "completed": {"archived"},
+        "archived": set(),
+    }
+    NOTIFY_VISIBLE_STATUSES = ("pending", "viewed", "reassigned", "rereferred")
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _as_doctor_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            return "Dr. Unknown"
+        lowered = value.lower()
+        if lowered.startswith("dr. ") or lowered.startswith("dr "):
+            return value
+        return f"Dr. {value}"
+
+    @staticmethod
+    def ensure_schema(conn: sqlite3.Connection) -> None:
+        """Create referral hardening tables and add missing columns."""
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS referral_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                referral_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                actor_username TEXT,
+                from_status TEXT,
+                to_status TEXT,
+                details TEXT,
+                event_time TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_inbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                referral_id TEXT,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                read_at TEXT
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_referral_events_referral ON referral_events(referral_id, event_time DESC)")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notification_inbox_user_read ON notification_inbox(username, is_read, created_at DESC)"
+        )
+
+        cur.execute("PRAGMA table_info(referral_assignments)")
+        existing_columns = {row[1] for row in cur.fetchall()}
+        required_columns = {
+            "created_at": "TEXT",
+            "updated_at": "TEXT",
+            "last_status_at": "TEXT",
+            "due_at": "TEXT",
+            "closed_at": "TEXT",
+            "closed_by_username": "TEXT",
+        }
+        for column_name, column_type in required_columns.items():
+            if column_name in existing_columns:
+                continue
+            cur.execute(f"ALTER TABLE referral_assignments ADD COLUMN {column_name} {column_type}")
+
+        now = ReferralService._now()
+        cur.execute("UPDATE referral_assignments SET created_at = COALESCE(created_at, assigned_at, ?)", (now,))
+        cur.execute("UPDATE referral_assignments SET updated_at = COALESCE(updated_at, assigned_at, ?)", (now,))
+        cur.execute("UPDATE referral_assignments SET last_status_at = COALESCE(last_status_at, assigned_at, ?)", (now,))
+
+    @staticmethod
+    def _record_event(
+        conn: sqlite3.Connection,
+        referral_id: str,
+        event_type: str,
+        actor_username: str = "",
+        from_status: str = "",
+        to_status: str = "",
+        details: str = "",
+    ) -> None:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO referral_events
+            (referral_id, event_type, actor_username, from_status, to_status, details, event_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(referral_id or "").strip(),
+                str(event_type or "").strip(),
+                str(actor_username or "").strip(),
+                str(from_status or "").strip(),
+                str(to_status or "").strip(),
+                str(details or "").strip(),
+                ReferralService._now(),
+            ),
+        )
+
+    @staticmethod
+    def _notify(
+        conn: sqlite3.Connection,
+        username: str,
+        referral_id: str,
+        title: str,
+        message: str,
+        category: str = "referral",
+    ) -> None:
+        user = str(username or "").strip()
+        if not user:
+            return
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO notification_inbox
+            (username, referral_id, category, title, message, is_read, created_at, read_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, NULL)
+            """,
+            (
+                user,
+                str(referral_id or "").strip(),
+                str(category or "referral"),
+                str(title or "Referral update"),
+                str(message or ""),
+                ReferralService._now(),
+            ),
+        )
+
+    @staticmethod
+    def assign_referral(
+        get_connection: Callable[[], sqlite3.Connection],
+        add_activity_log: Callable[[str, str], bool],
+        referral_id: str,
+        assigned_to_username: str,
+        assigned_by_username: str,
+        patient_name: str = "",
+        urgency: str = "normal",
+        notes: str = "",
+    ) -> bool:
+        referral_key = str(referral_id or "").strip()
+        assigned_to = str(assigned_to_username or "").strip()
+        assigned_by = str(assigned_by_username or "").strip()
+        urgency_value = str(urgency or "normal").strip().lower()
+        if not referral_key or not assigned_to or not assigned_by:
+            return False
+        if urgency_value not in ReferralService.VALID_URGENCY:
+            return False
+
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            now = ReferralService._now()
+            cur.execute(
+                """
+                INSERT INTO referral_assignments
+                (referral_id, assigned_to_username, assigned_by_username, assigned_at, patient_name, urgency, notes, status,
+                 created_at, updated_at, last_status_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                """,
+                (
+                    referral_key,
+                    assigned_to,
+                    assigned_by,
+                    now,
+                    str(patient_name or "").strip(),
+                    urgency_value,
+                    str(notes or "").strip(),
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            ReferralService._record_event(
+                conn,
+                referral_key,
+                event_type="assigned",
+                actor_username=assigned_by,
+                to_status="pending",
+                details=f"Assigned to {assigned_to}",
+            )
+            ReferralService._notify(
+                conn,
+                assigned_to,
+                referral_key,
+                title="New referral assigned",
+                message=f"Referral {referral_key} has been assigned to you by {assigned_by}.",
+            )
+            conn.commit()
+            success = cur.rowcount > 0
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False
+        except sqlite3.Error:
+            success = False
+        conn.close()
+
+        if success:
+            add_activity_log(assigned_by, f"Assigned referral {referral_key} to {assigned_to}")
+        return success
+
+    @staticmethod
+    def get_pending_referrals(get_connection: Callable[[], sqlite3.Connection], username: str) -> list[dict]:
+        user = str(username or "").strip()
+        if not user:
+            return []
+
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                """
+                SELECT
+                    ra.id,
+                    ra.referral_id,
+                    ra.assigned_by_username,
+                    COALESCE(NULLIF(TRIM(ub.display_name), ''), NULLIF(TRIM(ub.full_name), ''), ra.assigned_by_username) AS assigned_by_name,
+                    ra.assigned_at,
+                    ra.patient_name,
+                    ra.urgency,
+                    ra.notes,
+                    ra.status,
+                    ra.due_at
+                FROM referral_assignments ra
+                LEFT JOIN users ub ON ub.username = ra.assigned_by_username
+                WHERE ra.assigned_to_username = ? AND ra.status IN ('pending', 'viewed', 'reassigned', 'rereferred')
+                ORDER BY
+                    CASE LOWER(ra.urgency)
+                        WHEN 'critical' THEN 0
+                        WHEN 'urgent' THEN 1
+                        ELSE 2
+                    END,
+                    ra.assigned_at DESC
+                """,
+                (user,),
+            )
+            rows = cur.fetchall()
+        except sqlite3.Error:
+            rows = []
+        conn.close()
+
+        return [
+            {
+                "id": row[0],
+                "referral_id": row[1],
+                "assigned_by_username": row[2],
+                "assigned_by": ReferralService._as_doctor_name(row[3]),
+                "assigned_at": row[4],
+                "patient_name": row[5],
+                "urgency": row[6],
+                "notes": row[7],
+                "status": row[8],
+                "due_at": row[9],
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def get_user_referrals(get_connection: Callable[[], sqlite3.Connection], username: str, limit: int = 100) -> list[dict]:
+        user = str(username or "").strip()
+        if not user:
+            return []
+
+        safe_limit = max(1, min(int(limit), 500))
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                """
+                SELECT
+                    ra.id,
+                    ra.referral_id,
+                    ra.assigned_to_username,
+                    COALESCE(NULLIF(TRIM(ut.display_name), ''), NULLIF(TRIM(ut.full_name), ''), ra.assigned_to_username) AS assigned_to_name,
+                    ra.assigned_by_username,
+                    COALESCE(NULLIF(TRIM(ub.display_name), ''), NULLIF(TRIM(ub.full_name), ''), ra.assigned_by_username) AS assigned_by_name,
+                    ra.assigned_at,
+                    ra.patient_name,
+                    ra.urgency,
+                    ra.notes,
+                    ra.status
+                FROM referral_assignments ra
+                LEFT JOIN users ut ON ut.username = ra.assigned_to_username
+                LEFT JOIN users ub ON ub.username = ra.assigned_by_username
+                WHERE ra.assigned_to_username = ? OR ra.assigned_by_username = ?
+                ORDER BY ra.assigned_at DESC
+                LIMIT ?
+                """,
+                (user, user, safe_limit),
+            )
+            rows = cur.fetchall()
+        except sqlite3.Error:
+            rows = []
+        conn.close()
+
+        result = []
+        for row in rows:
+            assigned_to_username = row[2]
+            assigned_to_name = row[3]
+            assigned_by_username = row[4]
+            assigned_by_name = row[5]
+            relation = "assigned_to_me" if assigned_to_username == user else "created_by_me"
+            result.append(
+                {
+                    "id": row[0],
+                    "referral_id": row[1],
+                    "assigned_to_username": assigned_to_username,
+                    "assigned_to": ReferralService._as_doctor_name(assigned_to_name),
+                    "assigned_by_username": assigned_by_username,
+                    "assigned_by": ReferralService._as_doctor_name(assigned_by_name),
+                    "assigned_at": row[6],
+                    "patient_name": row[7],
+                    "urgency": row[8],
+                    "notes": row[9],
+                    "status": row[10],
+                    "relation": relation,
+                }
+            )
+        return result
+
+    @staticmethod
+    def get_referral_count(get_connection: Callable[[], sqlite3.Connection], username: str, status: str = "pending") -> int:
+        user = str(username or "").strip()
+        status_value = str(status or "").strip()
+        if not user or not status_value:
+            return 0
+
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM referral_assignments
+                WHERE assigned_to_username = ? AND status = ?
+                """,
+                (user, status_value),
+            )
+            row = cur.fetchone()
+            count = int(row[0]) if row else 0
+        except sqlite3.Error:
+            count = 0
+        conn.close()
+        return count
+
+    @staticmethod
+    def update_referral_status(
+        get_connection: Callable[[], sqlite3.Connection],
+        add_activity_log: Callable[[str, str], bool],
+        referral_id: str,
+        new_status: str,
+        actor_username: str = "",
+    ) -> bool:
+        referral_key = str(referral_id or "").strip()
+        target_status = str(new_status or "").strip().lower()
+        actor = str(actor_username or "").strip()
+        if not referral_key or target_status not in ReferralService.STATUS_TRANSITIONS:
+            return False
+
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                "SELECT status, assigned_to_username FROM referral_assignments WHERE referral_id = ?",
+                (referral_key,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.close()
+                return False
+
+            current_status = str(row[0] or "").strip().lower()
+            assigned_to = str(row[1] or "").strip()
+            if target_status not in ReferralService.STATUS_TRANSITIONS.get(current_status, set()):
+                conn.close()
+                return False
+
+            now = ReferralService._now()
+            close_time = now if target_status in {"completed", "archived"} else None
+            close_actor = actor if close_time else None
+            cur.execute(
+                """
+                UPDATE referral_assignments
+                SET status = ?, updated_at = ?, last_status_at = ?, closed_at = COALESCE(?, closed_at),
+                    closed_by_username = COALESCE(?, closed_by_username)
+                WHERE referral_id = ?
+                """,
+                (target_status, now, now, close_time, close_actor, referral_key),
+            )
+            ReferralService._record_event(
+                conn,
+                referral_key,
+                event_type="status_changed",
+                actor_username=actor,
+                from_status=current_status,
+                to_status=target_status,
+                details=f"Status changed from {current_status} to {target_status}",
+            )
+            if assigned_to and actor and assigned_to != actor:
+                ReferralService._notify(
+                    conn,
+                    assigned_to,
+                    referral_key,
+                    title="Referral status updated",
+                    message=f"Referral {referral_key} is now {target_status.replace('_', ' ')}.",
+                )
+            conn.commit()
+            success = cur.rowcount > 0
+        except sqlite3.Error:
+            success = False
+        conn.close()
+
+        if success and actor:
+            add_activity_log(actor, f"Updated referral {referral_key}: {current_status} -> {target_status}")
+        return success
+
+    @staticmethod
+    def append_referral_note(
+        get_connection: Callable[[], sqlite3.Connection],
+        add_activity_log: Callable[[str, str], bool],
+        referral_id: str,
+        actor_username: str,
+        note: str,
+    ) -> bool:
+        referral_key = str(referral_id or "").strip()
+        actor = str(actor_username or "").strip()
+        note_text = str(note or "").strip()
+        if not referral_key or not actor or not note_text:
+            return False
+        if len(note_text) > 5000:
+            return False
+
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                "SELECT notes, assigned_to_username FROM referral_assignments WHERE referral_id = ?",
+                (referral_key,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.close()
+                return False
+            existing = str(row[0] or "").strip()
+            assigned_to = str(row[1] or "").strip()
+            timestamp = ReferralService._now()
+            entry = f"[{timestamp}] {actor}: {note_text}"
+            merged = f"{existing}\n{entry}".strip() if existing else entry
+            cur.execute(
+                "UPDATE referral_assignments SET notes = ?, updated_at = ? WHERE referral_id = ?",
+                (merged, timestamp, referral_key),
+            )
+            ReferralService._record_event(
+                conn,
+                referral_key,
+                event_type="note_added",
+                actor_username=actor,
+                details=note_text,
+            )
+            if assigned_to and assigned_to != actor:
+                ReferralService._notify(
+                    conn,
+                    assigned_to,
+                    referral_key,
+                    title="Referral note added",
+                    message=f"{actor} added a note to referral {referral_key}.",
+                )
+            conn.commit()
+            success = cur.rowcount > 0
+        except sqlite3.Error:
+            success = False
+        conn.close()
+
+        if success:
+            add_activity_log(actor, f"Updated referral note {referral_key}")
+        return success
+
+    @staticmethod
+    def reassign_referral(
+        get_connection: Callable[[], sqlite3.Connection],
+        add_activity_log: Callable[[str, str], bool],
+        referral_id: str,
+        new_assignee_username: str,
+        acting_username: str,
+        reason: str = "",
+    ) -> bool:
+        referral_key = str(referral_id or "").strip()
+        new_assignee = str(new_assignee_username or "").strip()
+        actor = str(acting_username or "").strip()
+        reason_text = str(reason or "").strip() or "Reassigned for workflow continuity"
+        if not referral_key or not new_assignee or not actor:
+            return False
+
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                "SELECT assigned_to_username, notes, status FROM referral_assignments WHERE referral_id = ?",
+                (referral_key,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.close()
+                return False
+
+            current_assignee = str(row[0] or "").strip()
+            if current_assignee == new_assignee:
+                conn.close()
+                return False
+            existing_notes = str(row[1] or "").strip()
+            current_status = str(row[2] or "").strip().lower()
+            if "reassigned" not in ReferralService.STATUS_TRANSITIONS.get(current_status, set()):
+                conn.close()
+                return False
+
+            timestamp = ReferralService._now()
+            note_line = (
+                f"[{timestamp}] {actor}: Reassigned from {current_assignee or 'N/A'} "
+                f"to {new_assignee}. Reason: {reason_text}"
+            )
+            merged_notes = f"{existing_notes}\n{note_line}".strip() if existing_notes else note_line
+            cur.execute(
+                """
+                UPDATE referral_assignments
+                SET assigned_to_username = ?, status = 'reassigned', notes = ?, updated_at = ?, last_status_at = ?
+                WHERE referral_id = ?
+                """,
+                (new_assignee, merged_notes, timestamp, timestamp, referral_key),
+            )
+            ReferralService._record_event(
+                conn,
+                referral_key,
+                event_type="reassigned",
+                actor_username=actor,
+                from_status=current_status,
+                to_status="reassigned",
+                details=json.dumps(
+                    {
+                        "from_assignee": current_assignee,
+                        "to_assignee": new_assignee,
+                        "reason": reason_text,
+                    }
+                ),
+            )
+            ReferralService._notify(
+                conn,
+                new_assignee,
+                referral_key,
+                title="Referral reassigned to you",
+                message=f"Referral {referral_key} was reassigned by {actor}.",
+            )
+            conn.commit()
+            success = cur.rowcount > 0
+        except sqlite3.Error:
+            success = False
+        conn.close()
+
+        if success:
+            add_activity_log(actor, f"Reassigned referral {referral_key} to {new_assignee}")
+        return success
+
+    @staticmethod
+    def get_unread_notifications(
+        get_connection: Callable[[], sqlite3.Connection], username: str, limit: int = 30
+    ) -> list[dict]:
+        user = str(username or "").strip()
+        if not user:
+            return []
+        safe_limit = max(1, min(int(limit), 200))
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                """
+                SELECT id, referral_id, category, title, message, created_at
+                FROM notification_inbox
+                WHERE username = ? AND is_read = 0
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (user, safe_limit),
+            )
+            rows = cur.fetchall()
+        except sqlite3.Error:
+            rows = []
+        conn.close()
+        return [
+            {
+                "id": row[0],
+                "referral_id": row[1],
+                "category": row[2],
+                "title": row[3],
+                "message": row[4],
+                "created_at": row[5],
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def mark_notification_read(get_connection: Callable[[], sqlite3.Connection], notification_id: int, username: str) -> bool:
+        user = str(username or "").strip()
+        if not user:
+            return False
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            ReferralService.ensure_schema(conn)
+            cur.execute(
+                """
+                UPDATE notification_inbox
+                SET is_read = 1, read_at = ?
+                WHERE id = ? AND username = ?
+                """,
+                (ReferralService._now(), int(notification_id), user),
+            )
+            conn.commit()
+            success = cur.rowcount > 0
+        except (sqlite3.Error, ValueError, TypeError):
+            success = False
+        conn.close()
+        return success

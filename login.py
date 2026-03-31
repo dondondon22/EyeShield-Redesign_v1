@@ -191,7 +191,7 @@ class ReferralOptionsDialog(QDialog):
     def __init__(self, patient_name, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Referral Options")
-        self.setFixedSize(500, 300)
+        self.setMinimumSize(560, 380)
         self.setModal(True)
         self.selected_option = None  # "internal" or "letter"
         self.setStyleSheet("""
@@ -200,9 +200,11 @@ class ReferralOptionsDialog(QDialog):
             }
         """)
 
+        icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 32, 32, 28)
-        layout.setSpacing(20)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(14)
 
         # Header
         title = QLabel("How would you like to refer this patient?")
@@ -221,81 +223,117 @@ class ReferralOptionsDialog(QDialog):
         subtitle.setStyleSheet("""
             QLabel {
                 color: #6b7280;
-                font-size: 12px;
+                font-size: 13px;
                 background: transparent;
             }
         """)
         layout.addWidget(subtitle)
-
-        layout.addSpacing(16)
+        layout.addSpacing(8)
 
         # Option 1: Internal Referral
         internal_btn = QPushButton()
-        internal_btn.setMinimumHeight(100)
+        internal_btn.setCursor(Qt.PointingHandCursor)
+        internal_btn.setMinimumHeight(118)
         internal_btn.setStyleSheet("""
             QPushButton {
                 background: white;
-                border: 2px solid #e5e7eb;
-                border-radius: 8px;
-                padding: 16px;
+                border: 1px solid #dbe3ee;
+                border-radius: 10px;
+                padding: 14px;
                 text-align: left;
                 color: #374151;
             }
             QPushButton:hover {
-                border: 2px solid #3b82f6;
+                border: 1px solid #3b82f6;
                 background: #f0f9ff;
             }
+            QPushButton:pressed {
+                background: #e0f2fe;
+            }
         """)
-        
-        internal_layout = QVBoxLayout(internal_btn)
+
+        internal_layout = QHBoxLayout(internal_btn)
         internal_layout.setContentsMargins(0, 0, 0, 0)
-        internal_layout.setSpacing(8)
-        
-        internal_title = QLabel("👤 Internal Referral")
-        internal_title.setStyleSheet("color: #111827; font-weight: 700; font-size: 13px;")
-        internal_layout.addWidget(internal_title)
-        
-        internal_desc = QLabel("Assign to a clinician for internal follow-up\nand case management")
-        internal_desc.setStyleSheet("color: #6b7280; font-size: 11px;")
-        internal_layout.addWidget(internal_desc)
-        
+        internal_layout.setSpacing(12)
+
+        internal_icon = QLabel()
+        internal_icon.setFixedSize(28, 28)
+        internal_icon.setPixmap(QIcon(os.path.join(icon_dir, "refer.svg")).pixmap(QSize(22, 22)))
+        internal_icon.setStyleSheet("background: transparent;")
+        internal_icon.setAlignment(Qt.AlignCenter)
+        internal_layout.addWidget(internal_icon, 0, Qt.AlignTop)
+
+        internal_text = QVBoxLayout()
+        internal_text.setSpacing(6)
+        internal_title = QLabel("Internal Referral")
+        internal_title.setStyleSheet("color: #0f172a; font-weight: 700; font-size: 14px; background: transparent;")
+        internal_text.addWidget(internal_title)
+
+        internal_desc = QLabel("Assign this case to another clinician for internal follow-up and case management.")
+        internal_desc.setWordWrap(True)
+        internal_desc.setStyleSheet("color: #475569; font-size: 12px; line-height: 1.3; background: transparent;")
+        internal_text.addWidget(internal_desc)
+
+        internal_hint = QLabel("Best for handoff inside EyeShield")
+        internal_hint.setStyleSheet("color: #1d4ed8; font-size: 11px; font-weight: 600; background: transparent;")
+        internal_text.addWidget(internal_hint)
+        internal_layout.addLayout(internal_text, 1)
         internal_btn.clicked.connect(lambda: self._set_option("internal"))
         layout.addWidget(internal_btn)
 
         # Option 2: Generate Letter
         letter_btn = QPushButton()
-        letter_btn.setMinimumHeight(100)
+        letter_btn.setCursor(Qt.PointingHandCursor)
+        letter_btn.setMinimumHeight(118)
         letter_btn.setStyleSheet("""
             QPushButton {
                 background: white;
-                border: 2px solid #e5e7eb;
-                border-radius: 8px;
-                padding: 16px;
+                border: 1px solid #dbe3ee;
+                border-radius: 10px;
+                padding: 14px;
                 text-align: left;
                 color: #374151;
             }
             QPushButton:hover {
-                border: 2px solid #10b981;
+                border: 1px solid #10b981;
                 background: #f0fdf4;
             }
+            QPushButton:pressed {
+                background: #dcfce7;
+            }
         """)
-        
-        letter_layout = QVBoxLayout(letter_btn)
+
+        letter_layout = QHBoxLayout(letter_btn)
         letter_layout.setContentsMargins(0, 0, 0, 0)
-        letter_layout.setSpacing(8)
-        
-        letter_title = QLabel("📄 Generate Letter")
-        letter_title.setStyleSheet("color: #111827; font-weight: 700; font-size: 13px;")
-        letter_layout.addWidget(letter_title)
-        
-        letter_desc = QLabel("Generate formal referral letter for external\nspecialist or ophthalmology clinic")
-        letter_desc.setStyleSheet("color: #6b7280; font-size: 11px;")
-        letter_layout.addWidget(letter_desc)
-        
+        letter_layout.setSpacing(12)
+
+        letter_icon = QLabel()
+        letter_icon.setFixedSize(28, 28)
+        letter_icon.setPixmap(QIcon(os.path.join(icon_dir, "generate_report.svg")).pixmap(QSize(22, 22)))
+        letter_icon.setStyleSheet("background: transparent;")
+        letter_icon.setAlignment(Qt.AlignCenter)
+        letter_layout.addWidget(letter_icon, 0, Qt.AlignTop)
+
+        letter_text = QVBoxLayout()
+        letter_text.setSpacing(6)
+        letter_title = QLabel("Generate Letter")
+        letter_title.setStyleSheet("color: #0f172a; font-weight: 700; font-size: 14px; background: transparent;")
+        letter_text.addWidget(letter_title)
+
+        letter_desc = QLabel("Generate a formal referral letter for an external specialist or ophthalmology clinic.")
+        letter_desc.setWordWrap(True)
+        letter_desc.setStyleSheet("color: #475569; font-size: 12px; line-height: 1.3; background: transparent;")
+        letter_text.addWidget(letter_desc)
+
+        letter_hint = QLabel("Best for referral outside EyeShield")
+        letter_hint.setStyleSheet("color: #059669; font-size: 11px; font-weight: 600; background: transparent;")
+        letter_text.addWidget(letter_hint)
+        letter_layout.addLayout(letter_text, 1)
+
         letter_btn.clicked.connect(lambda: self._set_option("letter"))
         layout.addWidget(letter_btn)
 
-        layout.addStretch()
+        layout.addStretch(1)
 
         # Action buttons
         button_layout = QHBoxLayout()
@@ -334,11 +372,12 @@ class AssignReferralDialog(QDialog):
     def __init__(self, patient_name, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Assign Referral")
-        self.setFixedSize(450, 350)
+        self.setMinimumSize(560, 520)
         self.setModal(True)
         self.selected_clinician = None
         self.urgency_level = "normal"
         self.notes_text = ""
+        self._urgency_buttons = []
         self.setStyleSheet("""
             QDialog {
                 background-color: #f8f9fa;
@@ -367,7 +406,7 @@ class AssignReferralDialog(QDialog):
             from .auth import UserManager
 
         all_users = UserManager.get_all_users()
-        clinicians = [u for u in all_users if u[6] == "clinician"]  # role is at index 6
+        clinicians = [u for u in all_users if str(u[6] or "").strip().lower() == "clinician"]  # role at index 6
 
         if not clinicians:
             QMessageBox.warning(self, "Error", "No clinicians available to assign referral to.")
@@ -393,7 +432,7 @@ class AssignReferralDialog(QDialog):
         """)
         layout.addWidget(clinician_combo)
 
-        # Clinician dropdown (using buttons for simplicity)
+        # Clinician dropdown (button list for quick choose)
         clinician_buttons_layout = QVBoxLayout()
         clinician_buttons_layout.setSpacing(6)
         clinician_buttons_layout.setContentsMargins(0, 0, 0, 0)
@@ -402,13 +441,22 @@ class AssignReferralDialog(QDialog):
             self.selected_clinician = username
             clinician_combo.setText(display_name)
 
-        for clinician in clinicians[:5]:  # Show first 5
-            username, full_name, display_name = clinician[0], clinician[1], clinician[2]
-            btn = QPushButton(f"{display_name or full_name or username} (Optometrist)")
+        sorted_clinicians = sorted(
+            clinicians,
+            key=lambda u: (
+                str(u[2] or u[1] or u[0]).strip().lower(),
+                str(u[4] or "").strip().lower(),
+            ),
+        )
+        for clinician in sorted_clinicians:
+            username, full_name, display_name, _, specialization = clinician[0], clinician[1], clinician[2], clinician[3], clinician[4]
+            label_name = str(display_name or full_name or username).strip()
+            label_title = str(specialization or "Clinician").strip()
+            btn = QPushButton(f"{label_name} ({label_title})")
             btn.setMinimumHeight(32)
             btn.setStyleSheet("""
                 QPushButton {
-                    background:   white;
+                    background: white;
                     border: 1px solid #dee2e6;
                     border-radius: 4px;
                     color: #374151;
@@ -420,7 +468,7 @@ class AssignReferralDialog(QDialog):
                     background: #f3f4f6;
                 }
             """)
-            btn.clicked.connect(lambda checked, u=username, d=(display_name or full_name or username): select_clinician(u, d))
+            btn.clicked.connect(lambda checked, u=username, d=label_name: select_clinician(u, d))
             clinician_buttons_layout.addWidget(btn)
 
         scroll = QScrollArea()
@@ -428,7 +476,7 @@ class AssignReferralDialog(QDialog):
         scroll_widget.setLayout(clinician_buttons_layout)
         scroll.setWidget(scroll_widget)
         scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(120)
+        scroll.setMaximumHeight(220)
         layout.addWidget(scroll)
 
         # Urgency level
@@ -454,11 +502,13 @@ class AssignReferralDialog(QDialog):
                 }
             """)
             urgency_btn.clicked.connect(
-                lambda checked, l=level.lower(): self._set_urgency(l, urgency_btn, urgency_layout)
+                lambda checked, l=level.lower(), b=urgency_btn: self._set_urgency(l, b, urgency_layout)
             )
+            self._urgency_buttons.append(urgency_btn)
             urgency_layout.addWidget(urgency_btn)
         urgency_layout.addStretch()
         layout.addLayout(urgency_layout)
+        self._set_urgency("normal", self._urgency_buttons[0], urgency_layout)
 
         layout.addStretch()
 
