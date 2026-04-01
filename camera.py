@@ -251,7 +251,7 @@ class CameraPage(QWidget):
             """
         )
         self.start_btn.clicked.connect(self._toggle_camera)
-        self.start_btn.setIcon(self._button_icon("start_camera.svg"))
+        self.start_btn.setIcon(self._button_icon("start_camera.svg", color="#ffffff"))
         self.start_btn.setIconSize(QSize(18, 18))
         controls_layout.addWidget(self.start_btn)
 
@@ -260,41 +260,41 @@ class CameraPage(QWidget):
 
         self.capture_btn = QPushButton("Capture Image")
         self.capture_btn.clicked.connect(self._capture_frame)
-        self.capture_btn.setIcon(self._button_icon("capture.svg", "camera.svg"))
+        self.capture_btn.setIcon(self._button_icon("capture.svg", "camera.svg", color="#1f6fe5"))
         self.capture_btn.setIconSize(QSize(18, 18))
         capture_validate_row.addWidget(self.capture_btn)
 
         self.validate_btn = QPushButton("Validate")
         self.validate_btn.clicked.connect(self._validate_capture_placeholder)
-        self.validate_btn.setIcon(self._button_icon("analyze.svg"))
+        self.validate_btn.setIcon(self._button_icon("analyze.svg", color="#1f6fe5"))
         self.validate_btn.setIconSize(QSize(18, 18))
         capture_validate_row.addWidget(self.validate_btn)
 
         controls_layout.addLayout(capture_validate_row)
-        
+
         # Capture workflow buttons: Preview + ReCapture
         capture_workflow_row = QHBoxLayout()
         capture_workflow_row.setSpacing(6)
-        
+
         preview_btn = QPushButton("Preview Saved Image")
         preview_btn.setEnabled(False)
         preview_btn.clicked.connect(self._preview_saved_capture)
-        preview_btn.setIcon(self._button_icon("preview.svg"))
+        preview_btn.setIcon(self._button_icon("preview.svg", color="#1f6fe5"))
         preview_btn.setIconSize(QSize(18, 18))
         self._preview_capture_btn = preview_btn
         capture_workflow_row.addWidget(preview_btn)
-        
+
         recapture_btn = QPushButton("Retake Image")
         recapture_btn.setEnabled(False)
         recapture_btn.clicked.connect(self._retry_capture)
-        recapture_btn.setIcon(self._button_icon("retake_image.svg"))
+        recapture_btn.setIcon(self._button_icon("retake_image.svg", color="#1f6fe5"))
         recapture_btn.setIconSize(QSize(18, 18))
         self._recapture_btn = recapture_btn
         capture_workflow_row.addWidget(recapture_btn)
-        
+
         self.send_btn = QPushButton("Send to Screening")
         self.send_btn.clicked.connect(self._send_to_screening)
-        self.send_btn.setIcon(self._button_icon("send_to_screening.svg"))
+        self.send_btn.setIcon(self._button_icon("send_to_screening.svg", color="#1f6fe5"))
         self.send_btn.setIconSize(QSize(18, 18))
 
         # Keep control buttons readable even if app-level styles override sizing.
@@ -466,38 +466,37 @@ class CameraPage(QWidget):
         )
         self.preview_stack.setCurrentWidget(self.simulation_preview)
 
-    def _button_icon(self, *candidates: str) -> QIcon:
+    def _button_icon(self, *candidates: str, color: str = "#1f2a37") -> QIcon:
         icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
-        dark = QColor(31, 42, 55)  # #1f2a37
-        
+        tint = QColor(color)
+
         for name in candidates:
             path = os.path.join(icon_dir, name)
             if not os.path.isfile(path):
                 continue
-            
+
             if path.lower().endswith(".svg"):
                 try:
                     renderer = QSvgRenderer(path)
                     if renderer.isValid():
-                        img = QImage(20, 20, QImage.Format_ARGB32_Premultiplied)
+                        img = QImage(20, 20, QImage.Format_ARGB32)
                         img.fill(Qt.transparent)
                         painter = QPainter(img)
                         renderer.render(painter)
                         painter.end()
-                        
-                        # Recolor to dark while preserving shape/alpha structure
+
+                        # Recolor visible pixels to the requested tint color
                         for y in range(img.height()):
                             for x in range(img.width()):
                                 src = QColor(img.pixel(x, y))
                                 if src.alpha() > 20:
-                                    # Keep alpha from source, use dark color
-                                    dark.setAlpha(src.alpha())
-                                    img.setPixelColor(x, y, dark)
-                        
+                                    tint.setAlpha(src.alpha())
+                                    img.setPixelColor(x, y, tint)
+
                         return QIcon(QPixmap.fromImage(img))
                 except Exception:
                     pass
-            
+
             icon = QIcon(path)
             if not icon.isNull():
                 return icon
@@ -514,7 +513,7 @@ class CameraPage(QWidget):
         is_streaming = self.camera is not None
         if is_streaming:
             self.start_btn.setText("Stop Camera")
-            self.start_btn.setIcon(self._button_icon("stop_camera.svg"))
+            self.start_btn.setIcon(self._button_icon("stop_camera.svg", color="#ffffff"))
             self.start_btn.setStyleSheet(
                 """
                 QPushButton {
@@ -532,7 +531,7 @@ class CameraPage(QWidget):
             )
         else:
             self.start_btn.setText("Start Camera")
-            self.start_btn.setIcon(self._button_icon("start_camera.svg"))
+            self.start_btn.setIcon(self._button_icon("start_camera.svg", color="#ffffff"))
             self.start_btn.setStyleSheet(
                 """
                 QPushButton {
