@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QDialog, QMessageBox, QMenu, QScrollArea,
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
 
 from auth import DB_FILE, UserManager
 
@@ -81,8 +81,8 @@ class PatientDetailsDialog(QDialog):
         
         # Vital Signs Section
         add_section("Vital Signs & Measurements")
-        add_field("Height", str(patient_record.get("height") or "N/A") + (" cm" if patient_record.get("height") else ""))
-        add_field("Weight", str(patient_record.get("weight") or "N/A") + (" kg" if patient_record.get("weight") else ""))
+        add_field("Height (cm)", str(patient_record.get("height") or "N/A") + (" cm" if patient_record.get("height") else ""))
+        add_field("Weight (kg)", str(patient_record.get("weight") or "N/A") + (" kg" if patient_record.get("weight") else ""))
         add_field("BMI", str(patient_record.get("bmi") or "N/A"))
         add_field("Visual Acuity - Left", str(patient_record.get("visual_acuity_left") or "N/A"))
         add_field("Visual Acuity - Right", str(patient_record.get("visual_acuity_right") or "N/A"))
@@ -212,8 +212,8 @@ class ReferralDetailDialog(QDialog):
         add_field("Sex", str(patient_record.get("sex") or "N/A"))
 
         add_section("Vital Signs")
-        add_field("Height", str(patient_record.get("height") or "N/A") + (" cm" if patient_record.get("height") else ""))
-        add_field("Weight", str(patient_record.get("weight") or "N/A") + (" kg" if patient_record.get("weight") else ""))
+        add_field("Height (cm)", str(patient_record.get("height") or "N/A") + (" cm" if patient_record.get("height") else ""))
+        add_field("Weight (kg)", str(patient_record.get("weight") or "N/A") + (" kg" if patient_record.get("weight") else ""))
         add_field("BMI", str(patient_record.get("bmi") or "N/A"))
 
         bp_sys = patient_record.get("blood_pressure_systolic") or "-"
@@ -240,6 +240,30 @@ class ReferralDetailDialog(QDialog):
         add_field("Confidence", str(patient_record.get("confidence") or "N/A"))
         add_field("Screened By", str(patient_record.get("original_screener_name") or patient_record.get("original_screener_username") or "N/A"))
         add_field("Screened At", str(patient_record.get("screened_at") or "N/A"))
+
+        notes_raw = str(patient_record.get("notes") or "").strip()
+        if notes_raw:
+            notes_lines = [line.strip() for line in notes_raw.splitlines() if line.strip()]
+            message_lines = [line for line in notes_lines if line.lower().startswith("message on this patient")]
+            status_lines = [line for line in notes_lines if line not in message_lines]
+
+            if message_lines:
+                add_section("Message History")
+                message_label = QLabel("\n".join(reversed(message_lines)))
+                message_label.setWordWrap(True)
+                message_label.setStyleSheet(
+                    "color:#334155;background:#eef6ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px;"
+                )
+                left_layout.addWidget(message_label)
+
+            if status_lines:
+                add_section("Status Notes")
+                status_label = QLabel("\n".join(reversed(status_lines)))
+                status_label.setWordWrap(True)
+                status_label.setStyleSheet(
+                    "color:#475569;background:#f6f8fb;border:1px solid #d3dae3;border-radius:6px;padding:10px;"
+                )
+                left_layout.addWidget(status_label)
 
         left_layout.addStretch()
         left_scroll.setWidget(left_content)
@@ -471,7 +495,7 @@ class ReportsPage(QWidget):
             QWidget {
                 background: #f2f6fb;
                 color: #1f2a37;
-                font-family: 'Calibri', 'Inter', 'Arial';
+                font-family: 'Segoe UI';
             }
             QGroupBox {
                 background: #ffffff;
@@ -516,23 +540,23 @@ class ReportsPage(QWidget):
                 border: 1px solid #1f6fe5;
             }
             QPushButton {
-                background: #eef3f9;
-                color: #1f2a37;
-                border: 1px solid #c9d6e6;
-                border-radius: 10px;
-                padding: 9px 16px;
+                background: #ffffff;
+                border: 1px solid #bfdbfe;
+                color: #0f172a;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-size: 13px;
+                font-family: 'Segoe UI';
                 font-weight: 600;
             }
             QPushButton:hover {
-                background: #e4edf7;
+                background: #eff6ff;
+                border: 1px solid #93c5fd;
             }
-            QPushButton#primaryAction {
-                background: #1f6fe5;
-                color: #ffffff;
-                border: 1px solid #1a5fc4;
-                border-radius: 10px;
-                padding: 9px 16px;
-                font-weight: 700;
+            QPushButton:disabled {
+                background: #f8fafc;
+                border: 1px solid #dbeafe;
+                color: #9ca3af;
             }
             QLabel#statusLabel {
                 color: #4f637a;
@@ -550,8 +574,8 @@ class ReportsPage(QWidget):
 
         self._rep_title_lbl = QLabel("DR Screening Reports")
         self._rep_title_lbl.setObjectName("pageHeader")
-        self._rep_title_lbl.setStyleSheet("font-size:26px;font-weight:700;color:#1f6fe5;font-family:'Calibri','Inter','Arial';")
-        self._rep_subtitle_lbl = QLabel("View, filter, and export diabetic retinopathy screening outcomes.")
+        self._rep_title_lbl.setStyleSheet("font-size:26px;font-weight:700;color:#1f6fe5;font-family:'Segoe UI';")
+        self._rep_subtitle_lbl = QLabel("")
         self._rep_subtitle_lbl.setObjectName("pageSubtitle")
         self._rep_subtitle_lbl.setStyleSheet("font-size:13px;color:#6b7f95;")
         self._rep_subtitle_lbl.setAlignment(Qt.AlignLeft)
@@ -561,7 +585,6 @@ class ReportsPage(QWidget):
         top_bar.addWidget(self._rep_title_lbl)
         top_bar.addStretch(1)
         self.export_btn = QPushButton("Export Results")
-        self.export_btn.setObjectName("primaryAction")
         self.export_btn.setAutoDefault(True)
         self.export_btn.setDefault(True)
         self.export_btn.clicked.connect(self.export_summary)
@@ -585,7 +608,7 @@ class ReportsPage(QWidget):
         top_bar.addWidget(self.report_btn)
         self.referral_btn = QPushButton("Generate Referral")
         self.referral_btn.setEnabled(False)
-        self.referral_btn.clicked.connect(self.generate_referral)
+        self.referral_btn.clicked.connect(self.start_referral_flow)
         top_bar.addWidget(self.referral_btn)
         self.rescreen_btn = QPushButton("Rescreen")
         self.rescreen_btn.setEnabled(False)
@@ -593,7 +616,7 @@ class ReportsPage(QWidget):
         top_bar.addWidget(self.rescreen_btn)
         root.addLayout(top_bar)
 
-        root.addWidget(self._rep_subtitle_lbl)
+        self._rep_subtitle_lbl.hide()
         self.status_label = QLabel("Ready")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -614,11 +637,6 @@ class ReportsPage(QWidget):
         self.result_filter.setMinimumHeight(40)
         self.result_filter.currentTextChanged.connect(self.apply_filters)
         cl.addWidget(self.result_filter)
-        self.filtered_count_label = QLabel("Total: 0")
-        self.filtered_count_label.setObjectName("hintLabel")
-        self.filtered_count_label.setAlignment(Qt.AlignCenter)
-        self.filtered_count_label.setStyleSheet("color:#62788f;font-size:12px;background:#f3f8ff;border:1px solid #dbe7f5;border-radius:8px;padding:6px 10px;")
-        cl.addWidget(self.filtered_count_label)
         root.addWidget(self._controls_group)
 
         self._results_group = QGroupBox("")
@@ -665,8 +683,29 @@ class ReportsPage(QWidget):
     def _set_button_icon(self, button: QPushButton, icon_name: str):
         icon_file = self._icon_path(icon_name)
         if os.path.exists(icon_file):
-            button.setIcon(QIcon(icon_file))
-            button.setIconSize(QSize(18, 18))
+            base_icon = QIcon(icon_file)
+            source = base_icon.pixmap(QSize(24, 24))
+            if source.isNull():
+                button.setIcon(base_icon)
+                button.setIconSize(QSize(24, 24))
+                return
+
+            def _tint(color_hex: str) -> QPixmap:
+                tinted = QPixmap(source.size())
+                tinted.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(tinted)
+                painter.drawPixmap(0, 0, source)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(tinted.rect(), QColor(color_hex))
+                painter.end()
+                return tinted
+
+            icon = QIcon()
+            icon.addPixmap(_tint("#60a5fa"), QIcon.Mode.Normal, QIcon.State.Off)
+            icon.addPixmap(_tint("#3b82f6"), QIcon.Mode.Active, QIcon.State.Off)
+            icon.addPixmap(_tint("#bfdbfe"), QIcon.Mode.Disabled, QIcon.State.Off)
+            button.setIcon(icon)
+            button.setIconSize(QSize(22, 22))
 
     def _setup_action_buttons_ui(self):
         self._set_button_icon(self.export_btn, "export.svg")
@@ -698,11 +737,6 @@ class ReportsPage(QWidget):
 
         for button in top_icon_buttons:
             button.setMinimumHeight(40)
-            button.setStyleSheet(
-                "QPushButton{background:#1f6fe5;color:#ffffff;border:1px solid #1a5fc4;border-radius:10px;padding:8px 14px;font-weight:700;}"
-                "QPushButton:hover{background:#1b63cf;}"
-                "QPushButton:disabled{background:#8fb5f2;border:1px solid #8fb5f2;color:#edf4ff;}"
-            )
 
     def refresh_report(self):
         try:
@@ -732,12 +766,7 @@ class ReportsPage(QWidget):
         self.apply_filters()
         if self.archived_records_dialog is not None:
             self.archived_records_dialog.reload_rows()
-        active = [r for r in rows if not r["archived_at"]]
-        archived_count = len(rows) - len(active)
-        if self.is_admin:
-            self.status_label.setText(f"Updated {len(active)} active and {archived_count} archived records at {datetime.now().strftime('%I:%M:%S %p').lstrip('0')}")
-        else:
-            self.status_label.setText(f"Updated {len(active)} screenings at {datetime.now().strftime('%I:%M:%S %p').lstrip('0')}")
+        self.status_label.setText("Ready")
 
     @staticmethod
     def _eye_sort_key(eye_value: str) -> tuple[int, str]:
@@ -747,6 +776,30 @@ class ReportsPage(QWidget):
         if "left" in eye:
             return (1, eye)
         return (2, eye)
+
+    @staticmethod
+    def _format_screening_datetime(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return "—"
+
+        parsed = None
+        normalized = raw.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    parsed = datetime.strptime(raw, fmt)
+                    break
+                except ValueError:
+                    continue
+
+        if parsed is None:
+            return raw
+
+        hour = parsed.strftime("%I").lstrip("0") or "0"
+        return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year} - {hour}:{parsed.strftime('%M')} {parsed.strftime('%p').lower()}"
 
     def _build_display_rows(self, rows: list[dict]) -> list[dict]:
         grouped: dict[tuple[str, str], list[dict]] = {}
@@ -767,7 +820,13 @@ class ReportsPage(QWidget):
             record_ids = [int(item.get("id") or 0) for item in ordered_rows if int(item.get("id") or 0)]
             selection_key = f"{key[0]}|{key[1]}|{'-'.join(str(i) for i in record_ids)}"
             eyes_text = "\n".join(str(item.get("eyes") or "—") for item in ordered_rows)
-            date_text = "\n".join(str(item.get("screened_at") or "—") for item in ordered_rows)
+            date_values = [str(item.get("screened_at") or "").strip() for item in ordered_rows]
+            date_values = [value for value in date_values if value]
+            if date_values:
+                unique_dates = list(dict.fromkeys(date_values))
+                date_text = "\n".join(self._format_screening_datetime(value) for value in unique_dates)
+            else:
+                date_text = "—"
             result_text = "\n".join(
                 str(item.get("final_diagnosis_icdr") or item.get("doctor_classification") or item.get("result") or "—")
                 for item in ordered_rows
@@ -883,7 +942,8 @@ class ReportsPage(QWidget):
             self.results_table.setItem(i, 6, screened_by_item)
         self.results_table.setSortingEnabled(True)
         self.results_table.resizeRowsToContents()
-        self.filtered_count_label.setText(f"Total: {len(self._filtered_rows)}")
+        if hasattr(self, "filtered_count_label"):
+            self.filtered_count_label.setText(f"Total: {len(self._filtered_rows)}")
         self._update_action_buttons()
 
     def _result_color_for_current_theme(self, level: str) -> QColor:
@@ -911,6 +971,9 @@ class ReportsPage(QWidget):
         if not owner_username:
             return True
         return owner_username == str(self.username or "").strip().lower()
+
+    def _can_internal_referral_record(self, record: dict) -> bool:
+        return self._can_rescreen_record(record)
 
     def _record_owner_label(self, record: dict) -> str:
         owner_name = str(record.get("original_screener_name") or "").strip()
@@ -944,7 +1007,7 @@ class ReportsPage(QWidget):
         elif chosen == generate_action:
             self.generate_report()
         elif chosen == referral_action:
-            self.generate_referral()
+            self.start_referral_flow()
         elif chosen == rescreen_action:
             self.rescreen_patient()
         elif archive_action is not None and chosen == archive_action:
@@ -960,6 +1023,13 @@ class ReportsPage(QWidget):
         record = self._get_selected_record()
         self.report_btn.setEnabled(bool(record))
         self.referral_btn.setEnabled(bool(record))
+        if record and not self._can_internal_referral_record(record):
+            owner = self._record_owner_label(record)
+            self.referral_btn.setToolTip(
+                f"Only Generate Letter is available. Internal referral is limited to the original screener ({owner})."
+            )
+        else:
+            self.referral_btn.setToolTip("Open referral options (Internal Referral or Generate Letter)")
         can_rescreen = bool(record and self._can_rescreen_record(record))
         self.rescreen_btn.setEnabled(can_rescreen)
         if record and not can_rescreen:
@@ -968,6 +1038,91 @@ class ReportsPage(QWidget):
             )
         else:
             self.rescreen_btn.setToolTip("Start a new screening for the selected patient")
+
+    def start_referral_flow(self):
+        record = self._get_selected_record()
+        if not record:
+            QMessageBox.information(self, "Referral", "Select a patient record first.")
+            return
+
+        if not self._can_internal_referral_record(record):
+            owner = self._record_owner_label(record)
+            QMessageBox.information(
+                self,
+                "Referral",
+                f"Only Generate Letter is available for this record. Internal referral is limited to the original screener ({owner}).",
+            )
+            self.generate_referral()
+            return
+
+        try:
+            from login import ReferralOptionsDialog
+        except ImportError:
+            from .login import ReferralOptionsDialog
+
+        patient_name = str(record.get("name") or "Patient").strip()
+        dialog = ReferralOptionsDialog(patient_name, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if dialog.selected_option == "internal":
+            self._show_internal_referral_from_record(record)
+        elif dialog.selected_option == "letter":
+            self.generate_referral()
+
+    def _show_internal_referral_from_record(self, record: dict):
+        full = self._fetch_full_record(record.get("id")) or record
+        patient_name_raw = str(full.get("name") or "Patient").strip()
+
+        try:
+            from login import AssignReferralDialog
+        except ImportError:
+            from .login import AssignReferralDialog
+
+        while True:
+            dialog = AssignReferralDialog(patient_name_raw, self, exclude_username=self.username)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                if getattr(dialog, "go_back", False):
+                    self.start_referral_flow()
+                return
+
+            if dialog.selected_clinician == self.username:
+                QMessageBox.warning(self, "Referral", "You cannot assign a referral to yourself.")
+                continue
+
+            duplicate = UserManager.find_active_duplicate_referral(patient_name_raw, dialog.selected_clinician)
+            if duplicate:
+                status_label = str(duplicate.get("status") or "pending").replace("_", " ").title()
+                existing_referral_id = str(duplicate.get("referral_id") or "").strip()
+                confirm = QMessageBox.question(
+                    self,
+                    "Duplicate Referral",
+                    (
+                        f"{patient_name_raw} is already referred to this doctor "
+                        f"(Referral ID: {existing_referral_id}, Status: {status_label}).\n\n"
+                        "Do you want to create another referral anyway?"
+                    ),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if confirm != QMessageBox.Yes:
+                    continue
+
+            referral_id = f"REF-{datetime.now().strftime('%Y%m%d%H%M%S')}-INTERNAL-{full.get('id', 'NA')}"
+            success = UserManager.assign_referral(
+                referral_id=referral_id,
+                assigned_to_username=dialog.selected_clinician,
+                assigned_by_username=self.username,
+                patient_name=patient_name_raw,
+                urgency=dialog.urgency_level,
+                notes=f"Assigned from Reports for record ID: {full.get('id', 'N/A')}",
+            )
+            if success:
+                QMessageBox.information(self, "Referral Assigned", "Patient referral assigned successfully to clinician.")
+                self.status_label.setText("Referral assigned successfully")
+                return
+
+            QMessageBox.warning(self, "Error", "Failed to assign referral. It may already be assigned.")
         if self.is_admin:
             self.archive_btn.setEnabled(bool(record and not record["archived_at"]))
 
@@ -1248,11 +1403,20 @@ class ReportsPage(QWidget):
         if not self._summary_cache:
             self.status_label.setText("No report data to export")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Export DR Screening Results", "", "CSV Files (*.csv)")
-        if not path:
-            return
         if not self._filtered_rows:
             self.status_label.setText("No visible report data to export")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Export Reports",
+            f"Export {len(self._filtered_rows)} visible report row(s) to CSV?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export DR Screening Results", "", "CSV Files (*.csv)")
+        if not path:
             return
         try:
             with open(path, "w", newline="", encoding="utf-8") as f:
@@ -1397,11 +1561,11 @@ class ReportsPage(QWidget):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Referral Destination")
-        dialog.resize(560, 320)
+        dialog.resize(560, 250)
 
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
 
         subtitle = QLabel("Choose a trusted referral hospital or use Other for one-time manual entry.")
         subtitle.setWordWrap(True)
@@ -1411,7 +1575,7 @@ class ReportsPage(QWidget):
         hospital_label = QLabel("Referral Hospital")
         hospital_label.setStyleSheet("font-size:11px;font-weight:700;color:#2f4054;")
         hospital_combo = QComboBox()
-        hospital_combo.setMinimumHeight(36)
+        hospital_combo.setMinimumHeight(34)
         for item in hospitals:
             dept = str(item.get("department") or "").strip()
             label = str(item.get("hospital_name") or "").strip()
@@ -1429,7 +1593,7 @@ class ReportsPage(QWidget):
         manual_wrap = QWidget()
         manual_layout = QVBoxLayout(manual_wrap)
         manual_layout.setContentsMargins(0, 0, 0, 0)
-        manual_layout.setSpacing(8)
+        manual_layout.setSpacing(6)
 
         manual_name = QLineEdit()
         manual_name.setPlaceholderText("Hospital name")
@@ -1445,6 +1609,7 @@ class ReportsPage(QWidget):
         layout.addWidget(manual_wrap)
 
         action_row = QHBoxLayout()
+        action_row.setSpacing(6)
         action_row.addStretch(1)
         cancel_btn = QPushButton("Cancel")
         continue_btn = QPushButton("Continue")
@@ -2124,8 +2289,8 @@ class ReportsPage(QWidget):
                 <td><span class=\"label\">HbA1c:</span> {patient_hba1c}</td>
             </tr>
             <tr>
-                <td><span class=\"label\">Height:</span> {patient_height}</td>
-                <td><span class=\"label\">Weight:</span> {patient_weight}</td>
+                <td><span class=\"label\">Height (cm):</span> {patient_height}</td>
+                <td><span class=\"label\">Weight (kg):</span> {patient_weight}</td>
             </tr>
             <tr>
                 <td><span class=\"label\">BMI:</span> {patient_bmi}</td>
@@ -2204,43 +2369,3 @@ class ReportsPage(QWidget):
             ),
         )
         QMessageBox.information(self, "Referral Saved", f"Referral letter saved to:\n{path}")
-        
-        # Ask if user wants to assign referral to a clinician
-        assign_reply = QMessageBox.question(
-            self,
-            "Assign Referral",
-            "Do you want to assign this referral to a clinician for follow-up?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        
-        if assign_reply == QMessageBox.StandardButton.Yes:
-            try:
-                from login import AssignReferralDialog
-            except ImportError:
-                from .login import AssignReferralDialog
-            
-            dialog = AssignReferralDialog(patient_name_raw, self, exclude_username=self.username)
-            if dialog.exec() == QDialog.Accepted:
-                if dialog.selected_clinician == self.username:
-                    QMessageBox.warning(self, "Error", "You cannot assign a referral to yourself.")
-                    return
-                # Create referral assignment
-                referral_id = f"REF-{datetime.now().strftime('%Y%m%d%H%M%S')}-{full.get('id', 'NA')}"
-                success = UserManager.assign_referral(
-                    referral_id=referral_id,
-                    assigned_to_username=dialog.selected_clinician,
-                    assigned_by_username=self.username,
-                    patient_name=patient_name_raw,
-                    urgency=dialog.urgency_level,
-                    notes=f"Generated from patient record ID: {full.get('id', 'N/A')}"
-                )
-                if success:
-                    QMessageBox.information(
-                        self,
-                        "Referral Assigned",
-                        f"Referral has been assigned to the clinician for follow-up."
-                    )
-                    self.status_label.setText("Referral assigned successfully")
-                else:
-                    QMessageBox.warning(self, "Error", "Failed to assign referral. It may already be assigned.")

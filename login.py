@@ -6,7 +6,7 @@ import json
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QLineEdit,
     QVBoxLayout, QHBoxLayout, QCheckBox, QMessageBox, QDialog, QFrame,
-    QScrollArea, QTableWidget, QTableWidgetItem
+    QScrollArea, QTableWidget, QTableWidgetItem, QStyle
 )
 from PySide6.QtGui import QAction, QIcon, QDesktopServices, QPixmap, QColor
 from PySide6.QtCore import Qt, QUrl, QSize, QTimer
@@ -200,8 +200,6 @@ class ReferralOptionsDialog(QDialog):
             }
         """)
 
-        icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 20)
         layout.setSpacing(14)
@@ -258,7 +256,7 @@ class ReferralOptionsDialog(QDialog):
 
         internal_icon = QLabel()
         internal_icon.setFixedSize(28, 28)
-        internal_icon.setPixmap(QIcon(os.path.join(icon_dir, "refer.svg")).pixmap(QSize(22, 22)))
+        internal_icon.setPixmap(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView).pixmap(QSize(22, 22)))
         internal_icon.setStyleSheet("background: transparent;")
         internal_icon.setAlignment(Qt.AlignCenter)
         internal_layout.addWidget(internal_icon, 0, Qt.AlignTop)
@@ -309,7 +307,7 @@ class ReferralOptionsDialog(QDialog):
 
         letter_icon = QLabel()
         letter_icon.setFixedSize(28, 28)
-        letter_icon.setPixmap(QIcon(os.path.join(icon_dir, "generate_report.svg")).pixmap(QSize(22, 22)))
+        letter_icon.setPixmap(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton).pixmap(QSize(22, 22)))
         letter_icon.setStyleSheet("background: transparent;")
         letter_icon.setAlignment(Qt.AlignCenter)
         letter_layout.addWidget(letter_icon, 0, Qt.AlignTop)
@@ -377,6 +375,7 @@ class AssignReferralDialog(QDialog):
         self.selected_clinician = None
         self.urgency_level = "normal"
         self.notes_text = ""
+        self.go_back = False
         self._urgency_buttons = []
         self.setStyleSheet("""
             QDialog {
@@ -543,6 +542,25 @@ class AssignReferralDialog(QDialog):
         assign_btn.clicked.connect(self._on_assign)
         button_layout.addWidget(assign_btn)
 
+        back_btn = QPushButton("Back")
+        back_btn.setMinimumHeight(36)
+        back_btn.setStyleSheet("""
+            QPushButton {
+                background: #ffffff;
+                color: #374151;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #f8fafc;
+                border-color: #94a3b8;
+            }
+        """)
+        back_btn.clicked.connect(self._on_back)
+        button_layout.addWidget(back_btn)
+
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setMinimumHeight(36)
         cancel_btn.setStyleSheet("""
@@ -598,6 +616,10 @@ class AssignReferralDialog(QDialog):
             QMessageBox.warning(self, "Error", "Please select a clinician")
             return
         self.accept()
+
+    def _on_back(self):
+        self.go_back = True
+        self.reject()
 
 
 class ContactAdminDialog(QDialog):
