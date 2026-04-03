@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QGroupBox, QMessageBox, QProgressBar, QSizePolicy,
     QFrame, QMenu, QInputDialog, QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QHeaderView, QDialog, QApplication
+    QHeaderView, QDialog, QApplication, QLineEdit
 )
 from PySide6.QtCore import Qt, QSize, QByteArray, QEvent, QTimer, QCoreApplication
 from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication
@@ -1752,12 +1752,22 @@ class EyeShieldApp(QMainWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
-        title = QLabel("REFERRALS")
-        title.setStyleSheet("color: #2b3a4a; font-size: 22px; font-weight: 800; background: transparent;")
-        layout.addWidget(title)
-
         actions_row = QHBoxLayout()
         actions_row.setSpacing(8)
+
+        self.referral_search_input = QLineEdit()
+        self.referral_search_input.setPlaceholderText("Search")
+        self.referral_search_input.setMinimumHeight(32)
+        self.referral_search_input.setMinimumWidth(260)
+        self.referral_search_input.setStyleSheet(
+            "QLineEdit {"
+            "background:#ffffff; color:#1f2937; border:1px solid #bfdbfe; border-radius:8px;"
+            "padding:6px 10px; font-size:12px;"
+            "}"
+            "QLineEdit:focus { border-color:#60a5fa; }"
+        )
+        self.referral_search_input.textChanged.connect(self.refresh_referrals_page)
+        actions_row.addWidget(self.referral_search_input)
         actions_row.addStretch(1)
         icons_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 
@@ -1937,6 +1947,24 @@ class EyeShieldApp(QMainWindow):
             for item in referrals
             if item.get("relation") == "created_by_me" and str(item.get("status") or "").strip().lower() != "archived"
         ]
+
+        query = str(self.referral_search_input.text() if hasattr(self, "referral_search_input") else "").strip().lower()
+        if query:
+            def _matches_query(referral: dict) -> bool:
+                haystack = " ".join([
+                    str(referral.get("referral_id") or ""),
+                    str(referral.get("patient_name") or ""),
+                    str(referral.get("status") or ""),
+                    str(referral.get("urgency") or ""),
+                    str(referral.get("assigned_by") or ""),
+                    str(referral.get("assigned_to") or ""),
+                    str(referral.get("notes") or ""),
+                ]).lower()
+                return query in haystack
+
+            assigned_referrals = [item for item in assigned_referrals if _matches_query(item)]
+            created_referrals = [item for item in created_referrals if _matches_query(item)]
+
         self._archived_created_referrals = [
             item
             for item in referrals
@@ -2672,10 +2700,19 @@ class EyeShieldApp(QMainWindow):
                 message_lower.startswith("message on this patient")
                 or "added a clinical note" in message_lower
             ):
-                parts = raw_message.split(":", 1)
-                note_text = parts[1].strip() if len(parts) > 1 else raw_message
-                display_title = "Clinical Notes on This Patient"
-                display_message = f"Clinical notes on this patient -\n- {note_text}"
+                sender_match = re.search(r"^(.*?)\s+added a clinical note", raw_message, flags=re.IGNORECASE)
+                sender_name = sender_match.group(1).strip() if sender_match else "Referring Doctor"
+
+                note_text = raw_message
+                new_format_match = re.search(r"\bat\s\d{2}:\d{2}:\s*(.+)$", raw_message, flags=re.IGNORECASE)
+                old_format_match = re.search(r"\bby\s.+?:\s*(.+)$", raw_message, flags=re.IGNORECASE)
+                if new_format_match:
+                    note_text = new_format_match.group(1).strip()
+                elif old_format_match:
+                    note_text = old_format_match.group(1).strip()
+
+                display_title = f"Message from {sender_name}"
+                display_message = note_text
             else:
                 display_title = raw_title
                 display_message = raw_message

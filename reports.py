@@ -594,7 +594,7 @@ class ReportsPage(QWidget):
         root.setContentsMargins(24, 22, 24, 22)
         root.setSpacing(18)
 
-        self._rep_title_lbl = QLabel("DR Screening Reports")
+        self._rep_title_lbl = QLabel("")
         self._rep_title_lbl.setObjectName("pageHeader")
         self._rep_title_lbl.setStyleSheet("font-size:26px;font-weight:700;color:#1f6fe5;font-family:'Segoe UI';")
         self._rep_subtitle_lbl = QLabel("")
@@ -602,10 +602,7 @@ class ReportsPage(QWidget):
         self._rep_subtitle_lbl.setStyleSheet("font-size:13px;color:#6b7f95;")
         self._rep_subtitle_lbl.setAlignment(Qt.AlignLeft)
 
-        top_bar = QHBoxLayout()
-        top_bar.setSpacing(10)
-        top_bar.addWidget(self._rep_title_lbl)
-        top_bar.addStretch(1)
+        self._rep_title_lbl.hide()
         self.export_btn = QPushButton("Export Results")
         self.export_btn.setAutoDefault(True)
         self.export_btn.setDefault(True)
@@ -614,35 +611,29 @@ class ReportsPage(QWidget):
             self.archive_btn = QPushButton("Archive Selected")
             self.archive_btn.clicked.connect(self.archive_selected_record)
             self.archive_btn.setEnabled(False)
-            top_bar.addWidget(self.archive_btn)
         else:
             self.archive_btn = None
         if self.is_admin:
             self.archived_records_btn = QPushButton("Archived Records")
             self.archived_records_btn.clicked.connect(self.open_archived_records_window)
-            top_bar.addWidget(self.archived_records_btn)
         else:
             self.archived_records_btn = None
-        top_bar.addWidget(self.export_btn)
         self.report_btn = QPushButton("Generate Report")
         self.report_btn.setEnabled(False)
         self.report_btn.clicked.connect(self.generate_report)
-        top_bar.addWidget(self.report_btn)
         self.referral_btn = QPushButton("Generate Referral")
         self.referral_btn.setEnabled(False)
         self.referral_btn.clicked.connect(self.start_referral_flow)
-        top_bar.addWidget(self.referral_btn)
         self.rescreen_btn = QPushButton("Rescreen")
         self.rescreen_btn.setEnabled(False)
         self.rescreen_btn.clicked.connect(self.rescreen_patient)
-        top_bar.addWidget(self.rescreen_btn)
-        root.addLayout(top_bar)
 
         self._rep_subtitle_lbl.hide()
-        self.status_label = QLabel("Ready")
+        self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setStyleSheet("color:#4f637a;background:#eaf1fb;border:1px solid #d4e2f3;border-radius:10px;padding:8px 12px;")
+        self.status_label.hide()
         root.addWidget(self.status_label)
 
         self._controls_group = QGroupBox("")
@@ -650,7 +641,7 @@ class ReportsPage(QWidget):
         cl.setContentsMargins(18, 16, 18, 16)
         cl.setSpacing(14)
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by patient ID, name, eye screened, result, or confidence")
+        self.search_input.setPlaceholderText("Search")
         self.search_input.setMinimumHeight(40)
         self.search_input.textChanged.connect(self.apply_filters)
         cl.addWidget(self.search_input, 1)
@@ -659,6 +650,15 @@ class ReportsPage(QWidget):
         self.result_filter.setMinimumHeight(40)
         self.result_filter.currentTextChanged.connect(self.apply_filters)
         cl.addWidget(self.result_filter)
+        cl.addStretch(1)
+        if self.archive_btn is not None:
+            cl.addWidget(self.archive_btn)
+        if self.archived_records_btn is not None:
+            cl.addWidget(self.archived_records_btn)
+        cl.addWidget(self.export_btn)
+        cl.addWidget(self.report_btn)
+        cl.addWidget(self.referral_btn)
+        cl.addWidget(self.rescreen_btn)
         root.addWidget(self._controls_group)
 
         self._results_group = QGroupBox("")
@@ -788,7 +788,7 @@ class ReportsPage(QWidget):
         self.apply_filters()
         if self.archived_records_dialog is not None:
             self.archived_records_dialog.reload_rows()
-        self.status_label.setText("Ready")
+        self.status_label.setText("")
 
     @staticmethod
     def _eye_sort_key(eye_value: str) -> tuple[int, str]:
@@ -1467,8 +1467,8 @@ class ReportsPage(QWidget):
     def apply_language(self, language: str):
         from translations import get_pack
         pack = get_pack(language)
-        self._rep_title_lbl.setText(pack["rep_title"])
-        self._rep_subtitle_lbl.setText(pack["rep_subtitle"])
+        self._rep_title_lbl.setText("")
+        self._rep_subtitle_lbl.setText("")
         self._controls_group.setTitle("")
         self._results_group.setTitle("")
         self._setup_action_buttons_ui()
@@ -1718,6 +1718,37 @@ class ReportsPage(QWidget):
         if not eye_records:
             eye_records = [full]
 
+        severity_rank = {
+            "No DR": 0,
+            "Mild DR": 1,
+            "Moderate DR": 2,
+            "Severe DR": 3,
+            "Proliferative DR": 4,
+        }
+
+        def pick_worst_grade(values: list[str]) -> str:
+            best = ""
+            best_rank = -1
+            for raw in values:
+                value = str(raw or "").strip()
+                rank = severity_rank.get(value, -1)
+                if rank > best_rank:
+                    best = value
+                    best_rank = rank
+            return best
+
+        bilateral_grades = []
+        for eye_record in eye_records:
+            grade = (
+                str(eye_record.get("final_diagnosis_icdr") or "").strip()
+                or str(eye_record.get("doctor_classification") or "").strip()
+                or str(eye_record.get("ai_classification") or "").strip()
+                or str(eye_record.get("result") or "").strip()
+            )
+            if grade:
+                bilateral_grades.append(grade)
+        bilateral_worst_grade = pick_worst_grade(bilateral_grades)
+
         # ── helpers ──────────────────────────────────────────────────────────
         def esc(v) -> str:
             s = str(v or "").strip()
@@ -1745,6 +1776,8 @@ class ReportsPage(QWidget):
         decision_mode_raw = str(full.get("decision_mode") or "accepted").strip().lower()
         override_reason_raw = str(full.get("override_justification") or "").strip()
         final_dx_raw = str(full.get("final_diagnosis_icdr") or doctor_result_raw or ai_result_raw).strip()
+        if bilateral_worst_grade and severity_rank.get(bilateral_worst_grade, -1) > severity_rank.get(final_dx_raw, -1):
+            final_dx_raw = bilateral_worst_grade
         doctor_findings_raw = str(full.get("doctor_findings") or "").strip()
         result_raw = final_dx_raw or doctor_result_raw or ai_result_raw
 
@@ -1767,13 +1800,6 @@ class ReportsPage(QWidget):
         else:
             rec = "Consult a qualified ophthalmologist."
             summary = "Please consult a qualified ophthalmologist for further evaluation."
-
-        referral_destination = "&#8212;"
-        if final_dx_raw in ("Moderate DR", "Severe DR", "Proliferative DR"):
-            selected_destination = self._prompt_referral_destination()
-            if selected_destination is None:
-                return
-            referral_destination = esc(selected_destination.get("display"))
 
         report_date = datetime.now().strftime("%B %d, %Y  %I:%M %p")
         screening_date = str(full.get("screened_at") or "").strip() or report_date
@@ -1946,32 +1972,33 @@ class ReportsPage(QWidget):
             src_uri = resolve_image_uri(eye_record.get("source_image_path", ""))
             heat_uri = resolve_image_uri(eye_record.get("heatmap_image_path", ""))
 
-            def image_panel(title: str, uri: str, placeholder: str) -> str:
+            def image_panel(uri: str, placeholder: str) -> str:
                 if uri:
-                    img_html = f'<img src="{uri}" style="width:100%;max-width:280px;height:auto;display:block;margin:0 auto;border-radius:4px;" />'
+                    img_html = f'<img src="{uri}" style="width:100%;max-width:320px;max-height:230px;height:auto;display:block;margin:0 auto;border-radius:4px;page-break-inside:avoid;break-inside:avoid-page;" />'
                 else:
                     img_html = (
-                        f'<div style="width:280px;height:280px;background:#f3f4f6;border-radius:4px;'
+                        f'<div style="width:320px;height:230px;background:#f3f4f6;border-radius:4px;'
                         f'display:flex;align-items:center;justify-content:center;margin:0 auto;">'
                         f'<span style="font-size:8pt;color:#9ca3af;font-style:italic;text-align:center;padding:20px;">{placeholder}</span>'
                         f'</div>'
                     )
+                return f'<div style="text-align:center;background:#ffffff;padding:8px;border:1px solid #e5e7eb;">{img_html}</div>'
+
+            def titled_image_block(title: str, uri: str, placeholder: str, margin_top: str = "0") -> str:
                 return (
-                    f'<td width="50%" valign="top" style="padding:0 8px;">'
-                    f'<div style="border:1px solid #e5e7eb;border-radius:4px;background:#fafafa;padding:8px;">'
-                    f'<div style="font-size:7.5pt;font-weight:600;color:#6b7280;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;padding:0 4px;">{title}</div>'
-                    f'<div style="padding:0;">{img_html}</div>'
+                    f'<div style="page-break-inside:avoid;break-inside:avoid-page;margin-top:{margin_top};">'
+                    f'<div style="font-size:8pt;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 6px;">{title}</div>'
+                    f'{image_panel(uri, placeholder)}'
                     f'</div>'
-                    f'</td>'
                 )
 
             return (
-                f'<div style="border:1px solid #d1d5db;border-radius:6px;background:#ffffff;margin-bottom:14px;padding:14px 16px;">'
+                f'<div style="border:1px solid #d1d5db;border-radius:6px;background:#ffffff;margin-bottom:14px;padding:14px 16px;page-break-inside:avoid;break-inside:avoid-page;">'
                 f'<div style="margin-bottom:12px;">'
                 f'<table width="100%" cellpadding="0" cellspacing="0"><tr>'
                 f'<td style="font-size:10pt;font-weight:700;color:#111827;">{escape(eye_name)}</td>'
                 f'<td align="right">'
-                f'<span style="font-size:8pt;color:#6b7280;font-weight:600;">Result:&nbsp;</span>'
+                f'<span style="font-size:8pt;color:#6b7280;font-weight:600;">AI Results:&nbsp;</span>'
                 f'<span style="font-size:9pt;font-weight:700;color:#111827;">{escape(eye_result) if eye_result else "&#8212;"}</span>'
                 f'</td>'
                 f'</tr></table>'
@@ -1979,10 +2006,8 @@ class ReportsPage(QWidget):
                 f'<div style="font-size:8.5pt;color:#6b7280;margin-bottom:12px;">'
                 f'Confidence: <span style="font-weight:600;color:#374151;">{escape(eye_conf) if eye_conf else "&#8212;"}</span>'
                 f'</div>'
-                f'<table width="100%" cellpadding="0" cellspacing="0"><tr>'
-                f'{image_panel("Fundus Photograph", src_uri, "Source image not stored")}'
-                f'{image_panel("AI Attention Heatmap", heat_uri, "Heatmap not stored")}'
-                f'</tr></table>'
+                f'{titled_image_block("Fundus", src_uri, "Source image not stored")}'
+                f'{titled_image_block("Heatmap", heat_uri, "Heatmap not stored", "12px")}'
                 f'</div>'
             )
 
@@ -2116,7 +2141,6 @@ class ReportsPage(QWidget):
   <div style="padding:14px;border:1px solid #d1d5db;background:#f9fafb;margin-bottom:18px;">
     <div style="font-size:8pt;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Clinical Recommendation</div>
     <div style="font-size:9.5pt;color:#111827;font-weight:600;line-height:1.6;margin-bottom:14px;">&rarr; {rec}</div>
-        <div style="font-size:8.8pt;color:#374151;font-weight:600;margin-bottom:10px;">Referral Destination: <span style="font-weight:700;color:#111827;">{referral_destination}</span></div>
     <div style="border-top:1px solid #d1d5db;padding-top:12px;margin-top:12px;">
       <div style="font-size:9.5pt;color:#374151;line-height:1.75;">{summary}</div>
     </div>
@@ -2179,7 +2203,45 @@ class ReportsPage(QWidget):
             return
 
         full = self._fetch_full_record(record["id"]) or record
-        result_raw = str(full.get("result") or "").strip()
+        eye_records = self._fetch_report_eye_records(
+            full.get("patient_id"),
+            full.get("screened_at"),
+            int(full.get("id") or record["id"]),
+        )
+        if not eye_records:
+            eye_records = [full]
+
+        severity_rank = {
+            "No DR": 0,
+            "Mild DR": 1,
+            "Moderate DR": 2,
+            "Severe DR": 3,
+            "Proliferative DR": 4,
+        }
+
+        def pick_worst_grade(values: list[str]) -> str:
+            best = ""
+            best_rank = -1
+            for raw in values:
+                value = str(raw or "").strip()
+                rank = severity_rank.get(value, -1)
+                if rank > best_rank:
+                    best = value
+                    best_rank = rank
+            return best
+
+        bilateral_grades = []
+        for eye_record in eye_records:
+            grade = (
+                str(eye_record.get("final_diagnosis_icdr") or "").strip()
+                or str(eye_record.get("doctor_classification") or "").strip()
+                or str(eye_record.get("ai_classification") or "").strip()
+                or str(eye_record.get("result") or "").strip()
+            )
+            if grade:
+                bilateral_grades.append(grade)
+
+        result_raw = pick_worst_grade(bilateral_grades) or str(full.get("result") or "").strip()
 
         if result_raw in ("No DR", "Mild DR"):
             confirm = QMessageBox.question(
@@ -2201,6 +2263,8 @@ class ReportsPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Save Referral Letter", default_name, "PDF Files (*.pdf)")
         if not path:
             return
+        if not path.lower().endswith(".pdf"):
+            path = f"{path}.pdf"
 
         try:
             from PySide6.QtGui import QPdfWriter, QPageSize, QPageLayout, QTextDocument
@@ -2255,7 +2319,26 @@ class ReportsPage(QWidget):
         doctor_contact = str(profile.get("contact") or "").strip()
 
         screen_date_text = esc(_to_long_date(full.get("screened_at") or report_date))
+        eye_findings = []
+        for eye_record in eye_records:
+            eye_label = str(eye_record.get("eyes") or "Eye").strip() or "Eye"
+            eye_grade = (
+                str(eye_record.get("final_diagnosis_icdr") or "").strip()
+                or str(eye_record.get("doctor_classification") or "").strip()
+                or str(eye_record.get("ai_classification") or "").strip()
+                or str(eye_record.get("result") or "").strip()
+                or "N/A"
+            )
+            eye_findings.append(f"{eye_label}: {eye_grade}")
+        eye_findings_text = esc("; ".join(eye_findings)) if eye_findings else "&#8212;"
+
+        ai_result_raw = (
+            str(full.get("ai_classification") or "").strip()
+            or str(full.get("result") or "").strip()
+            or result_raw
+        )
         patient_name = esc(full.get("name"))
+        patient_dob = esc(full.get("birthdate"))
         patient_age = esc(full.get("age"))
         patient_sex = esc(full.get("sex"))
         patient_hba1c = esc(full.get("hba1c"))
@@ -2265,12 +2348,98 @@ class ReportsPage(QWidget):
         patient_bmi = esc(full.get("bmi"))
         patient_visual_acuity_left = esc(full.get("visual_acuity_left"))
         patient_visual_acuity_right = esc(full.get("visual_acuity_right"))
-        patient_notes = esc(full.get("notes"))
+        patient_notes_raw = str(full.get("notes") or "").strip()
+        if len(patient_notes_raw) > 220:
+            patient_notes_raw = f"{patient_notes_raw[:217].rstrip()}..."
+        patient_notes = esc(patient_notes_raw)
 
-        referral_image_uri = ""
-        image_path = str(full.get("source_image_path") or "").strip()
-        if image_path and os.path.exists(image_path):
-            referral_image_uri = Path(image_path).resolve().as_uri()
+        def _resolve_image_uri(path_value: str) -> str:
+            raw = str(path_value or "").strip()
+            if not raw:
+                return ""
+            candidate = raw if os.path.isabs(raw) else os.path.join(os.path.dirname(os.path.abspath(__file__)), raw)
+            if not os.path.exists(candidate):
+                return ""
+            try:
+                return Path(candidate).resolve().as_uri()
+            except OSError:
+                return ""
+
+        def _scaled_referral_image(uri: str, file_path: str, missing_text: str) -> str:
+            if not uri:
+                return f'<div style="padding:26px 14px;color:#9ca3af;font-style:italic;">{missing_text}</div>'
+
+            max_w, max_h = 380, 280
+            width, height = max_w, max_h
+            if file_path and os.path.exists(file_path):
+                pixmap = QPixmap(file_path)
+                if not pixmap.isNull() and pixmap.width() > 0 and pixmap.height() > 0:
+                    ratio = min(max_w / pixmap.width(), max_h / pixmap.height())
+                    ratio = min(ratio, 1.0)
+                    width = max(1, int(pixmap.width() * ratio))
+                    height = max(1, int(pixmap.height() * ratio))
+
+            return (
+                f'<img src="{uri}" width="{width}" height="{height}" '
+                'style="display:block;margin:0 auto;border-radius:2px;" />'
+            )
+
+        def _normalize_eye_label(eye_label_value: str) -> str:
+            eye_name = str(eye_label_value or "").strip().lower()
+            if eye_name in ("left", "left eye", "os"):
+                return "Left Eye"
+            if eye_name in ("right", "right eye", "od"):
+                return "Right Eye"
+            return str(eye_label_value or "Eye").strip() or "Eye"
+
+        def _referral_eye_block(eye_label_value: str, source_uri: str, source_path: str) -> str:
+            source_html = _scaled_referral_image(source_uri, source_path, "Fundus image not available")
+            return f"""
+    <div class=\"image-box keep-together\">
+        <div style=\"font-size:9.2pt;font-weight:700;color:#1f2937;margin-bottom:10px;\">{esc(_normalize_eye_label(eye_label_value))}</div>
+        <div style=\"font-size:8pt;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;\">Fundus Image</div>
+        <div style=\"text-align:center;background:#ffffff;padding:8px;border:1px solid #e5e7eb;min-height:230px;\">{source_html}</div>
+    </div>
+"""
+
+        referral_eye_blocks = []
+        seen_eyes = set()
+        for eye_record in eye_records:
+            eye_label = str(eye_record.get("eyes") or "").strip() or "Eye"
+            source_path = str(eye_record.get("source_image_path") or "").strip()
+            source_uri = _resolve_image_uri(source_path)
+            dedupe_key = (eye_label.lower(), source_path)
+            if dedupe_key in seen_eyes:
+                continue
+            seen_eyes.add(dedupe_key)
+            referral_eye_blocks.append(
+                _referral_eye_block(eye_label, source_uri, source_path)
+            )
+
+        if not referral_eye_blocks:
+            fallback_source_path = str(full.get("source_image_path") or "").strip()
+            referral_eye_blocks.append(
+                _referral_eye_block(
+                    str(full.get("eyes") or "Eye").strip() or "Eye",
+                    _resolve_image_uri(fallback_source_path),
+                    fallback_source_path,
+                )
+            )
+
+        is_bilateral_referral = len(referral_eye_blocks) > 1
+        if is_bilateral_referral:
+            referral_images_html = (
+                '<div class="subject">Bilateral Fundus Images Captured</div>'
+                '<div class="paragraph">The following retinal fundus images from both screened eyes are attached for specialist reference.</div>'
+                + "".join(referral_eye_blocks)
+            )
+        else:
+            referral_images_html = (
+                '<div class="subject">Fundus Image Captured</div>'
+                '<div class="paragraph">The following retinal fundus image was captured during this screening encounter and is attached for specialist reference.</div>'
+                + "".join(referral_eye_blocks)
+            )
+
         html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -2284,26 +2453,27 @@ class ReportsPage(QWidget):
     padding: 0;
         line-height: 1.6;
   }}
-    .sheet {{ padding: 26px 36px; }}
+    .sheet {{ padding: 20px 30px; }}
     .page-break {{ page-break-before: always; }}
     .header-grid {{ width: 100%; border-collapse: collapse; margin-bottom: 14px; }}
     .header-grid td {{ width: 100%; vertical-align: top; padding: 0; }}
     .header-block {{ font-size: 10.8pt; line-height: 1.65; }}
     .date-line {{ font-size: 10.8pt; line-height: 1.65; margin-bottom: 8px; }}
     .label {{ font-weight: 700; }}
-    .subject {{ margin: 14px 0 14px 0; font-size: 11.5pt; font-weight: 700; }}
-    .paragraph {{ margin: 0 0 12px 0; text-align: justify; line-height: 1.7; }}
+    .subject {{ margin: 10px 0 10px 0; font-size: 11pt; font-weight: 700; }}
+    .paragraph {{ margin: 0 0 8px 0; text-align: justify; line-height: 1.45; }}
     .patient-box {{
         border: 1px solid #d1d5db;
         background: #fafafa;
         padding: 12px 14px;
-        margin: 16px 0 16px 0;
+        margin: 10px 0 10px 0;
     }}
     .patient-box table {{ width: 100%; border-collapse: collapse; }}
-    .patient-box td {{ padding: 5px 0; vertical-align: top; font-size: 10pt; line-height: 1.6; }}
-    .closing {{ margin-top: 24px; }}
-    .signature-line {{ margin-top: 34px; border-top: 1px solid #374151; width: 260px; }}
-    .image-box {{ border: 1px solid #d1d5db; background: #fafafa; padding: 12px 14px; margin: 10px 0 16px 0; }}
+    .patient-box td {{ padding: 4px 0; vertical-align: top; font-size: 9.5pt; line-height: 1.35; }}
+    .closing {{ margin-top: 12px; }}
+    .signature-line {{ margin-top: 20px; border-top: 1px solid #374151; width: 260px; }}
+    .keep-together {{ page-break-inside: avoid; break-inside: avoid-page; }}
+    .image-box {{ border: 1px solid #d1d5db; background: #fafafa; padding: 12px 14px; margin: 10px 0 16px 0; page-break-inside: avoid; break-inside: avoid-page; }}
     .image-caption {{ font-size: 9pt; color: #4b5563; margin-top: 8px; text-align: center; }}
 </style>
 </head>
@@ -2327,7 +2497,7 @@ class ReportsPage(QWidget):
 
     <div class=\"paragraph\">
         I am referring this patient for specialist ophthalmology assessment following diabetic retinopathy screening.
-        The current screening result indicates <b>{esc(result_raw)}</b> with <b>{esc(urgency)}</b> referral priority.
+        The current AI screening result indicates <b>{esc(ai_result_raw)}</b>. Final diagnosis based on ICDR by doctor is <b>{esc(result_raw)}</b> with <b>{esc(urgency)}</b> referral priority.
         Screening was performed on {screen_date_text}.
     </div>
 
@@ -2335,22 +2505,11 @@ class ReportsPage(QWidget):
         <table>
             <tr>
                 <td style=\"width:50%;\"><span class=\"label\">Patient Name:</span> {patient_name}</td>
-                <td><span class=\"label\">Age / Sex:</span> {patient_age} / {patient_sex}</td>
+                <td><span class=\"label\">Date of Birth:</span> {patient_dob}</td>
             </tr>
             <tr>
-                <td><span class=\"label\">Diabetes Type:</span> {patient_diabetes_type}</td>
-                <td><span class=\"label\">HbA1c:</span> {patient_hba1c}</td>
-            </tr>
-            <tr>
-                <td><span class=\"label\">Height (cm):</span> {patient_height}</td>
-                <td><span class=\"label\">Weight (kg):</span> {patient_weight}</td>
-            </tr>
-            <tr>
-                <td><span class=\"label\">BMI:</span> {patient_bmi}</td>
-                <td><span class=\"label\">Visual Acuity:</span> {patient_visual_acuity_left} / {patient_visual_acuity_right}</td>
-            </tr>
-            <tr>
-                <td colspan=\"2\"><span class=\"label\">Clinical History & Symptoms:</span> {patient_notes}</td>
+                <td style=\"width:50%;\"><span class=\"label\">Age:</span> {patient_age}</td>
+                <td><span class=\"label\">Sex:</span> {patient_sex}</td>
             </tr>
             <tr>
                 <td colspan=\"2\"><span class=\"label\">Referral Reason:</span> {esc(rationale)}</td>
@@ -2364,7 +2523,7 @@ class ReportsPage(QWidget):
         assessment. If you need to reach me, contact me at {esc(doctor_contact)}.
     </div>
 
-    <div class=\"closing\">
+    <div class=\"closing keep-together\">
         <div style=\"margin-bottom:8px;\">Sincerely,</div>
         <div class=\"signature-line\"></div>
         <div style="margin-top:8px;"><b>{esc(finalized_by_label)}</b></div>
@@ -2375,16 +2534,7 @@ class ReportsPage(QWidget):
 <div class="page-break"></div>
 
 <div class="sheet">
-    <div class="subject">Fundus Image Captured</div>
-    <div class="paragraph">
-        The following retinal fundus image was captured during this screening encounter and is attached for specialist reference.
-    </div>
-    <div class="image-box">
-        <div style="text-align:center;background:#ffffff;padding:8px;border:1px solid #e5e7eb;">
-            {f'<img src="{referral_image_uri}" style="max-width:100%;max-height:560px;width:auto;height:auto;" />' if referral_image_uri else '<div style="padding:80px 20px;color:#9ca3af;font-style:italic;">Fundus image not available</div>'}
-        </div>
-        <div class="image-caption">Captured fundus image</div>
-    </div>
+    {referral_images_html}
     <div style="font-size:10pt;color:#4b5563;margin-top:20px;line-height:1.8;">
         <span><b>Created by:</b> {esc(created_by_label)}</span><br>
         <span><b>Finalized by:</b> {esc(finalized_by_label)}</span>
@@ -2410,6 +2560,14 @@ class ReportsPage(QWidget):
             pass
 
         doc.print_(writer)
+        del writer
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            QMessageBox.warning(
+                self,
+                "Generate Referral",
+                "Referral PDF was not created. Please choose a writable folder and try again.",
+            )
+            return
         self.status_label.setText(f"Referral saved: {os.path.basename(path)}")
         UserManager.add_activity_log(
             self.username,

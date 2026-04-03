@@ -569,6 +569,8 @@ class ScreeningPage(QWidget):
         self._last_saved_source_path = ""
         self._current_eye_saved = False
         self._first_eye_result = None
+        self._last_eye_choice = ""
+        self._suspend_eye_guard = False
         self._navigation_locked = False
         self._rescreen_replace_record_id = None
         self._flow_guard = ScreeningFlowGuard(self)
@@ -603,6 +605,59 @@ class ScreeningPage(QWidget):
         main_window = self.window()
         if main_window is not self and hasattr(main_window, "_refresh_navigation_lock"):
             main_window._refresh_navigation_lock()
+
+    def _set_eye_selection(self, eye_label: str):
+        self._suspend_eye_guard = True
+        try:
+            self.p_eye.setCurrentText(str(eye_label or ""))
+            self._last_eye_choice = str(self.p_eye.currentText() or "").strip()
+        finally:
+            self._suspend_eye_guard = False
+
+    def _on_eye_selection_changed(self, eye_label: str):
+        if self._suspend_eye_guard:
+            return
+
+        selected_eye = str(eye_label or "").strip()
+        previous_eye = str(self._last_eye_choice or "").strip()
+        self._last_eye_choice = selected_eye
+
+        if not selected_eye:
+            return
+
+        patient_id = str(self.p_id.text() or "").strip() if hasattr(self, "p_id") else ""
+        if not patient_id:
+            return
+
+        existing = self._find_existing_eye_record(patient_id, selected_eye)
+        if not existing:
+            return
+
+        existing_id = int(existing.get("id") or 0)
+        active_replace_id = int(self._rescreen_replace_record_id or 0)
+        if existing_id and active_replace_id and existing_id == active_replace_id:
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Existing Eye Record Detected")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            f"A saved screening record already exists for <b>{selected_eye}</b> for this patient."
+        )
+        box.setInformativeText(
+            "Would you like to open that eye in replace mode, or keep your current eye selection?"
+        )
+        replace_btn = box.addButton("Open and Replace Existing Eye", QMessageBox.ButtonRole.AcceptRole)
+        keep_btn = box.addButton("Keep Current Selection", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep_btn)
+        box.exec()
+
+        if box.clickedButton() == replace_btn:
+            if existing_id and self.load_patient_for_rescreen(existing_id, replace_mode=True):
+                self._set_eye_selection(selected_eye)
+            return
+
+        self._set_eye_selection(previous_eye)
 
     def init_ui(self):
         """Initialize the revised UI: patient info and image upload in one window, results in new window"""
@@ -831,6 +886,7 @@ class ScreeningPage(QWidget):
         self.p_eye.setObjectName("eyeDropdown")
         self.p_eye.addItems(["", "Right Eye", "Left Eye"])
         self._apply_visible_dropdown_style(self.p_eye)
+        self.p_eye.currentTextChanged.connect(self._on_eye_selection_changed)
         c1.addLayout(row3(field("Age", self.p_age, "scr_label_age"), field("Sex", self.p_sex, "scr_label_sex"), field("Eye to be Screened", self.p_eye, "scr_label_eye")))
 
         self.p_contact = QLineEdit()
@@ -1978,24 +2034,29 @@ class ScreeningPage(QWidget):
 
             # Set eye based on previous record - match against available options
             eye_value = str(eyes or "").strip()
-            if eye_value:
-                # Try exact match first
-                idx = self.p_eye.findText(eye_value)
-                if idx >= 0:
-                    self.p_eye.setCurrentIndex(idx)
+            self._suspend_eye_guard = True
+            try:
+                if eye_value:
+                    # Try exact match first
+                    idx = self.p_eye.findText(eye_value)
+                    if idx >= 0:
+                        self.p_eye.setCurrentIndex(idx)
+                    else:
+                        # Try partial match as fallback
+                        matched = False
+                        for i in range(self.p_eye.count()):
+                            item_text = self.p_eye.itemText(i)
+                            if eye_value.lower() in item_text.lower() or item_text.lower() in eye_value.lower():
+                                self.p_eye.setCurrentIndex(i)
+                                matched = True
+                                break
+                        if not matched:
+                            self.p_eye.setCurrentIndex(0)
                 else:
-                    # Try partial match as fallback
-                    matched = False
-                    for i in range(self.p_eye.count()):
-                        item_text = self.p_eye.itemText(i)
-                        if eye_value.lower() in item_text.lower() or item_text.lower() in eye_value.lower():
-                            self.p_eye.setCurrentIndex(i)
-                            matched = True
-                            break
-                    if not matched:
-                        self.p_eye.setCurrentIndex(0)
-            else:
-                self.p_eye.setCurrentIndex(0)
+                    self.p_eye.setCurrentIndex(0)
+            finally:
+                self._suspend_eye_guard = False
+            self._last_eye_choice = str(self.p_eye.currentText() or "").strip()
 
             # Clear image for fresh screening
             self.clear_image()
@@ -3241,8 +3302,8 @@ class ScreeningPage(QWidget):
         self.treatment_regimen.setCurrentText(treatment_reg)
         self.prev_dr_stage.setCurrentText(prev_dr)
 
-        # Pre-select the other eye
-        self.p_eye.setCurrentText(opposite_eye)
+        # Pre-select the opposite eye for bilateral workflow continuity.
+        self._set_eye_selection(opposite_eye)
 
         # Return to intake form — only the image needs to be uploaded
         self.stacked_widget.setCurrentIndex(0)
