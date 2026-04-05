@@ -2593,14 +2593,6 @@ body {{
     def _prompt_referral_destination(self) -> dict | None:
         hospitals = UserManager.list_referral_hospitals(active_only=True)
 
-        if not hospitals:
-            QMessageBox.warning(
-                self,
-                "Referral Destination",
-                "No active referral hospitals/clinics found. Please add one in Settings first.",
-            )
-            return None
-
         dialog = QDialog(self)
         dialog.setWindowTitle("Referral Destination")
         dialog.setFixedSize(520, 160)
@@ -2621,6 +2613,7 @@ body {{
             if item.get("is_default"):
                 label = f"{label}  [Default]"
             hospital_combo.addItem(label, item)
+        hospital_combo.addItem("Other (manual entry)", None)
         layout.addWidget(hospital_label)
         layout.addWidget(hospital_combo)
 
@@ -2637,11 +2630,65 @@ body {{
         cancel_btn.clicked.connect(dialog.reject)
         continue_btn.clicked.connect(dialog.accept)
 
+        def _prompt_manual_destination() -> dict | None:
+            manual_dialog = QDialog(dialog)
+            manual_dialog.setWindowTitle("Manual Referral Destination")
+            manual_dialog.setFixedSize(520, 220)
+
+            manual_layout = QVBoxLayout(manual_dialog)
+            manual_layout.setContentsMargins(14, 12, 14, 12)
+            manual_layout.setSpacing(8)
+
+            name_input = QLineEdit()
+            name_input.setPlaceholderText("Hospital or clinic name")
+            dept_input = QLineEdit()
+            dept_input.setPlaceholderText("Department (optional)")
+            contact_input = QLineEdit()
+            contact_input.setPlaceholderText("Contact person / phone (optional)")
+            manual_layout.addWidget(name_input)
+            manual_layout.addWidget(dept_input)
+            manual_layout.addWidget(contact_input)
+
+            manual_actions = QHBoxLayout()
+            manual_actions.addStretch(1)
+            manual_cancel_btn = QPushButton("Cancel")
+            manual_save_btn = QPushButton("Use Destination")
+            manual_save_btn.setObjectName("primaryAction")
+            manual_actions.addWidget(manual_cancel_btn)
+            manual_actions.addWidget(manual_save_btn)
+            manual_layout.addLayout(manual_actions)
+
+            manual_cancel_btn.clicked.connect(manual_dialog.reject)
+            manual_save_btn.clicked.connect(manual_dialog.accept)
+
+            while True:
+                if manual_dialog.exec() != QDialog.DialogCode.Accepted:
+                    return None
+                name = name_input.text().strip()
+                if not name:
+                    QMessageBox.warning(manual_dialog, "Referral Destination", "Hospital/clinic name is required for manual entry.")
+                    continue
+                department = dept_input.text().strip()
+                contact = contact_input.text().strip()
+                display = name if not department else f"{name} ({department})"
+                return {
+                    "hospital_name": name,
+                    "department": department,
+                    "contact_person": contact,
+                    "display": display,
+                }
+
         while True:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return None
 
             selected = hospital_combo.currentData()
+            if selected is None:
+                manual_destination = _prompt_manual_destination()
+                if manual_destination is not None:
+                    return manual_destination
+                continue
+
             hospital_name = str(selected.get("hospital_name") or "").strip()
             department = str(selected.get("department") or "").strip()
             contact = str(selected.get("contact_person") or selected.get("phone") or "").strip()
