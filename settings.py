@@ -639,11 +639,6 @@ class SettingsPage(QWidget):
         admin_contact_layout.addWidget(self.admin_contact_location_label, 2, 1)
         admin_contact_layout.addWidget(self.admin_contact_location_input, 3, 1)
 
-        self.backup_now_btn = QPushButton("Backup Now")
-        self.backup_now_btn.setObjectName("primaryAction")
-        self.backup_now_btn.clicked.connect(self._backup_now)
-        admin_contact_layout.addWidget(self.backup_now_btn, 4, 0, 1, 2)
-
         self.referral_hospitals_group = QGroupBox("Trusted referred hospitals")
         referral_layout = QVBoxLayout(self.referral_hospitals_group)
         referral_layout.setSpacing(6)
