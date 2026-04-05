@@ -250,27 +250,6 @@ class UserManager:
 
         UserManager._ensure_activity_log_columns(conn)
 
-        # Referral assignments table
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS referral_assignments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                referral_id TEXT NOT NULL,
-                episode_no INTEGER NOT NULL DEFAULT 1,
-                assigned_to_username TEXT NOT NULL,
-                assigned_by_username TEXT NOT NULL,
-                assigned_at TEXT,
-                status TEXT DEFAULT 'pending',
-                patient_name TEXT,
-                urgency TEXT DEFAULT 'normal',
-                notes TEXT,
-                FOREIGN KEY (assigned_to_username) REFERENCES users(username),
-                FOREIGN KEY (assigned_by_username) REFERENCES users(username),
-                UNIQUE(referral_id, episode_no)
-            )
-            """
-        )
-
         UserManager._ensure_patient_record_columns(conn)
         UserManager._ensure_referral_hospitals_table(conn)
         ReferralService.ensure_schema(conn)
@@ -1786,73 +1765,6 @@ class UserManager:
         ]
 
     @staticmethod
-    def assign_referral(
-        referral_id: str,
-        assigned_to_username: str,
-        assigned_by_username: str,
-        patient_name: str = "",
-        urgency: str = "normal",
-        notes: str = "",
-    ) -> bool:
-        """Assign a referral to a specific clinician."""
-        return ReferralService.assign_referral(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            assigned_to_username=assigned_to_username,
-            assigned_by_username=assigned_by_username,
-            patient_name=patient_name,
-            urgency=urgency,
-            notes=notes,
-        )
-
-    @staticmethod
-    def find_active_duplicate_referral(patient_name: str, assigned_to_username: str) -> dict | None:
-        """Find active referral for the same patient-assignee pair."""
-        return ReferralService.find_active_duplicate_referral(
-            get_connection=get_connection,
-            patient_name=patient_name,
-            assigned_to_username=assigned_to_username,
-        )
-
-    @staticmethod
-    def get_pending_referrals(username: str) -> list[dict]:
-        """Get pending and actionable referrals for a clinician."""
-        return ReferralService.get_pending_referrals(get_connection=get_connection, username=username)
-
-    @staticmethod
-    def get_user_referrals(username: str, limit: int = 100) -> list[dict]:
-        """Get referral activity that is private to a user."""
-        return ReferralService.get_user_referrals(get_connection=get_connection, username=username, limit=limit)
-
-    @staticmethod
-    def get_referral_count(username: str, status: str = "pending") -> int:
-        """Get referral count for a clinician by status."""
-        return ReferralService.get_referral_count(get_connection=get_connection, username=username, status=status)
-
-    @staticmethod
-    def update_referral_status(referral_id: str, new_status: str, actor_username: str = "") -> bool:
-        """Update referral status with transition validation and audit trail."""
-        return ReferralService.update_referral_status(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            new_status=new_status,
-            actor_username=actor_username,
-        )
-
-    @staticmethod
-    def append_referral_note(referral_id: str, actor_username: str, note: str) -> bool:
-        """Append a timestamped note to a referral record."""
-        return ReferralService.append_referral_note(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            actor_username=actor_username,
-            note=note,
-        )
-
-    @staticmethod
     def list_clinicians(exclude_username: str = "") -> list[dict]:
         """Return active clinician accounts for assignment/reassignment."""
         excluded = str(exclude_username or "").strip()
@@ -1887,77 +1799,6 @@ class UserManager:
             )
         return clinicians
 
-    @staticmethod
-    def reassign_referral(
-        referral_id: str,
-        new_assignee_username: str,
-        acting_username: str,
-        reason: str = "",
-        reason_code: str = "",
-    ) -> bool:
-        """Reassign referral to another clinician and preserve audit note."""
-        return ReferralService.reassign_referral(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            new_assignee_username=new_assignee_username,
-            acting_username=acting_username,
-            reason=reason,
-            reason_code=reason_code,
-        )
-
-    @staticmethod
-    def update_referral_details(
-        referral_id: str,
-        actor_username: str,
-        urgency: str = "",
-        notes: str = "",
-    ) -> bool:
-        """Update referral details on the latest episode (creator-only)."""
-        return ReferralService.update_referral_details(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            actor_username=actor_username,
-            urgency=urgency,
-            notes=notes,
-        )
-
-    @staticmethod
-    def delete_referral(referral_id: str, actor_username: str, reason: str = "") -> bool:
-        """Archive (soft-delete) referral latest episode (creator-only)."""
-        return ReferralService.delete_referral(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            actor_username=actor_username,
-            reason=reason,
-        )
-
-    @staticmethod
-    def delete_archived_referral(referral_id: str, actor_username: str, note: str = "") -> bool:
-        """Permanently delete archived referral (creator-only)."""
-        return ReferralService.purge_archived_referral(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            actor_username=actor_username,
-            note=note,
-        )
-
-    @staticmethod
-    def get_unread_referral_notifications(username: str, limit: int = 30) -> list[dict]:
-        """Return unread referral notifications for a user."""
-        return ReferralService.get_unread_notifications(get_connection=get_connection, username=username, limit=limit)
-
-    @staticmethod
-    def mark_referral_notification_read(notification_id: int, username: str) -> bool:
-        """Mark a referral notification as read."""
-        return ReferralService.mark_notification_read(
-            get_connection=get_connection,
-            notification_id=notification_id,
-            username=username,
-        )
 
     @staticmethod
     def log_external_referral_letter(
@@ -2030,50 +1871,5 @@ class UserManager:
             success = False
         conn.close()
         return success
-
-    @staticmethod
-    def get_referral_reason_taxonomy() -> dict:
-        return {
-            "reassignment": dict(ReferralService.REASSIGNMENT_REASONS),
-            "completion": dict(ReferralService.COMPLETION_REASONS),
-        }
-
-    @staticmethod
-    def get_referral_notifications(username: str, include_read: bool = False, limit: int = 100) -> list[dict]:
-        return ReferralService.get_notifications(
-            get_connection=get_connection,
-            username=username,
-            include_read=include_read,
-            limit=limit,
-        )
-
-    @staticmethod
-    def mark_all_referral_notifications_read(username: str) -> int:
-        return ReferralService.mark_all_notifications_read(
-            get_connection=get_connection,
-            username=username,
-        )
-
-    @staticmethod
-    def get_referral_kpis(username: str) -> dict:
-        return ReferralService.get_referral_kpis(get_connection=get_connection, username=username)
-
-    @staticmethod
-    def update_referral_status_with_reason(
-        referral_id: str,
-        new_status: str,
-        actor_username: str = "",
-        reason_code: str = "",
-        reason_note: str = "",
-    ) -> bool:
-        return ReferralService.update_referral_status(
-            get_connection=get_connection,
-            add_activity_log=UserManager.add_activity_log,
-            referral_id=referral_id,
-            new_status=new_status,
-            actor_username=actor_username,
-            reason_code=reason_code,
-            reason_note=reason_note,
-        )
 
 

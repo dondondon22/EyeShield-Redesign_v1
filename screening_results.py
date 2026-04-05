@@ -333,7 +333,7 @@ class ResultsWindow(QWidget):
         actions_head.addStretch(1)
         actions_layout.addLayout(actions_head)
 
-        actions_hint = QLabel("Workflow shortcuts for save, handoff, reports, and navigation.")
+        actions_hint = QLabel("Workflow shortcuts for save, reports, and navigation.")
         actions_hint.setObjectName("metaText")
         actions_hint.setWordWrap(True)
         actions_layout.addWidget(actions_hint)
@@ -2249,106 +2249,15 @@ img {{
                 pass
 
     def _show_referral_options(self):
-        """Show dialog to choose between internal clinical handoff or generating referral letter."""
+        """Start referral letter generation flow."""
         if self._current_result_class in ("Pending", "Analyzing…") or not self._current_image_path:
-            QMessageBox.information(self, "Referral", "No completed screening result available for handoff.")
+            QMessageBox.information(self, "Referral", "No completed screening result available for referral.")
             return
 
         if self.parent_page and not getattr(self.parent_page, "_current_eye_saved", False):
-            QMessageBox.warning(self, "Referral", "Please save the result before creating a handoff.")
+            QMessageBox.warning(self, "Referral", "Please save the result before creating a referral letter.")
             return
-
-        try:
-            from login import ReferralOptionsDialog
-        except ImportError:
-            from .login import ReferralOptionsDialog
-        
-        patient_name = str(self._current_patient_name or "Patient").strip()
-        dialog = ReferralOptionsDialog(patient_name, self)
-        
-        if dialog.exec() == QDialog.Accepted:
-            if dialog.selected_option == "internal":
-                self._show_internal_referral()
-            elif dialog.selected_option == "letter":
-                self.generate_referral()
-
-    def _show_internal_referral(self):
-        """Show dialog to assign an internal clinical handoff."""
-        if not self._current_patient_name:
-            QMessageBox.warning(self, "Clinical Handoff", "Patient name is not available.")
-            return
-
-        try:
-            from login import AssignReferralDialog
-        except ImportError:
-            from .login import AssignReferralDialog
-        
-        patient_name_raw = str(self._current_patient_name or "Patient").strip()
-        username = self._resolve_actor_username()
-        if not username:
-            QMessageBox.warning(self, "Clinical Handoff", "Current logged-in user could not be resolved. Please sign in again.")
-            return
-        
-        while True:
-            dialog = AssignReferralDialog(patient_name_raw, self, exclude_username=username)
-            if dialog.exec() != QDialog.Accepted:
-                if getattr(dialog, "go_back", False):
-                    self._show_referral_options()
-                return
-
-            if dialog.selected_clinician == username:
-                QMessageBox.warning(self, "Clinical Handoff", "You cannot assign a handoff to yourself.")
-                continue
-
-            duplicate = UserManager.find_active_duplicate_referral(patient_name_raw, dialog.selected_clinician)
-            if duplicate:
-                status_map = {
-                    "pending": "Pending",
-                    "viewed": "Viewed",
-                    "in_review": "In Review",
-                    "completed": "Completed",
-                    "archived": "Archived",
-                }
-                status_raw = str(duplicate.get("status") or "pending").strip().lower()
-                status_label = status_map.get(status_raw, status_raw.replace("_", " ").title())
-                existing_referral_id = str(duplicate.get("referral_id") or "").strip()
-                confirm = QMessageBox.question(
-                    self,
-                    "Duplicate Handoff",
-                    (
-                        f"{patient_name_raw} already has an active handoff to this clinician "
-                        f"(Referral ID: {existing_referral_id}, Status: {status_label}).\n\n"
-                        "Create another handoff anyway?"
-                    ),
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if confirm != QMessageBox.Yes:
-                    continue
-
-            # Create referral assignment
-            referral_id = f"REF-{datetime.now().strftime('%Y%m%d%H%M%S')}-INTERNAL"
-            base_note = "Assigned from screening results"
-            extra_note = str(getattr(dialog, "notes_text", "") or "").strip()
-            notes_value = f"{base_note}\nAdditional comments: {extra_note}" if extra_note else base_note
-            success = UserManager.assign_referral(
-                referral_id=referral_id,
-                assigned_to_username=dialog.selected_clinician,
-                assigned_by_username=username,
-                patient_name=patient_name_raw,
-                urgency=dialog.urgency_level,
-                notes=notes_value,
-            )
-            if success:
-                QMessageBox.information(
-                    self,
-                    "Clinical Handoff Assigned",
-                    "Patient handoff assigned successfully to clinician."
-                )
-                write_activity("INFO", "INTERNAL_REFERRAL_ASSIGNED", f"patient={patient_name_raw}")
-                return
-
-            QMessageBox.warning(self, "Clinical Handoff", "Failed to assign handoff. It may already be assigned.")
+        self.generate_referral()
 
     def generate_referral(self):
         """Generate a referral letter PDF from screening results."""
@@ -2364,7 +2273,6 @@ img {{
         if not destination:
             return
         if destination.get("_action") == "back":
-            self._show_referral_options()
             return
 
         # Get patient data from parent page
@@ -2685,20 +2593,23 @@ body {{
     def _prompt_referral_destination(self) -> dict | None:
         hospitals = UserManager.list_referral_hospitals(active_only=True)
 
+        if not hospitals:
+            QMessageBox.warning(
+                self,
+                "Referral Destination",
+                "No active referral hospitals/clinics found. Please add one in Settings first.",
+            )
+            return None
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Referral Destination")
-        dialog.resize(560, 260)
+        dialog.setFixedSize(520, 160)
 
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(6)
 
-        subtitle = QLabel("Choose referral hospital/clinic etc")
-        subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color:#4f637a;font-size:12px;")
-        layout.addWidget(subtitle)
-
-        hospital_label = QLabel("Referral Hospital/Clinic")
+        hospital_label = QLabel("Referral Hospital")
         hospital_label.setStyleSheet("font-size:11px;font-weight:700;color:#2f4054;")
         hospital_combo = QComboBox()
         hospital_combo.setMinimumHeight(34)
@@ -2710,79 +2621,27 @@ body {{
             if item.get("is_default"):
                 label = f"{label}  [Default]"
             hospital_combo.addItem(label, item)
-        hospital_combo.addItem("Other (manual entry)", None)
         layout.addWidget(hospital_label)
         layout.addWidget(hospital_combo)
 
-        manual_wrap = QWidget()
-        manual_layout = QVBoxLayout(manual_wrap)
-        manual_layout.setContentsMargins(0, 0, 0, 0)
-        manual_layout.setSpacing(6)
-
-        manual_layout.addWidget(QLabel("Manual Destination Details"))
-        manual_name = QLineEdit()
-        manual_name.setPlaceholderText("Hospital or clinic name")
-        manual_department = QLineEdit()
-        manual_department.setPlaceholderText("Department (optional)")
-        manual_contact = QLineEdit()
-        manual_contact.setPlaceholderText("Contact person / phone (optional)")
-        manual_layout.addWidget(manual_name)
-        manual_layout.addWidget(manual_department)
-        manual_layout.addWidget(manual_contact)
-        layout.addWidget(manual_wrap)
-
         action_row = QHBoxLayout()
         action_row.setSpacing(6)
-        back_btn = QPushButton("Back")
         cancel_btn = QPushButton("Cancel")
         continue_btn = QPushButton("Continue")
         continue_btn.setObjectName("primaryAction")
-        action_row.addWidget(back_btn)
         action_row.addStretch(1)
         action_row.addWidget(cancel_btn)
         action_row.addWidget(continue_btn)
         layout.addLayout(action_row)
 
-        dialog._go_back = False
-
-        def _on_back_clicked():
-            dialog._go_back = True
-            dialog.reject()
-
-        back_btn.clicked.connect(_on_back_clicked)
         cancel_btn.clicked.connect(dialog.reject)
         continue_btn.clicked.connect(dialog.accept)
 
-        def _is_manual_selected() -> bool:
-            return hospital_combo.currentData() is None
-
-        def _sync_manual_visibility():
-            manual_wrap.setVisible(_is_manual_selected())
-
-        hospital_combo.currentIndexChanged.connect(_sync_manual_visibility)
-        _sync_manual_visibility()
-
         while True:
             if dialog.exec() != QDialog.DialogCode.Accepted:
-                if getattr(dialog, "_go_back", False):
-                    return {"_action": "back"}
                 return None
-            selected = hospital_combo.currentData()
-            if selected is None:
-                name = manual_name.text().strip()
-                if not name:
-                    QMessageBox.warning(dialog, "Referral Destination", "Hospital/clinic name is required for manual entry.")
-                    continue
-                department = manual_department.text().strip()
-                contact = manual_contact.text().strip()
-                display = name if not department else f"{name} ({department})"
-                return {
-                    "hospital_name": name,
-                    "department": department,
-                    "contact_person": contact,
-                    "display": display,
-                }
 
+            selected = hospital_combo.currentData()
             hospital_name = str(selected.get("hospital_name") or "").strip()
             department = str(selected.get("department") or "").strip()
             contact = str(selected.get("contact_person") or selected.get("phone") or "").strip()

@@ -937,7 +937,7 @@ class SettingsPage(QWidget):
         self.about_contact_label = QLabel(
             "EyeShield EMR is an offline clinical screening system for diabetic retinopathy. "
             "It supports patient intake, AI-assisted image analysis, report generation, and "
-            "internal referral coordination. AI output is decision support only and must be "
+            "referral letter generation. AI output is decision support only and must be "
             "reviewed by a qualified clinician before final diagnosis and treatment planning."
         )
         self.about_contact_label.setWordWrap(True)
@@ -959,7 +959,7 @@ class SettingsPage(QWidget):
             "By using EyeShield EMR, you agree to use the system only for authorized clinical "
             "screening, documentation, and referral workflows. Users must follow role-based "
             "permissions, maintain accurate records, and avoid unauthorized copying, sharing, "
-            "or modification of patient data. Internal referral notes and status updates must "
+            "or modification of patient data. Referral letters and associated records must "
             "be used for continuity of care. The software is provided as a clinical support "
             "tool and does not replace professional medical judgment."
         )

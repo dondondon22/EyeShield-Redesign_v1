@@ -995,7 +995,7 @@ class ReportsPage(QWidget):
         return owner_username == str(self.username or "").strip().lower()
 
     def _can_internal_referral_record(self, record: dict) -> bool:
-        return self._can_rescreen_record(record)
+        return False
 
     def _record_owner_label(self, record: dict) -> str:
         owner_name = str(record.get("original_screener_name") or "").strip()
@@ -1045,13 +1045,7 @@ class ReportsPage(QWidget):
         record = self._get_selected_record()
         self.report_btn.setEnabled(bool(record))
         self.referral_btn.setEnabled(bool(record))
-        if record and not self._can_internal_referral_record(record):
-            owner = self._record_owner_label(record)
-            self.referral_btn.setToolTip(
-                f"Only Generate Letter is available. Internal referral is limited to the original screener ({owner})."
-            )
-        else:
-            self.referral_btn.setToolTip("Open referral options (Internal Referral or Generate Letter)")
+        self.referral_btn.setToolTip("Generate referral letter")
         can_rescreen = bool(record and self._can_rescreen_record(record))
         self.rescreen_btn.setEnabled(can_rescreen)
         if record and not can_rescreen:
@@ -1067,87 +1061,8 @@ class ReportsPage(QWidget):
             QMessageBox.information(self, "Referral", "Select a patient record first.")
             return
 
-        if not self._can_internal_referral_record(record):
-            owner = self._record_owner_label(record)
-            QMessageBox.information(
-                self,
-                "Referral",
-                f"Only Generate Letter is available for this record. Internal referral is limited to the original screener ({owner}).",
-            )
-            self.generate_referral()
-            return
+        self.generate_referral()
 
-        try:
-            from login import ReferralOptionsDialog
-        except ImportError:
-            from .login import ReferralOptionsDialog
-
-        patient_name = str(record.get("name") or "Patient").strip()
-        dialog = ReferralOptionsDialog(patient_name, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        if dialog.selected_option == "internal":
-            self._show_internal_referral_from_record(record)
-        elif dialog.selected_option == "letter":
-            self.generate_referral()
-
-    def _show_internal_referral_from_record(self, record: dict):
-        full = self._fetch_full_record(record.get("id")) or record
-        patient_name_raw = str(full.get("name") or "Patient").strip()
-
-        try:
-            from login import AssignReferralDialog
-        except ImportError:
-            from .login import AssignReferralDialog
-
-        while True:
-            dialog = AssignReferralDialog(patient_name_raw, self, exclude_username=self.username)
-            if dialog.exec() != QDialog.DialogCode.Accepted:
-                if getattr(dialog, "go_back", False):
-                    self.start_referral_flow()
-                return
-
-            if dialog.selected_clinician == self.username:
-                QMessageBox.warning(self, "Referral", "You cannot assign a referral to yourself.")
-                continue
-
-            duplicate = UserManager.find_active_duplicate_referral(patient_name_raw, dialog.selected_clinician)
-            if duplicate:
-                status_label = str(duplicate.get("status") or "pending").replace("_", " ").title()
-                existing_referral_id = str(duplicate.get("referral_id") or "").strip()
-                confirm = QMessageBox.question(
-                    self,
-                    "Duplicate Referral",
-                    (
-                        f"{patient_name_raw} is already referred to this doctor "
-                        f"(Referral ID: {existing_referral_id}, Status: {status_label}).\n\n"
-                        "Do you want to create another referral anyway?"
-                    ),
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if confirm != QMessageBox.Yes:
-                    continue
-
-            referral_id = f"REF-{datetime.now().strftime('%Y%m%d%H%M%S')}-INTERNAL-{full.get('id', 'NA')}"
-            base_note = f"Assigned from Reports for record ID: {full.get('id', 'N/A')}"
-            extra_note = str(getattr(dialog, "notes_text", "") or "").strip()
-            notes_value = f"{base_note}\nAdditional comments: {extra_note}" if extra_note else base_note
-            success = UserManager.assign_referral(
-                referral_id=referral_id,
-                assigned_to_username=dialog.selected_clinician,
-                assigned_by_username=self.username,
-                patient_name=patient_name_raw,
-                urgency=dialog.urgency_level,
-                notes=notes_value,
-            )
-            if success:
-                QMessageBox.information(self, "Referral Assigned", "Patient referral assigned successfully to clinician.")
-                self.status_label.setText("Referral assigned successfully")
-                return
-
-            QMessageBox.warning(self, "Error", "Failed to assign referral. It may already be assigned.")
         if self.is_admin:
             self.archive_btn.setEnabled(bool(record and not record["archived_at"]))
 
@@ -1584,18 +1499,21 @@ class ReportsPage(QWidget):
     def _prompt_referral_destination(self) -> "dict | None":
         hospitals = UserManager.list_referral_hospitals(active_only=True)
 
+        if not hospitals:
+            QMessageBox.warning(
+                self,
+                "Referral Destination",
+                "No active referral hospitals/clinics found. Please add one in Settings first.",
+            )
+            return None
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Referral Destination")
-        dialog.resize(560, 250)
+        dialog.setFixedSize(520, 160)
 
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(6)
-
-        subtitle = QLabel("Choose a trusted referral hospital or use Other for one-time manual entry.")
-        subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color:#4f637a;font-size:12px;")
-        layout.addWidget(subtitle)
 
         hospital_label = QLabel("Referral Hospital")
         hospital_label.setStyleSheet("font-size:11px;font-weight:700;color:#2f4054;")
@@ -1609,29 +1527,8 @@ class ReportsPage(QWidget):
             if item.get("is_default"):
                 label = f"{label}  [Default]"
             hospital_combo.addItem(label, item)
-        hospital_combo.addItem("Other (manual entry)", None)
-        if not hospitals:
-            hospital_combo.setCurrentIndex(0)
         layout.addWidget(hospital_label)
         layout.addWidget(hospital_combo)
-
-        manual_wrap = QWidget()
-        manual_layout = QVBoxLayout(manual_wrap)
-        manual_layout.setContentsMargins(0, 0, 0, 0)
-        manual_layout.setSpacing(6)
-
-        manual_name = QLineEdit()
-        manual_name.setPlaceholderText("Hospital name")
-        manual_department = QLineEdit()
-        manual_department.setPlaceholderText("Department (optional)")
-        manual_contact = QLineEdit()
-        manual_contact.setPlaceholderText("Contact person or phone (optional)")
-
-        manual_layout.addWidget(QLabel("Manual Referral Destination"))
-        manual_layout.addWidget(manual_name)
-        manual_layout.addWidget(manual_department)
-        manual_layout.addWidget(manual_contact)
-        layout.addWidget(manual_wrap)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(6)
@@ -1646,37 +1543,11 @@ class ReportsPage(QWidget):
         cancel_btn.clicked.connect(dialog.reject)
         continue_btn.clicked.connect(dialog.accept)
 
-        def _is_manual_selected() -> bool:
-            return hospital_combo.currentData() is None
-
-        def _sync_manual_visibility():
-            manual_wrap.setVisible(_is_manual_selected())
-
-        hospital_combo.currentIndexChanged.connect(_sync_manual_visibility)
-        _sync_manual_visibility()
-
         while True:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return None
 
             selected = hospital_combo.currentData()
-            if selected is None:
-                name = manual_name.text().strip()
-                if not name:
-                    QMessageBox.warning(dialog, "Referral Destination", "Hospital name is required for manual entry.")
-                    continue
-                department = manual_department.text().strip()
-                contact = manual_contact.text().strip()
-                display = name
-                if department:
-                    display = f"{display} ({department})"
-                return {
-                    "hospital_name": name,
-                    "department": department,
-                    "contact_person": contact,
-                    "display": display,
-                }
-
             hospital_name = str(selected.get("hospital_name") or "").strip()
             department = str(selected.get("department") or "").strip()
             contact = str(selected.get("contact_person") or selected.get("phone") or "").strip()
