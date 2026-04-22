@@ -1135,15 +1135,7 @@ class ScreeningPage(QWidget):
             self.btn_upload.setIconSize(QSize(18, 18))
         self.btn_upload.clicked.connect(self.upload_image)
 
-        self.btn_take_picture = QPushButton("Take Picture")
-        self.btn_take_picture.setObjectName("btnPrimary")
-        self.btn_take_picture.setMinimumHeight(36)
-        self.btn_take_picture.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        camera_icon = self._resolve_icon_path("camera.svg")
-        if camera_icon:
-            self.btn_take_picture.setIcon(self._tinted_icon(camera_icon, "#60a5fa", 18))
-            self.btn_take_picture.setIconSize(QSize(18, 18))
-        self.btn_take_picture.clicked.connect(self.take_picture_for_screening)
+        self.btn_take_picture = None
 
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.setObjectName("btnDanger")
@@ -1155,7 +1147,6 @@ class ScreeningPage(QWidget):
             self.btn_clear.setIconSize(QSize(18, 18))
         self.btn_clear.clicked.connect(self.clear_image)
         btn_row.addWidget(self.btn_upload)
-        btn_row.addWidget(self.btn_take_picture)
         btn_row.addWidget(self.btn_clear)
         c3.addLayout(btn_row)
 
@@ -1251,8 +1242,7 @@ class ScreeningPage(QWidget):
         self.setTabOrder(self.symptom_flashes, self.symptom_vision_loss)
         self.setTabOrder(self.symptom_vision_loss, self.symptom_other)
         self.setTabOrder(self.symptom_other, self.btn_upload)
-        self.setTabOrder(self.btn_upload, self.btn_take_picture)
-        self.setTabOrder(self.btn_take_picture, self.btn_clear)
+        self.setTabOrder(self.btn_upload, self.btn_clear)
         self.setTabOrder(self.btn_clear, self.btn_analyze)
 
     def _setup_validators(self):
@@ -2292,52 +2282,11 @@ class ScreeningPage(QWidget):
             self._set_upload_error("")
 
     def take_picture_for_screening(self):
-        if self._guard_busy_action("opening camera capture"):
-            return
-
-        existing_image = str(getattr(self, "current_image", "") or "").strip()
-        if existing_image:
-            proceed = QMessageBox.question(
-                self,
-                "Image Already Uploaded",
-                "An image is already uploaded for this screening. Open Camera anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if proceed != QMessageBox.StandardButton.Yes:
-                return
-
-        patient_id = self.p_id.text().strip()
-        if not patient_id:
-            patient_id = self.generate_patient_id()
-
-        eye_label = self.p_eye.currentText().strip()
-        if eye_label not in ("Right Eye", "Left Eye"):
-            QMessageBox.warning(
-                self,
-                "Eye Label Required",
-                "Select the eye to be screened (Right Eye or Left Eye) before taking a picture.",
-            )
-            return
-
-        main_window = self.window()
-        if main_window is self or not hasattr(main_window, "camera_page"):
-            QMessageBox.warning(self, "Camera Unavailable", "Camera page is not available in this session.")
-            return
-
-        operator = str(os.environ.get("EYESHIELD_CURRENT_NAME", "")).strip() or str(
-            os.environ.get("EYESHIELD_CURRENT_USER", "")
-        ).strip()
-        main_window.camera_page.set_capture_context(
-            patient_id=patient_id,
-            patient_name=self.p_name.text().strip(),
-            eye_label=eye_label,
-            operator=operator,
-            on_saved_callback=self._on_camera_capture_return,
+        QMessageBox.information(
+            self,
+            "Camera Removed",
+            "Camera capture has been removed from this build. Please use Upload Image to continue.",
         )
-
-        if hasattr(main_window, "_navigate_to"):
-            main_window._navigate_to(2, nav_key="Camera")
 
     def _on_camera_capture_return(self, capture_packet: dict):
         image_path = str((capture_packet or {}).get("image_path") or "").strip()
@@ -3647,8 +3596,7 @@ class ScreeningPage(QWidget):
                     label.setText(pack[key])
 
         self.btn_upload.setText(pack["scr_upload_btn"])
-        if hasattr(self, "btn_take_picture"):
-            self.btn_take_picture.setText(pack.get("scr_take_picture_btn", "Take Picture"))
+        # Camera capture has been removed from this build.
         self.btn_clear.setText(pack["scr_clear_btn"])
         self.btn_analyze.setText(pack["scr_analyze_btn"])
         patient_labels = [

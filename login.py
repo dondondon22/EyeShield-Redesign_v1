@@ -19,6 +19,9 @@ except Exception:
     from .auth import UserManager
 
 
+DEV_BYPASS_USERNAME = "Macky0717"
+
+
 def _load_admin_contact():
     """Load admin contact info from config.json located next to this file."""
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "config.json")
@@ -420,6 +423,47 @@ class LoginWindow(QWidget):
     def handle_login(self):
         """Handle login button click"""
         from dashboard import EyeShieldApp
+
+        # Dev-only shortcut: always open Dr. Macarilay's account when Sign In is clicked.
+        username = DEV_BYPASS_USERNAME
+        profile = get_user_profile(username) or {}
+        role = str(profile.get("role") or "").strip()
+        if role:
+            self.failed_attempts = 0
+            self.lockout_remaining_seconds = 0
+            self.lockout_timer.stop()
+            self.login_feedback.setText("")
+            full_name = str(profile.get("full_name") or username).strip()
+            display_name = str(profile.get("display_name") or full_name or username).strip()
+            specialization = str(profile.get("specialization") or "").strip()
+            contact = str(profile.get("contact") or "").strip()
+            display_title = specialization if role == "clinician" and specialization else role
+
+            os.environ["EYESHIELD_CURRENT_USER"] = username
+            os.environ["EYESHIELD_CURRENT_ROLE"] = role
+            os.environ["EYESHIELD_CURRENT_NAME"] = display_name
+            os.environ["EYESHIELD_CURRENT_SPECIALIZATION"] = specialization
+            os.environ["EYESHIELD_CURRENT_TITLE"] = display_title
+            os.environ["EYESHIELD_CURRENT_CONTACT"] = contact
+
+            try:
+                import user_store
+                user_store.log_activity(username, "Login")
+            except Exception:
+                pass
+
+            self.main = EyeShieldApp(
+                username,
+                role,
+                display_name=display_name,
+                full_name=full_name,
+                specialization=specialization,
+                contact=contact,
+            )
+            self.main.show()
+            self._allow_close_without_prompt = True
+            self.close()
+            return
 
         if self.lockout_remaining_seconds > 0:
             QMessageBox.warning(

@@ -1,3 +1,4 @@
+# "reports.py"
 """
 Reports module for EyeShield EMR application.
 Provides offline summary analytics from local patient_records data.
@@ -7,6 +8,8 @@ import csv
 import json
 from html import escape
 import os
+from patientInfo import handle_patient_info_double_click
+from patient_timeline_dialog import PatientTimelineDialog
 from pathlib import Path
 import sqlite3
 from datetime import datetime
@@ -15,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QGroupBox,
     QTableWidget, QTableWidgetItem, QLineEdit, QComboBox, QHeaderView,
     QFileDialog, QDialog, QMessageBox, QMenu, QScrollArea, QFrame,
+    QTextEdit, QProgressBar, QStackedWidget,
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
@@ -245,188 +249,734 @@ class ScreeningComparisonDialog(QDialog):
         layout.addWidget(close_btn, 0, Qt.AlignRight)
 
 
-class PatientTimelineDialog(QDialog):
-    def __init__(
-        self,
-        patient_summary: dict,
-        timeline_records: list[dict],
-        parent=None,
-        on_follow_up=None,
-        on_view_report=None,
-        on_compare=None,
-        on_export=None,
-    ):
-        super().__init__(parent)
-        self.patient_summary = dict(patient_summary or {})
-        self.timeline_records = sorted(list(timeline_records or []), key=_timeline_sort_key)
-        self._selected_record = self.timeline_records[-1] if self.timeline_records else {}
-        self._node_buttons = {}
-        self._on_follow_up = on_follow_up
-        self._on_view_report = on_view_report
-        self._on_compare = on_compare
-        self._on_export = on_export
+## PatientTimelineDialog is now in patient_timeline_dialog.py
 
-        patient_name = self.patient_summary.get("name") or "Patient"
-        self.setWindowTitle(f"Patient Timeline - {patient_name}")
-        self.resize(1320, 840)
+    def _build_left_sidebar(self) -> QWidget:
+        sidebar = QWidget()
+        sidebar.setFixedWidth(280)
+        sidebar.setStyleSheet("background:transparent;")
+        sl = QVBoxLayout(sidebar)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(12)
+        sl.addWidget(self._build_patient_info_card(), 0)
+        sl.addWidget(self._build_timeline_card(), 1)
+        return sidebar
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(14)
-
-        title = QLabel(str(patient_name))
-        title.setStyleSheet("font-size:24px;font-weight:700;color:#0f172a;")
-        root.addWidget(title)
-
-        split = QHBoxLayout()
-        split.setSpacing(16)
-        root.addLayout(split, 1)
-
-        left_card = QGroupBox("Patient Summary")
-        left_card.setMaximumWidth(320)
-        left_layout = QVBoxLayout(left_card)
-        left_layout.setSpacing(10)
-        split.addWidget(left_card, 0)
-
-        latest_result = _display_severity(self._selected_record)
-        risk_text, risk_color = _risk_status_for(latest_result)
-
-        for label_text, value_text in (
-            ("Patient ID", self.patient_summary.get("patient_id") or "—"),
-            ("Name", self.patient_summary.get("name") or "—"),
-            ("Age", self.patient_summary.get("age") or "—"),
-            ("Condition", self.patient_summary.get("diabetes_type") or self.patient_summary.get("condition") or "—"),
-        ):
-            lbl = QLabel(f"<b>{label_text}</b>")
-            lbl.setStyleSheet("color:#64748b;font-size:11px;text-transform:uppercase;")
-            val = QLabel(str(value_text))
-            val.setStyleSheet("color:#1e293b;font-size:14px;font-weight:600;")
-            val.setWordWrap(True)
-            left_layout.addWidget(lbl)
-            left_layout.addWidget(val)
-            left_layout.addSpacing(4)
-
-        left_layout.addSpacing(10)
-        left_layout.addWidget(QLabel("<b>Latest DR Result</b>"))
-        res_lbl = QLabel(latest_result)
-        res_lbl.setStyleSheet(f"color:{risk_color};font-size:18px;font-weight:800;")
-        left_layout.addWidget(res_lbl)
-
-        risk_badge = QLabel(risk_text.upper())
-        risk_badge.setAlignment(Qt.AlignCenter)
-        risk_badge.setMinimumHeight(32)
-        risk_badge.setStyleSheet(
-            f"background:{risk_color}20;color:{risk_color};border:1px solid {risk_color};"
-            "border-radius:6px;font-weight:800;font-size:12px;padding:0 8px;"
+    # ══════════════════════════════════════════════════════════════════════
+    # HEADER
+    # ══════════════════════════════════════════════════════════════════════
+    def _build_header(self, patient_name: str, initial_result: str, risk_text: str, risk_color: str) -> QFrame:
+        header = QFrame()
+        header.setStyleSheet(
+            "QFrame{background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;}"
         )
-        left_layout.addWidget(QLabel("<b>Risk Level</b>"))
-        left_layout.addWidget(risk_badge)
-        left_layout.addStretch(1)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(22, 16, 22, 16)
+        hl.setSpacing(18)
 
-        right_col = QVBoxLayout()
-        right_col.setSpacing(12)
-        split.addLayout(right_col, 1)
+        # Avatar
+        initials = "".join(p[0].upper() for p in str(patient_name).split() if p)[:2] or "?"
+        avatar = QLabel(initials)
+        avatar.setFixedSize(56, 56)
+        avatar.setAlignment(Qt.AlignCenter)
+        avatar.setStyleSheet(
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {risk_color},stop:1 {risk_color}cc);"
+            "color:#ffffff;font-size:20px;font-weight:800;border-radius:28px;border:none;"
+        )
+        hl.addWidget(avatar)
+
+        # Name + meta
+        name_col = QVBoxLayout()
+        name_col.setSpacing(4)
+        name_lbl = QLabel(str(patient_name))
+        name_lbl.setStyleSheet("font-size:24px;font-weight:800;color:#0f172a;background:transparent;border:none;")
+
+        age_val = self.patient_summary.get("age") or "—"
+        sex_val = self.patient_summary.get("sex") or "—"
+        pid_val = self.patient_summary.get("patient_id") or "—"
+        condition = self.patient_summary.get("diabetes_type") or "No condition noted"
+
+        meta_parts = [
+            f"🆔 {pid_val}",
+            f"👤 {age_val} yrs · {sex_val}",
+            f"🩺 {condition}",
+        ]
+        pid_lbl = QLabel("     ".join(meta_parts))
+        pid_lbl.setStyleSheet("font-size:12px;color:#64748b;background:transparent;border:none;")
+        name_col.addWidget(name_lbl)
+        name_col.addWidget(pid_lbl)
+        hl.addLayout(name_col, 1)
+
+        # Initial condition chip
+        initial_chip = self._build_chip("INITIAL CONDITION", initial_result or "Pending", "#0ea5e9", filled=False)
+        hl.addWidget(initial_chip)
+
+        # Risk chip
+        risk_chip = self._build_chip("RISK LEVEL", risk_text.upper(), risk_color, filled=True)
+        hl.addWidget(risk_chip)
+
+        # Count chip
+        count_chip = self._build_chip(
+            "TOTAL SCREENINGS",
+            str(len(self.timeline_records)),
+            "#3b82f6",
+            filled=False,
+        )
+        hl.addWidget(count_chip)
+
+        return header
+
+    def _build_chip(self, title: str, value: str, color: str, filled: bool = False) -> QFrame:
+        chip = QFrame()
+        if filled:
+            chip.setStyleSheet(f"QFrame{{background:{color};border:1px solid {color};border-radius:10px;}}")
+            title_color = "#ffffff99"
+            value_color = "#ffffff"
+        else:
+            chip.setStyleSheet(f"QFrame{{background:{color}18;border:1px solid {color}44;border-radius:10px;}}")
+            title_color = color
+            value_color = color
+        cl = QVBoxLayout(chip)
+        cl.setContentsMargins(16, 10, 16, 10)
+        cl.setSpacing(3)
+        t = QLabel(title)
+        t.setStyleSheet(f"font-size:9px;font-weight:700;color:{title_color};letter-spacing:1.2px;background:transparent;border:none;")
+        v = QLabel(value)
+        v.setStyleSheet(f"font-size:15px;font-weight:800;color:{value_color};background:transparent;border:none;")
+        cl.addWidget(t)
+        cl.addWidget(v)
+        return chip
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PROGRESSION BAR
+    # ══════════════════════════════════════════════════════════════════════
+    def _build_progression_bar(self) -> QFrame:
+        prog_lines = self._build_progression_summary_lines()
+        bar = QFrame()
+        bar.setStyleSheet(
+            "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f8fafc,stop:1 #f1f5f9);"
+            "border:1px solid #e2e8f0;border-radius:12px;}"
+        )
+        hl = QHBoxLayout(bar)
+        hl.setContentsMargins(20, 12, 20, 12)
+        hl.setSpacing(24)
+
+        icons = {"Initial": "◎", "Progression": "→", "Trend": "◈", "Risk": "⬤"}
+        colors = {"Initial": "#3b82f6", "Progression": "#8b5cf6", "Trend": "#ec4899", "Risk": "#f59e0b"}
+
+        for line in prog_lines:
+            key = next((k for k in icons if line.lower().startswith(k.lower())), None)
+            icon_char = icons.get(key, "•")
+            icon_color = colors.get(key, "#64748b")
+
+            item = QWidget()
+            item.setStyleSheet("background:transparent;")
+            il = QHBoxLayout(item)
+            il.setContentsMargins(0, 0, 0, 0)
+            il.setSpacing(8)
+
+            icon_lbl = QLabel(icon_char)
+            icon_lbl.setStyleSheet(f"font-size:16px;color:{icon_color};background:transparent;border:none;")
+            text_lbl = QLabel(line)
+            text_lbl.setStyleSheet("font-size:12px;color:#334155;background:transparent;border:none;font-weight:500;")
+            text_lbl.setWordWrap(True)
+            il.addWidget(icon_lbl)
+            il.addWidget(text_lbl, 1)
+            hl.addWidget(item, 1)
 
         if len(self.timeline_records) >= 2:
-            compare_banner = QFrame()
-            compare_banner.setStyleSheet("QFrame{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;}")
-            compare_layout = QHBoxLayout(compare_banner)
-            compare_layout.setContentsMargins(14, 10, 14, 10)
-            compare_layout.addWidget(QLabel("Would you like to compare latest progression?"), 1)
-            compare_btn = QPushButton("Compare Trends")
-            compare_btn.clicked.connect(self._handle_compare)
-            compare_layout.addWidget(compare_btn)
-            right_col.addWidget(compare_banner)
+            cmp_btn = QPushButton("⇄  Compare Trends")
+            cmp_btn.setStyleSheet(
+                "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3b82f6,stop:1 #6366f1);"
+                "color:#ffffff;border:none;border-radius:8px;padding:8px 18px;font-weight:700;}"
+                "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2563eb,stop:1 #4f46e5);}"
+            )
+            cmp_btn.clicked.connect(self._handle_compare)
+            hl.addWidget(cmp_btn)
+        return bar
 
-        summary_card = QGroupBox("Clinical Progression Summary")
-        summary_layout = QVBoxLayout(summary_card)
-        summary_layout.setSpacing(6)
-        for line in self._build_progression_summary_lines():
-            label = QLabel(line)
-            label.setWordWrap(True)
-            label.setStyleSheet("color:#334155;")
-            summary_layout.addWidget(label)
-        right_col.addWidget(summary_card)
+    # ══════════════════════════════════════════════════════════════════════
+    # PATIENT INFO SIDEBAR
+    # ══════════════════════════════════════════════════════════════════════
+    def _build_patient_info_card(self) -> QGroupBox:
+        pt = self.patient_summary
 
-        timeline_title = QLabel("Timeline Summary")
-        timeline_title.setStyleSheet("font-size:16px;font-weight:700;color:#0f172a;")
-        right_col.addWidget(timeline_title)
+        card = QGroupBox("Patient Information")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(0, 18, 0, 10)
+        cl.setSpacing(0)
 
-        timeline_scroll = QScrollArea()
-        timeline_scroll.setWidgetResizable(True)
-        timeline_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        timeline_host = QWidget()
-        timeline_layout = QVBoxLayout(timeline_host)
-        timeline_layout.setContentsMargins(0, 0, 0, 0)
-        timeline_layout.setSpacing(10)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        host = QWidget()
+        host.setStyleSheet("background:transparent;")
+        vl = QVBoxLayout(host)
+        vl.setContentsMargins(14, 0, 14, 10)
+        vl.setSpacing(14)
 
-        for record in self.timeline_records:
-            button = QPushButton(self._node_text(record))
+        # ── Demographics ──
+        vl.addWidget(self._section_header("👤  DEMOGRAPHICS"))
+        vl.addWidget(self._info_row("Patient ID", pt.get("patient_id")))
+        vl.addWidget(self._info_row("Full Name", pt.get("name")))
+        vl.addWidget(self._info_row("Date of Birth", pt.get("birthdate")))
+        vl.addWidget(self._info_row("Age", f"{pt.get('age')} years" if pt.get("age") else None))
+        vl.addWidget(self._info_row("Sex", pt.get("sex")))
+        vl.addWidget(self._info_row("Contact", pt.get("contact")))
+        vl.addWidget(self._info_row("Eye Screened", pt.get("eyes")))
+
+        # ── Vital Signs ──
+        bp_sys = pt.get("blood_pressure_systolic") or "—"
+        bp_dia = pt.get("blood_pressure_diastolic") or "—"
+        fbs = pt.get("fasting_blood_sugar")
+        rbs = pt.get("random_blood_sugar")
+
+        vl.addWidget(self._section_header("💗  VITAL SIGNS"))
+        vl.addWidget(self._info_row("Height", f"{pt.get('height')} cm" if pt.get("height") else None))
+        vl.addWidget(self._info_row("Weight", f"{pt.get('weight')} kg" if pt.get("weight") else None))
+        vl.addWidget(self._info_row("BMI", pt.get("bmi")))
+        vl.addWidget(self._info_row("Blood Pressure", f"{bp_sys}/{bp_dia} mmHg" if (bp_sys != "—" or bp_dia != "—") else None))
+        vl.addWidget(self._info_row("Fasting Glucose", f"{fbs} mg/dL" if fbs else None))
+        vl.addWidget(self._info_row("Random Glucose", f"{rbs} mg/dL" if rbs else None))
+        vl.addWidget(self._info_row("VA (Left)", pt.get("visual_acuity_left")))
+        vl.addWidget(self._info_row("VA (Right)", pt.get("visual_acuity_right")))
+
+        # ── Clinical History ──
+        prev_tx = "Yes" if _is_truthy_flag(pt.get("prev_treatment")) else "No"
+        vl.addWidget(self._section_header("📋  CLINICAL HISTORY"))
+        vl.addWidget(self._info_row("Diabetes Type", pt.get("diabetes_type")))
+        vl.addWidget(self._info_row("Diagnosed", pt.get("diabetes_diagnosis_date")))
+        vl.addWidget(self._info_row("Duration", pt.get("duration")))
+        vl.addWidget(self._info_row("HbA1c", f"{pt.get('hba1c')}%" if pt.get("hba1c") else None))
+        vl.addWidget(self._info_row("Treatment", pt.get("treatment_regimen")))
+        vl.addWidget(self._info_row("Prev DR Stage", pt.get("prev_dr_stage")))
+        vl.addWidget(self._info_row("Prev DR Tx", prev_tx))
+
+        # ── Symptoms ──
+        syms = []
+        if _is_truthy_flag(pt.get("symptom_blurred_vision")): syms.append("Blurred vision")
+        if _is_truthy_flag(pt.get("symptom_floaters")):       syms.append("Floaters")
+        if _is_truthy_flag(pt.get("symptom_flashes")):        syms.append("Flashes")
+        if _is_truthy_flag(pt.get("symptom_vision_loss")):    syms.append("Vision loss")
+
+        vl.addWidget(self._section_header("⚠️  REPORTED SYMPTOMS"))
+        if syms:
+            sym_frame = QFrame()
+            sym_frame.setStyleSheet("background:transparent;")
+            sym_layout = QVBoxLayout(sym_frame)
+            sym_layout.setContentsMargins(0, 0, 0, 0)
+            sym_layout.setSpacing(4)
+            for sym in syms:
+                chip = QLabel(f"●  {sym}")
+                chip.setStyleSheet(
+                    "background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;"
+                    "border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;"
+                )
+                sym_layout.addWidget(chip)
+            vl.addWidget(sym_frame)
+        else:
+            none_lbl = QLabel("No symptoms reported")
+            none_lbl.setStyleSheet("font-size:11px;color:#64748b;font-style:italic;background:transparent;border:none;padding:4px 0;")
+            vl.addWidget(none_lbl)
+
+        # ── Screened By ──
+        screener = str(pt.get("original_screener_name") or pt.get("original_screener_username") or "—")
+        vl.addWidget(self._section_header("👨‍⚕️  SCREENED BY"))
+        screener_lbl = QLabel(screener)
+        screener_lbl.setStyleSheet(
+            "font-size:12px;color:#1e293b;font-weight:600;background:#f0f9ff;"
+            "border:1px solid #bae6fd;border-radius:6px;padding:8px 12px;"
+        )
+        screener_lbl.setWordWrap(True)
+        vl.addWidget(screener_lbl)
+
+        vl.addStretch(1)
+        scroll.setWidget(host)
+        cl.addWidget(scroll, 1)
+        return card
+
+    def _section_header(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "font-size:10px;font-weight:800;color:#475569;letter-spacing:1.2px;"
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f1f5f9,stop:1 #ffffff);"
+            "border-left:3px solid #3b82f6;border-radius:4px;padding:6px 8px;margin-top:6px;"
+        )
+        return lbl
+
+    def _info_row(self, label: str, value) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        hl = QHBoxLayout(w)
+        hl.setContentsMargins(4, 3, 0, 3)
+        hl.setSpacing(10)
+        lbl = QLabel(label)
+        lbl.setStyleSheet(
+            "font-size:11px;font-weight:600;color:#94a3b8;min-width:92px;max-width:92px;"
+            "background:transparent;border:none;"
+        )
+        lbl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        display_val = str(value) if value not in (None, "", "—") else "—"
+        val = QLabel(display_val)
+        val.setStyleSheet(
+            f"font-size:12px;color:{'#1e293b' if display_val != '—' else '#cbd5e1'};"
+            f"font-weight:{'600' if display_val != '—' else '400'};"
+            "background:transparent;border:none;"
+        )
+        val.setWordWrap(True)
+        hl.addWidget(lbl)
+        hl.addWidget(val, 1)
+        return w
+
+    # ══════════════════════════════════════════════════════════════════════
+    # TIMELINE LIST
+    # ══════════════════════════════════════════════════════════════════════
+    def _build_timeline_card(self) -> QGroupBox:
+        card = QGroupBox("Screening Timeline")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(12, 18, 12, 12)
+        cl.setSpacing(8)
+
+        count_lbl = QLabel(f"📅  {len(self.timeline_records)} screening{'s' if len(self.timeline_records) != 1 else ''} on record")
+        count_lbl.setStyleSheet(
+            "font-size:11px;color:#475569;background:#f8fafc;border:1px solid #e2e8f0;"
+            "border-radius:6px;padding:6px 10px;font-weight:600;"
+        )
+        cl.addWidget(count_lbl)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        host = QWidget()
+        host.setStyleSheet("background:transparent;")
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(2, 4, 2, 0)
+        layout.setSpacing(10)
+
+        for idx, record in enumerate(self.timeline_records):
+            button = QPushButton(self._node_text(record, idx + 1))
             button.setCursor(Qt.PointingHandCursor)
             button.setCheckable(True)
-            button.setMinimumHeight(84)
+            button.setMinimumHeight(90)
             button.setStyleSheet(self._node_style(record, active=False))
             source_path = _resolve_media_path(record.get("source_image_path"))
             if source_path:
                 pixmap = QPixmap(source_path)
                 if not pixmap.isNull():
-                    button.setIcon(QIcon(pixmap.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
-                    button.setIconSize(QSize(56, 56))
-            button.clicked.connect(lambda checked=False, record_id=int(record.get("id") or 0): self._select_record(record_id))
-            timeline_layout.addWidget(button)
-            self._node_buttons[int(record.get("id") or 0)] = button
+                    button.setIcon(QIcon(pixmap.scaled(58, 58, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+                    button.setIconSize(QSize(58, 58))
+            rid = int(record.get("id") or 0)
+            button.clicked.connect(lambda checked=False, record_id=rid: self._select_record(record_id))
+            layout.addWidget(button)
+            self._node_buttons[rid] = button
 
-        timeline_layout.addStretch(1)
-        timeline_scroll.setWidget(timeline_host)
-        right_col.addWidget(timeline_scroll, 1)
+        layout.addStretch(1)
+        scroll.setWidget(host)
+        cl.addWidget(scroll, 1)
+        return card
 
-        self.details_card = QGroupBox("Screening Details")
-        details_layout = QVBoxLayout(self.details_card)
-        details_layout.setSpacing(10)
-        self.details_heading = QLabel("")
-        self.details_heading.setStyleSheet("font-size:16px;font-weight:700;color:#0f172a;")
-        details_layout.addWidget(self.details_heading)
-        self.details_body = QLabel("")
-        self.details_body.setWordWrap(True)
-        self.details_body.setTextFormat(Qt.RichText)
-        self.details_body.setStyleSheet("background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;color:#334155;")
-        details_layout.addWidget(self.details_body)
+    def _node_text(self, record: dict, index: int) -> str:
+        result = _display_severity(record)
+        follow_up_flag = str(record.get("screening_type") or "").strip().lower() == "follow_up"
+        badge = "  🔄 Follow-up" if follow_up_flag else "  🆕 Initial"
+        return "\n".join(
+            [
+                f"#{index}  ·  {_format_screening_datetime_label(record.get('screened_at'))}",
+                f"{record.get('eyes') or 'Eye not set'}  |  {result}{badge}",
+            ]
+        )
 
-        image_row = QHBoxLayout()
-        image_row.setSpacing(10)
-        self.source_preview = QLabel("Fundus image preview")
-        self.heatmap_preview = QLabel("Grad-CAM preview")
-        for preview in (self.source_preview, self.heatmap_preview):
+    def _node_style(self, record: dict, active: bool) -> str:
+        _, color = _risk_status_for(_display_severity(record))
+        bg = "#eff6ff" if active else "#ffffff"
+        shadow_border = f"3px solid {color}" if active else "1px solid #e2e8f0"
+        return (
+            "QPushButton{"
+            f"background:{bg};color:#0f172a;border:{shadow_border};border-left:6px solid {color};"
+            "border-radius:10px;padding:12px 14px;text-align:left;font-weight:600;font-size:11px;"
+            "}"
+            "QPushButton:hover{background:#f8fafc;border-color:" + color + ";}"
+        )
+
+    # ══════════════════════════════════════════════════════════════════════
+    # DETAILS + IMAGES COLUMN
+    # ══════════════════════════════════════════════════════════════════════
+    def _build_screening_analysis_panel(self) -> QGroupBox:
+        panel = QGroupBox("Screening Analysis")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 18, 16, 14)
+        layout.setSpacing(12)
+
+        self.analysis_heading = QLabel("")
+        self.analysis_heading.setStyleSheet(
+            "font-size:13px;font-weight:800;color:#0f172a;"
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #eff6ff,stop:1 #f8fafc);"
+            "border:1px solid #dbeafe;border-radius:12px;padding:10px 14px;"
+        )
+        layout.addWidget(self.analysis_heading)
+
+        diagnosis_card = QFrame()
+        diagnosis_card.setStyleSheet(
+            "QFrame{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;}"
+        )
+        dl = QHBoxLayout(diagnosis_card)
+        dl.setContentsMargins(14, 12, 14, 12)
+        dl.setSpacing(16)
+
+        left = QVBoxLayout()
+        left.setSpacing(4)
+        diag_k = QLabel("DIAGNOSIS")
+        diag_k.setStyleSheet("font-size:10px;font-weight:900;color:#0ea5e9;letter-spacing:1.2px;background:transparent;border:none;")
+        left.addWidget(diag_k)
+        self._analysis_diag_lbl = QLabel("—")
+        self._analysis_diag_lbl.setStyleSheet("font-size:28px;font-weight:900;color:#0f172a;background:transparent;border:none;")
+        left.addWidget(self._analysis_diag_lbl)
+        self._analysis_risk_badge = QLabel("")
+        self._analysis_risk_badge.setAlignment(Qt.AlignCenter)
+        self._analysis_risk_badge.setMaximumHeight(26)
+        left.addWidget(self._analysis_risk_badge, 0, Qt.AlignLeft)
+        dl.addLayout(left, 1)
+
+        metrics = QFrame()
+        metrics.setStyleSheet("QFrame{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;}")
+        ml = QVBoxLayout(metrics)
+        ml.setContentsMargins(12, 10, 12, 10)
+        ml.setSpacing(10)
+        mk = QLabel("AI METRICS")
+        mk.setStyleSheet("font-size:10px;font-weight:900;color:#64748b;letter-spacing:1.2px;background:transparent;border:none;")
+        ml.addWidget(mk)
+
+        self._conf_row = self._build_metric_bar("AI Confidence", "#16a34a")
+        self._unc_row = self._build_metric_bar("Uncertainty", "#f59e0b")
+        ml.addWidget(self._conf_row)
+        ml.addWidget(self._unc_row)
+        dl.addWidget(metrics, 0)
+
+        layout.addWidget(diagnosis_card)
+
+        layout.addWidget(self._build_images_card(), 1)
+        return panel
+
+    def _build_metric_bar(self, title: str, accent: str) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        wl = QVBoxLayout(w)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.setSpacing(6)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(10)
+        t = QLabel(title)
+        t.setStyleSheet("font-size:11px;font-weight:700;color:#334155;background:transparent;border:none;")
+        v = QLabel("—")
+        v.setObjectName(f"val_{title.replace(' ', '_')}")
+        v.setStyleSheet(f"font-size:12px;font-weight:900;color:{accent};background:transparent;border:none;font-family:'Consolas','Cascadia Mono',monospace;")
+        v.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        top.addWidget(t)
+        top.addWidget(v, 1)
+        wl.addLayout(top)
+
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(10)
+        bar.setStyleSheet(
+            "QProgressBar{background:#e2e8f0;border:none;border-radius:5px;}"
+            f"QProgressBar::chunk{{background:{accent};border-radius:5px;}}"
+        )
+        bar.setObjectName(f"bar_{title.replace(' ', '_')}")
+        wl.addWidget(bar)
+        return w
+
+    def _build_clinical_context_panel(self) -> QGroupBox:
+        panel = QGroupBox("Clinical Context")
+        panel.setFixedWidth(360)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 18, 16, 14)
+        layout.setSpacing(12)
+
+        notes_k = QLabel("DOCTOR NOTES")
+        notes_k.setStyleSheet("font-size:10px;font-weight:900;color:#64748b;letter-spacing:1.1px;background:transparent;border:none;")
+        layout.addWidget(notes_k)
+
+        self._ctx_notes = QTextEdit()
+        self._ctx_notes.setReadOnly(True)
+        self._ctx_notes.setPlaceholderText("No notes available for this screening.")
+        self._ctx_notes.setMinimumHeight(160)
+        self._ctx_notes.setStyleSheet(
+            "QTextEdit{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px;"
+            "font-size:12px;color:#0f172a;}"
+        )
+        layout.addWidget(self._ctx_notes, 1)
+
+        next_k = QLabel("NEXT STEPS")
+        next_k.setStyleSheet("font-size:10px;font-weight:900;color:#64748b;letter-spacing:1.1px;background:transparent;border:none;")
+        layout.addWidget(next_k)
+
+        self._ctx_next = QLabel("—")
+        self._ctx_next.setWordWrap(True)
+        self._ctx_next.setStyleSheet(
+            "background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:10px;"
+            "font-size:12px;color:#0c4a6e;font-weight:600;"
+        )
+        layout.addWidget(self._ctx_next, 0)
+        return panel
+
+    def _build_diagnosis_card(self) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(
+            "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #f0f9ff,stop:1 #e0f2fe);"
+            "border:1px solid #bae6fd;border-radius:12px;}"
+        )
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(16, 12, 16, 14)
+        fl.setSpacing(6)
+
+        ttl = QLabel("🎯  DIAGNOSIS")
+        ttl.setStyleSheet("font-size:10px;font-weight:800;color:#0369a1;letter-spacing:1.2px;background:transparent;border:none;")
+        fl.addWidget(ttl)
+
+        self._det_severity_lbl = QLabel("—")
+        self._det_severity_lbl.setStyleSheet("font-size:22px;font-weight:800;color:#0f172a;background:transparent;border:none;")
+        fl.addWidget(self._det_severity_lbl)
+
+        self._det_risk_badge = QLabel("")
+        self._det_risk_badge.setMaximumHeight(24)
+        self._det_risk_badge.setAlignment(Qt.AlignCenter)
+        fl.addWidget(self._det_risk_badge, 0, Qt.AlignLeft)
+        return frame
+
+    def _build_metrics_card(self) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(
+            "QFrame{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;}"
+        )
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(16, 12, 16, 14)
+        fl.setSpacing(10)
+
+        ttl = QLabel("📊  AI METRICS")
+        ttl.setStyleSheet("font-size:10px;font-weight:800;color:#64748b;letter-spacing:1.2px;background:transparent;border:none;")
+        fl.addWidget(ttl)
+
+        for attr, label_text, color in (("_det_conf_lbl", "Confidence", "#16a34a"), ("_det_unc_lbl", "Uncertainty", "#dc2626")):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            lbl = QLabel(f"{label_text}")
+            lbl.setStyleSheet(f"font-size:11px;font-weight:600;color:{color};background:transparent;border:none;min-width:80px;")
+            val = QLabel("—")
+            val.setStyleSheet(f"font-size:16px;font-weight:800;color:{color};background:transparent;border:none;")
+            val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            setattr(self, attr, val)
+            row.addWidget(lbl)
+            row.addWidget(val, 1)
+            fl.addLayout(row)
+        return frame
+
+    def _build_classification_row(self) -> QWidget:
+        row = QWidget()
+        row.setStyleSheet("background:transparent;")
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(8)
+
+        tiles = (
+            ("🤖 AI RESULT", "_det_ai_lbl", "#8b5cf6"),
+            ("👨‍⚕️ DOCTOR", "_det_doctor_lbl", "#0ea5e9"),
+            ("✅ FINAL (ICDR)", "_det_final_lbl", "#16a34a"),
+        )
+        for label_text, attr, color in tiles:
+            tile = QFrame()
+            tile.setStyleSheet(
+                "QFrame{background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;}"
+                f"QFrame:hover{{border-color:{color};}}"
+            )
+            tl = QVBoxLayout(tile)
+            tl.setContentsMargins(12, 10, 12, 10)
+            tl.setSpacing(4)
+            kl = QLabel(label_text)
+            kl.setStyleSheet(f"font-size:9px;font-weight:800;color:{color};letter-spacing:0.6px;background:transparent;border:none;")
+            vl_lbl = QLabel("—")
+            vl_lbl.setStyleSheet("font-size:12px;font-weight:700;color:#1e293b;background:transparent;border:none;")
+            vl_lbl.setWordWrap(True)
+            setattr(self, attr, vl_lbl)
+            tl.addWidget(kl)
+            tl.addWidget(vl_lbl)
+            rl.addWidget(tile, 1)
+        return row
+
+    def _build_clinical_card(self) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet("QFrame{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;}")
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(16, 12, 16, 14)
+        fl.setSpacing(8)
+
+        ttl = QLabel("🩺  CLINICAL DETAILS")
+        ttl.setStyleSheet("font-size:10px;font-weight:800;color:#64748b;letter-spacing:1.2px;background:transparent;border:none;")
+        fl.addWidget(ttl)
+
+        rows = (
+            ("_det_decision_lbl", "Decision Mode"),
+            ("_det_symptoms_lbl", "Symptoms"),
+            ("_det_findings_lbl", "Findings"),
+            ("_det_notes_lbl", "Clinical Notes"),
+        )
+        for attr, label_text in rows:
+            w = QWidget()
+            w.setStyleSheet("background:transparent;")
+            wl = QHBoxLayout(w)
+            wl.setContentsMargins(0, 2, 0, 2)
+            wl.setSpacing(12)
+            kl = QLabel(f"{label_text}")
+            kl.setStyleSheet(
+                "font-weight:700;color:#64748b;font-size:11px;min-width:108px;max-width:108px;"
+                "background:transparent;border:none;"
+            )
+            kl.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            vl_lbl = QLabel("—")
+            vl_lbl.setStyleSheet("color:#1e293b;font-size:12px;background:transparent;border:none;font-weight:500;")
+            vl_lbl.setWordWrap(True)
+            setattr(self, attr, vl_lbl)
+            wl.addWidget(kl, 0)
+            wl.addWidget(vl_lbl, 1)
+            fl.addWidget(w)
+        return frame
+
+    def _build_meta_card(self) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(
+            "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #fefce8,stop:1 #fef9c3);"
+            "border:1px solid #fde68a;border-radius:12px;}"
+        )
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(16, 10, 16, 12)
+        fl.setSpacing(4)
+
+        ttl = QLabel("🔖  SCREENING METADATA")
+        ttl.setStyleSheet("font-size:10px;font-weight:800;color:#92400e;letter-spacing:1.2px;background:transparent;border:none;")
+        fl.addWidget(ttl)
+
+        self._det_type_lbl = QLabel("")
+        self._det_type_lbl.setStyleSheet("color:#78350f;font-size:12px;font-weight:700;background:transparent;border:none;")
+        self._det_prev_ref_lbl = QLabel("")
+        self._det_prev_ref_lbl.setStyleSheet("color:#78350f;font-size:12px;background:transparent;border:none;")
+        fl.addWidget(self._det_type_lbl)
+        fl.addWidget(self._det_prev_ref_lbl)
+        self._det_meta_frame = frame
+        return frame
+
+    def _build_images_card(self) -> QGroupBox:
+        card = QGroupBox("Fundus Images")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(14, 18, 14, 14)
+        cl.setSpacing(10)
+
+        row = QHBoxLayout()
+        row.setSpacing(12)
+
+        self.source_preview = QLabel("Loading fundus image...")
+        self.heatmap_preview = QLabel("Loading Grad-CAM...")
+
+        for preview, label_text, icon in (
+            (self.source_preview, "FUNDUS IMAGE", "📷"),
+            (self.heatmap_preview, "GRAD-CAM HEATMAP", "🔥"),
+        ):
+            wrap = QWidget()
+            wrap.setStyleSheet("background:transparent;")
+            wl = QVBoxLayout(wrap)
+            wl.setContentsMargins(0, 0, 0, 0)
+            wl.setSpacing(6)
+            cap = QLabel(f"{icon}  {label_text}")
+            cap.setStyleSheet(
+                "font-size:10px;font-weight:800;color:#475569;letter-spacing:0.8px;"
+                "background:transparent;border:none;padding:2px 0;"
+            )
             preview.setAlignment(Qt.AlignCenter)
             preview.setMinimumHeight(220)
-            preview.setStyleSheet("background:#0f172a;color:#e2e8f0;border:1px solid #cbd5e1;border-radius:10px;")
-            image_row.addWidget(preview, 1)
-        details_layout.addLayout(image_row)
-        right_col.addWidget(self.details_card)
+            preview.setStyleSheet(
+                "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #0f172a,stop:1 #1e293b);"
+                "color:#94a3b8;border:1px solid #334155;border-radius:12px;font-size:12px;font-style:italic;"
+            )
+            wl.addWidget(cap)
+            wl.addWidget(preview, 1)
+            row.addWidget(wrap, 1)
+        cl.addLayout(row)
+        return card
 
-        actions = QHBoxLayout()
-        actions.setSpacing(10)
-        follow_up_btn = QPushButton("Add Follow-Up Screening")
+    # ══════════════════════════════════════════════════════════════════════
+    # ACTION BAR
+    # ══════════════════════════════════════════════════════════════════════
+    def _build_action_bar(self) -> QFrame:
+        bar = QFrame()
+        bar.setStyleSheet("QFrame{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;}")
+        hl = QHBoxLayout(bar)
+        hl.setContentsMargins(16, 12, 16, 12)
+        hl.setSpacing(10)
+
+        styles = {
+            "primary": (
+                "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2563eb,stop:1 #1d4ed8);"
+                "color:#fff;border:none;border-radius:8px;font-weight:700;padding:9px 20px;}"
+                "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1d4ed8,stop:1 #1e3a8a);}"
+            ),
+            "success": (
+                "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #16a34a,stop:1 #15803d);"
+                "color:#fff;border:none;border-radius:8px;font-weight:700;padding:9px 20px;}"
+                "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #15803d,stop:1 #166534);}"
+            ),
+            "warning": (
+                "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #f59e0b,stop:1 #d97706);"
+                "color:#fff;border:none;border-radius:8px;font-weight:700;padding:9px 20px;}"
+                "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #d97706,stop:1 #b45309);}"
+                "QPushButton:disabled{background:#fcd34d;color:#ffffff;}"
+            ),
+            "neutral": (
+                "QPushButton{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;"
+                "border-radius:8px;font-weight:600;padding:9px 20px;}"
+                "QPushButton:hover{background:#e2e8f0;}"
+            ),
+            "close": (
+                "QPushButton{background:#ffffff;color:#64748b;border:1px solid #e2e8f0;"
+                "border-radius:8px;font-weight:600;padding:9px 20px;}"
+                "QPushButton:hover{background:#fef2f2;color:#b91c1c;border-color:#fecaca;}"
+            ),
+        }
+
+        follow_up_btn = QPushButton("➕  New Follow-Up")
+        follow_up_btn.setStyleSheet(styles["success"])
         follow_up_btn.clicked.connect(self._handle_follow_up)
-        actions.addWidget(follow_up_btn)
-        report_btn = QPushButton("View Full Report")
+
+        report_btn = QPushButton("📄  View Full Report")
+        report_btn.setStyleSheet(styles["primary"])
         report_btn.clicked.connect(self._handle_view_report)
-        actions.addWidget(report_btn)
-        compare_btn = QPushButton("Compare Latest Two Screenings")
+
+        compare_btn = QPushButton("⇄  Compare Screenings")
         compare_btn.setEnabled(len(self.timeline_records) >= 2)
+        compare_btn.setStyleSheet(styles["warning"])
         compare_btn.clicked.connect(self._handle_compare)
-        actions.addWidget(compare_btn)
-        export_btn = QPushButton("Export Patient History")
+
+        export_btn = QPushButton("⬇  Export History")
+        export_btn.setStyleSheet(styles["neutral"])
         export_btn.clicked.connect(self._handle_export)
-        actions.addWidget(export_btn)
-        close_btn = QPushButton("Close")
+
+        close_btn = QPushButton("✕  Close")
+        close_btn.setStyleSheet(styles["close"])
         close_btn.clicked.connect(self.accept)
-        actions.addWidget(close_btn)
-        right_col.addLayout(actions)
 
-        if self._selected_record:
-            self._select_record(int(self._selected_record.get("id") or 0))
+        for btn in (follow_up_btn, report_btn, compare_btn, export_btn):
+            btn.setMinimumHeight(40)
+            hl.addWidget(btn)
+        hl.addStretch(1)
+        close_btn.setMinimumHeight(40)
+        hl.addWidget(close_btn)
+        return bar
 
+    # ══════════════════════════════════════════════════════════════════════
+    # PROGRESSION LOGIC
+    # ══════════════════════════════════════════════════════════════════════
     def _build_progression_summary_lines(self) -> list[str]:
         if not self.timeline_records:
             return ["No screening history available."]
@@ -441,7 +991,6 @@ class PatientTimelineDialog(QDialog):
         latest = condensed[-1] if condensed else "Pending"
         risk_text, _ = _risk_status_for(latest)
 
-        # If only one record, don't show progression or trend
         if len(self.timeline_records) < 2:
             return [
                 f"Initial condition: {initial}",
@@ -454,7 +1003,7 @@ class PatientTimelineDialog(QDialog):
 
         start_rank = _severity_rank_for(initial)
         end_rank = _severity_rank_for(latest)
-        
+
         if end_rank - start_rank > 1 and day_span is not None and day_span <= 180:
             trend = "Trend: Rapid deterioration"
         elif end_rank > start_rank:
@@ -466,36 +1015,14 @@ class PatientTimelineDialog(QDialog):
 
         return [
             f"Initial condition: {initial}",
-            f"Progression detected: {' -> '.join(condensed)}",
+            f"Progression: {' → '.join(condensed)}",
             trend,
             f"Risk status: {risk_text}",
         ]
 
-    def _node_text(self, record: dict) -> str:
-        result = _display_severity(record)
-        conf_label, unc_label, _, _ = _parse_confidence_metrics(record.get("confidence"))
-        follow_up_flag = str(record.get("screening_type") or "").strip().lower() == "follow_up"
-        follow_up_suffix = " | Follow-up" if follow_up_flag else ""
-        return "\n".join(
-            [
-                f"Date: {_format_screening_datetime_label(record.get('screened_at'))}",
-                f"{record.get('eyes') or 'Eye not set'} | Result: {result}{follow_up_suffix}",
-                f"{conf_label} | {unc_label}",
-            ]
-        )
-
-    def _node_style(self, record: dict, active: bool) -> str:
-        _, color = _risk_status_for(_display_severity(record))
-        bg = "#eff6ff" if active else "#ffffff"
-        border = color if active else "#dbeafe"
-        return (
-            "QPushButton{"
-            f"background:{bg};color:#0f172a;border:2px solid {border};border-left:8px solid {color};"
-            "border-radius:12px;padding:12px;text-align:left;font-weight:600;"
-            "}"
-            "QPushButton:hover{background:#f8fbff;}"
-        )
-
+    # ══════════════════════════════════════════════════════════════════════
+    # RECORD SELECTION
+    # ══════════════════════════════════════════════════════════════════════
     def _select_record(self, record_id: int):
         chosen = next((record for record in self.timeline_records if int(record.get("id") or 0) == int(record_id)), None)
         if not chosen:
@@ -505,44 +1032,66 @@ class PatientTimelineDialog(QDialog):
         for rid, button in self._node_buttons.items():
             is_active = rid == int(record_id)
             button.setChecked(is_active)
-            button.setStyleSheet(self._node_style(chosen if is_active else next(record for record in self.timeline_records if int(record.get("id") or 0) == rid), is_active))
+            target_record = chosen if is_active else next(
+                record for record in self.timeline_records if int(record.get("id") or 0) == rid
+            )
+            button.setStyleSheet(self._node_style(target_record, is_active))
 
         result = _display_severity(chosen)
-        conf_label, unc_label, _, _ = _parse_confidence_metrics(chosen.get("confidence"))
-        self.details_heading.setText(f"{_format_screening_datetime_label(chosen.get('screened_at'))} - {chosen.get('eyes') or 'Eye'}")
+        _, _, conf_pct, unc_pct = _parse_confidence_metrics(chosen.get("confidence"))
+        eye_label = str(chosen.get("eyes") or "Eye")
+        when = _format_screening_datetime_label(chosen.get("screened_at"))
+        self.analysis_heading.setText(f"{when}     |     {eye_label}")
 
-        symptoms = []
-        if _is_truthy_flag(chosen.get("symptom_blurred_vision")):
-            symptoms.append("Blurred vision")
-        if _is_truthy_flag(chosen.get("symptom_floaters")):
-            symptoms.append("Floaters")
-        if _is_truthy_flag(chosen.get("symptom_flashes")):
-            symptoms.append("Flashes")
-        if _is_truthy_flag(chosen.get("symptom_vision_loss")):
-            symptoms.append("Vision loss")
+        # Diagnosis + risk
+        risk_text, risk_color = _risk_status_for(result)
+        self._analysis_diag_lbl.setText((result or "Pending").upper() if result else "PENDING")
+        self._analysis_diag_lbl.setStyleSheet(f"font-size:28px;font-weight:900;color:{risk_color};background:transparent;border:none;")
+        self._analysis_risk_badge.setText(f"  {risk_text.upper()}  ")
+        self._analysis_risk_badge.setStyleSheet(
+            f"background:{risk_color};color:#ffffff;border:none;"
+            "border-radius:6px;font-weight:800;font-size:10px;padding:3px 12px;letter-spacing:0.8px;"
+        )
 
-        details_lines = [
-            f"<b>DR Severity:</b> {escape(result)}",
-            f"<b>{escape(conf_label)}</b>",
-            f"<b>{escape(unc_label)}</b>",
-            f"<b>AI Classification:</b> {escape(str(chosen.get('ai_classification') or chosen.get('result') or '—'))}",
-            f"<b>Doctor Classification:</b> {escape(str(chosen.get('doctor_classification') or chosen.get('result') or '—'))}",
-            f"<b>Final Diagnosis:</b> {escape(str(chosen.get('final_diagnosis_icdr') or result or '—'))}",
-            f"<b>Decision Mode:</b> {escape(str(chosen.get('decision_mode') or 'accepted').title())}",
-            f"<b>Findings:</b> {escape(str(chosen.get('doctor_findings') or '—'))}",
-            f"<b>Symptoms:</b> {escape(', '.join(symptoms) if symptoms else 'None reported')}",
-            f"<b>Clinical Notes:</b> {escape(str(chosen.get('notes') or '—'))}",
-        ]
+        # Metrics bars
+        self._set_metric_bar(self._conf_row, "AI_Confidence", conf_pct, "#16a34a")
+        self._set_metric_bar(self._unc_row, "Uncertainty", unc_pct, "#f59e0b")
 
-        if str(chosen.get("screening_type") or "").strip().lower() == "follow_up":
-            details_lines.append("<b>Screening Type:</b> Follow-up")
-        previous_ref = chosen.get("previous_screening_id")
-        if previous_ref:
-            details_lines.append(f"<b>Previous Screening Reference:</b> {escape(str(previous_ref))}")
+        # Clinical context (right sidebar)
+        notes = str(chosen.get("notes") or chosen.get("doctor_findings") or "").strip()
+        self._ctx_notes.setPlainText(notes if notes else "")
+        self._ctx_next.setText(self._build_next_steps_text(result))
 
-        self.details_body.setText("<br>".join(details_lines))
-        self._set_preview_image(self.source_preview, chosen.get("source_image_path"), "Fundus image preview")
-        self._set_preview_image(self.heatmap_preview, chosen.get("heatmap_image_path"), "Grad-CAM preview")
+        self._set_preview_image(self.source_preview, chosen.get("source_image_path"), "Fundus image unavailable")
+        self._set_preview_image(self.heatmap_preview, chosen.get("heatmap_image_path"), "Grad-CAM unavailable")
+
+    def _set_metric_bar(self, row_widget: QWidget, key: str, value: float | None, accent: str):
+        val_label: QLabel | None = row_widget.findChild(QLabel, f"val_{key}")
+        bar: QProgressBar | None = row_widget.findChild(QProgressBar, f"bar_{key}")
+        if val_label is not None:
+            val_label.setStyleSheet(
+                f"font-size:12px;font-weight:900;color:{accent};background:transparent;border:none;"
+                "font-family:'Consolas','Cascadia Mono',monospace;"
+            )
+            val_label.setText(f"{value:.1f}%" if value is not None else "—")
+        if bar is not None:
+            bar.setValue(int(max(0, min(100, value))) if value is not None else 0)
+
+    def _build_next_steps_text(self, severity: str) -> str:
+        sev = _normalize_severity(severity)
+        if sev in ("", "Pending"):
+            return "Await final interpretation. If symptoms are present, arrange clinician review."
+        if sev == "No DR":
+            return "Routine follow-up: repeat screening in 12 months. Reinforce glycemic/BP control and lifestyle counseling."
+        if sev == "Mild DR":
+            return "Schedule follow-up screening in 6–12 months. Consider ophthalmology referral based on risk factors and symptoms."
+        if sev == "Moderate DR":
+            return "Recommend ophthalmology referral. Follow-up in 3–6 months and optimize systemic risk control."
+        if sev == "Severe DR":
+            return "Urgent ophthalmology referral. Consider expedited evaluation and treatment planning."
+        if sev == "Proliferative DR":
+            return "Immediate ophthalmology referral (same-day if possible). High risk for vision-threatening disease."
+        return "Clinical follow-up recommended based on the above findings."
 
     def _set_preview_image(self, label: QLabel, image_value: str, fallback_text: str):
         label.setPixmap(QPixmap())
@@ -554,8 +1103,11 @@ class PatientTimelineDialog(QDialog):
         if pixmap.isNull():
             return
         label.setText("")
-        label.setPixmap(pixmap.scaled(420, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        label.setPixmap(pixmap.scaled(460, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
+    # ══════════════════════════════════════════════════════════════════════
+    # EVENT HANDLERS
+    # ══════════════════════════════════════════════════════════════════════
     def _handle_follow_up(self):
         if callable(self._on_follow_up):
             self._on_follow_up(self._selected_record)
@@ -571,6 +1123,7 @@ class PatientTimelineDialog(QDialog):
     def _handle_export(self):
         if callable(self._on_export):
             self._on_export(self.timeline_records)
+
 
 class PatientDetailsDialog(QDialog):
     """Read-only dialog displaying full patient screening details without fundus image."""
@@ -1154,7 +1707,16 @@ class ReportsPage(QWidget):
             }
         """)
 
-        root = QVBoxLayout(self)
+        # ── stack: page 0 = reports table, page 1 = patient overview ────────
+        self._main_stack = QStackedWidget()
+        self._reports_page = QWidget()
+        _outer = QVBoxLayout(self)
+        _outer.setContentsMargins(0, 0, 0, 0)
+        _outer.setSpacing(0)
+        _outer.addWidget(self._main_stack)
+        self._main_stack.addWidget(self._reports_page)
+
+        root = QVBoxLayout(self._reports_page)
         root.setContentsMargins(24, 22, 24, 22)
         root.setSpacing(18)
 
@@ -1635,9 +2197,16 @@ class ReportsPage(QWidget):
             self.archive_selected_record()
 
     def _get_selected_record(self):
-        r = self.results_table.currentRow()
-        if r < 0: return None
-        item = self.results_table.item(r, 0)
+        row = self.results_table.currentRow()
+        if row < 0:
+            selection_model = self.results_table.selectionModel()
+            if selection_model is not None:
+                selected_rows = selection_model.selectedRows()
+                if selected_rows:
+                    row = selected_rows[0].row()
+        if row < 0:
+            return None
+        item = self.results_table.item(row, 0)
         return self._display_row_lookup.get(item.data(Qt.UserRole)) if item else None
 
     def _update_action_buttons(self):
@@ -1671,42 +2240,54 @@ class ReportsPage(QWidget):
 
         self.generate_referral()
 
-    def _on_table_row_double_clicked(self, index):
-        """Handle double-click on table row to show patient details."""
-        self._show_patient_details()
+    # ── inline patient overview ───────────────────────────────────────────────
 
-    def _show_patient_details(self):
-        """Open the patient timeline summary dialog from the selected report row."""
-        record = self._get_selected_record()
-        if not record:
-            return
+    def _show_patient_overview(self, record: dict, timeline_records: list):
+        """Replace the reports table with the patient overview panel in-place."""
+        from patient_timeline_dialog import PatientTimelineDialog
 
-        patient_id = str(record.get("patient_id") or "").strip()
-        if not patient_id:
-            QMessageBox.warning(self, "Patient Timeline", "Unable to retrieve patient history.")
-            return
+        # Remove previous overview page if one exists
+        if self._main_stack.count() > 1:
+            old = self._main_stack.widget(1)
+            self._main_stack.removeWidget(old)
+            old.deleteLater()
 
-        timeline_records = self._fetch_patient_timeline_records(patient_id)
-        if not timeline_records:
-            QMessageBox.warning(self, "Patient Timeline", "Unable to load patient timeline.")
-            return
-
-        latest_record = timeline_records[-1]
-        UserManager.add_activity_log(
-            self.username,
-            f"RECORD_OPENED patient_id={patient_id}; record_id={latest_record.get('id')}; source=reports_timeline",
-        )
-
-        dialog = PatientTimelineDialog(
-            latest_record,
+        overview = PatientTimelineDialog(
+            record,
             timeline_records,
-            self,
             on_follow_up=self._start_follow_up_from_timeline,
             on_view_report=self._generate_report_for_record,
             on_compare=self._compare_latest_two_screenings,
             on_export=self._export_patient_history,
         )
-        dialog.exec()
+        overview.back_requested.connect(self._hide_patient_overview)
+        self._main_stack.addWidget(overview)
+        self._main_stack.setCurrentIndex(1)
+
+    def _hide_patient_overview(self):
+        """Return to the reports table."""
+        self._main_stack.setCurrentIndex(0)
+        if self._main_stack.count() > 1:
+            old = self._main_stack.widget(1)
+            self._main_stack.removeWidget(old)
+            old.deleteLater()
+
+    def _on_table_row_double_clicked(self, index):
+        """Handle double-click on table row to show patient details."""
+        if index is not None and hasattr(index, "isValid") and index.isValid():
+            self.results_table.setCurrentCell(index.row(), 0)
+            self.results_table.selectRow(index.row())
+
+        handle_patient_info_double_click(
+            self,
+            self._get_selected_record,
+            self._fetch_patient_timeline_records,
+            self.username,
+            self._start_follow_up_from_timeline,
+            self._generate_report_for_record,
+            self._compare_latest_two_screenings,
+            self._export_patient_history,
+        )
 
     def _fetch_patient_timeline_records(self, patient_id: str) -> list[dict]:
         patient_id = str(patient_id or "").strip()
@@ -3248,8 +3829,7 @@ class ReportsPage(QWidget):
             <td>
                 <div class=\"header-block\"><span class=\"label\">To:</span> {destination_name}</div>
                 <div class=\"header-block\"><span class=\"label\">Department:</span> {destination_dept}</div>
-                <div class=\"header-block\"><span class=\"label\">Attention:</span> {destination_contact}</div>
-            </td>
+                <div class=\"header-block\"><span class=\"label\">Attention:</span> {destination_contact}</div></td>
         </tr>
     </table>
 

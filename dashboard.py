@@ -9,6 +9,7 @@ import os
 import random
 import re
 import sqlite3
+import time
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -28,7 +29,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QDialog, QApplication, QLineEdit
 )
 from PySide6.QtCore import Qt, QSize, QByteArray, QEvent, QTimer, QCoreApplication
-from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication
+from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication, QPainterPath
 from PySide6.QtSvg import QSvgRenderer
 
 from screening import ScreeningPage
@@ -46,10 +47,23 @@ class EyeShieldApp(QMainWindow):
     """Main application window"""
 
     ROLE_PAGE_ACCESS = {
-        "admin": {4, 5, 6, 7, 8},
-        "clinician": {0, 1, 2, 3, 5, 6},
+        "admin": {3, 4, 5, 6, 7, 8, 9},
+        "clinician": {0, 1, 2, 3, 5, 6, 9},
         "viewer": {0, 5, 6},
     }
+
+    # ── Sidebar design tokens ────────────────────────────────────────────────
+    _SIDEBAR_W          = 260
+    _SIDEBAR_BG_TOP     = "#0A1628"
+    _SIDEBAR_BG_BTM     = "#0f2d5e"
+    _NAV_ACTIVE_BG      = "rgba(255,255,255,0.13)"
+    _NAV_ACTIVE_BORDER  = "rgba(255,255,255,0.28)"
+    _NAV_HOVER_BG       = "rgba(255,255,255,0.07)"
+    _NAV_TEXT           = "rgba(255,255,255,0.72)"
+    _NAV_TEXT_ACTIVE    = "#ffffff"
+    _NAV_ICON_INACTIVE  = "#ffffff"
+    _NAV_ICON_ACTIVE    = "#ffffff"
+    # ────────────────────────────────────────────────────────────────────────
 
     def __init__(self, username, role, display_name=None, full_name=None, specialization=None, contact=None):
         super().__init__()
@@ -76,6 +90,10 @@ class EyeShieldApp(QMainWindow):
         self._inactivity_warning_active = False
         self._dashboard_clock_timer = None
         self._active_nav_key = ""
+        self._svg_icon_cache = {}
+        self._last_dashboard_refresh_at = 0.0
+        self._last_reports_refresh_at = 0.0
+        self._last_activity_log_refresh_at = 0.0
 
         self.setWindowTitle("EyeShield – DR Screening")
         self.setMinimumSize(900, 560)
@@ -88,7 +106,6 @@ class EyeShieldApp(QMainWindow):
         else:
             self.resize(1280, 720)
 
-        # Set app icon
         _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", "eyeshield_icon.svg")
         self._brand_logo_path = self._resolve_existing_path(
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", "Logo.png"),
@@ -105,121 +122,118 @@ class EyeShieldApp(QMainWindow):
         icons_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 
         root = QWidget()
-        root_layout = QVBoxLayout(root)
+        root_layout = QHBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        # Create top navigation bar
+        # ── Left sidebar ─────────────────────────────────────────────────────
+        sidebar_w   = self._SIDEBAR_W
+        nav_btn_h   = 44
+        nav_icon    = QSize(20, 20)
+
         nav_bar = QWidget()
-        nav_bar.setObjectName("navBar")
-        nav_bar.setFixedHeight(78)
+        nav_bar.setObjectName("appSidebar")
+        nav_bar.setFixedWidth(sidebar_w)
         self.nav_bar = nav_bar
-        nav_layout = QHBoxLayout(nav_bar)
-        nav_layout.setContentsMargins(12, 4, 12, 4)
-        nav_layout.setSpacing(4)
-        nav_bar.setStyleSheet("""
-            QWidget#navBar {
-                background: #f8f9fa;
-                border-bottom: 1px solid #dee2e6;
-            }
-        """)
+        nav_layout = QVBoxLayout(nav_bar)
+        nav_layout.setContentsMargins(14, 20, 14, 16)
+        nav_layout.setSpacing(0)
 
+        # Apply gradient sidebar background
+        nav_bar.setStyleSheet(
+            f"QWidget#appSidebar{{"
+            f"background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            f"  stop:0 {self._SIDEBAR_BG_TOP}, stop:1 {self._SIDEBAR_BG_BTM});"
+            f"border-right: 1px solid rgba(255,255,255,0.06);"
+            f"}}"
+            f"QLabel{{background:transparent;border:none;}}"
+        )
 
-        # App title + icon in a fixed-width container so they never shift
-        title_icon_container = QWidget()
-        title_icon_container.setFixedSize(165, 70)
-        title_icon_container.setStyleSheet("background: transparent;")
-        title_icon_layout = QHBoxLayout(title_icon_container)
-        title_icon_layout.setContentsMargins(0, 0, 0, 0)
-        title_icon_layout.setSpacing(2)
+        # ── Brand header ─────────────────────────────────────────────────────
+        brand_widget = QWidget()
+        brand_widget.setStyleSheet("background: transparent;")
+        brand_layout = QHBoxLayout(brand_widget)
+        brand_layout.setContentsMargins(4, 0, 4, 0)
+        brand_layout.setSpacing(10)
+
+        # App icon (small)
+        self._brand_icon_label = QLabel()
+        self._brand_icon_label.setFixedSize(32, 32)
+        self._brand_icon_label.setAlignment(Qt.AlignCenter)
+        self._brand_icon_label.setStyleSheet("background: transparent;")
+        brand_pix = self._load_svg_pixmap_colored(_icon_path, "#60a5fa", 64)
+        if not brand_pix.isNull():
+            self._brand_icon_label.setPixmap(
+                brand_pix.scaled(QSize(28, 28), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+
+        brand_text_col = QVBoxLayout()
+        brand_text_col.setSpacing(0)
+        brand_text_col.setContentsMargins(0, 0, 0, 0)
 
         self.title_label = QLabel("EyeShield")
-        title_label = self.title_label
-        title_label.setObjectName("appTitle")
-        title_label.setStyleSheet("color: #007bff; font-size: 20px; font-weight: 700; text-decoration: none;")
-        self._apply_title_label_font(title_label)
-        title_label.setFixedWidth(118)
-        if self._brand_title_path and os.path.isfile(self._brand_title_path):
-            title_pixmap = QPixmap(self._brand_title_path).scaled(
-                QSize(118, 32), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        self.title_label.setStyleSheet(
+            "color: #ffffff; font-size: 17px; font-weight: 800;"
+            "letter-spacing: 0.4px; font-family: 'Segoe UI Variable','Segoe UI',sans-serif;"
+        )
+        self._apply_title_label_font(self.title_label)
+
+        subtitle_lbl = QLabel("DR Screening")
+        subtitle_lbl.setStyleSheet(
+            "color: rgba(255,255,255,0.40); font-size: 10px; font-weight: 600;"
+            "letter-spacing: 1.2px; text-transform: uppercase;"
+        )
+
+        brand_text_col.addWidget(self.title_label)
+        brand_text_col.addWidget(subtitle_lbl)
+
+        brand_layout.addWidget(self._brand_icon_label)
+        brand_layout.addLayout(brand_text_col)
+        brand_layout.addStretch()
+        nav_layout.addWidget(brand_widget)
+
+        # ── Thin separator ───────────────────────────────────────────────────
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.HLine)
+        sep1.setFixedHeight(1)
+        sep1.setStyleSheet("background: rgba(255,255,255,0.08); border: none; margin: 14px 4px 10px 4px;")
+        nav_layout.addWidget(sep1)
+
+        # ── Nav buttons ──────────────────────────────────────────────────────
+        nav_list = QWidget()
+        nav_list.setStyleSheet("background: transparent;")
+        nav_list_l = QVBoxLayout(nav_list)
+        nav_list_l.setContentsMargins(0, 0, 0, 0)
+        nav_list_l.setSpacing(3)
+
+        # Group label helper
+        def _add_group_label(text):
+            lbl = QLabel(text)
+            lbl.setStyleSheet(
+                "color: rgba(255,255,255,0.28); font-size: 9px; font-weight: 700;"
+                "letter-spacing: 1.4px; text-transform: uppercase;"
+                "padding: 10px 8px 4px 8px; background: transparent;"
             )
-            if not title_pixmap.isNull():
-                title_label.setText("")
-                title_label.setPixmap(title_pixmap)
-        title_icon_layout.addWidget(title_label)
-
-        icon_label = QLabel()
-        self.nav_icon_label = icon_label
-        self._icon_path = _icon_path
-        icon_pixmap = QPixmap()
-        if self._brand_logo_path and self._brand_logo_path.lower().endswith(".svg"):
-            icon_pixmap = self._load_svg_pixmap_colored(self._brand_logo_path, "#007bff", 256)
-        elif self._brand_logo_path:
-            icon_pixmap = QPixmap(self._brand_logo_path)
-        if icon_pixmap.isNull():
-            icon_pixmap = self._load_svg_pixmap_colored(_icon_path, "#007bff", 256)
-        icon_pixmap = icon_pixmap.scaled(QSize(38, 38), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        if not icon_pixmap.isNull():
-            icon_label.setPixmap(icon_pixmap)
-        icon_label.setFixedSize(38, 38)
-        icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setStyleSheet("background: transparent;")
-        title_icon_layout.addWidget(icon_label)
-
-        self.title_icon_container = title_icon_container
-        nav_layout.addWidget(title_icon_container)
-        nav_layout.addStretch(1)
-
-        # Navigation buttons with icons and small text labels below
-        def nav_button_with_label(icon_path, text):
-            w = QWidget()
-            w.setFixedSize(60, 66)
-            w.setStyleSheet("QWidget { background: transparent; }")
-            v = QVBoxLayout(w)
-            v.setContentsMargins(0, 2, 0, 2)
-            v.setSpacing(2)
-
-            btn = QPushButton("")
-            btn.setProperty("navIconPath", icon_path)
-            btn.setStyleSheet(self.get_nav_button_style(icon_only=True))
-            btn.setFixedSize(50, 40)
-            btn.setIconSize(QSize(24, 24))
-
-            label = QLabel(text)
-            label.setAlignment(Qt.AlignHCenter)
-            label.setFixedWidth(60)
-            label.setWordWrap(True)
-            label.setFont(EyeShieldApp._make_nav_font(8))
-            if str(self.role or "").strip().lower() == "admin":
-                label.setFont(QFont("Segoe UI", 8))
-            label.setStyleSheet("font-size: 10px; color: #495057; margin-top: 0px; text-decoration: none; border: none;")
-
-            v.addWidget(btn, 0, Qt.AlignHCenter)
-            v.addWidget(label, 0, Qt.AlignHCenter)
-            return w, btn, label
+            nav_list_l.addWidget(lbl)
 
         navs = [
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "dashboard.svg"), os.path.join(icons_dir, "dasboard.svg")),
                 "label": "Dashboard",
                 "page_index": 0,
-                "requires_admin": False,
+                "group": "MAIN",
             },
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "screening.svg")),
                 "label": "Assessment",
                 "page_index": 1,
-                "requires_admin": False,
+                "group": None,
             },
             {
-                "icon": self._resolve_existing_path(os.path.join(icons_dir, "camera.svg")),
-                "label": "Camera",
-                "page_index": 2,
-                "requires_admin": False,
-            },
-            {
-                "icon": self._resolve_existing_path(os.path.join(icons_dir, "reports.svg")),
-                "label": "Analytics",
+                "icon": self._resolve_existing_path(os.path.join(icons_dir, "patients.svg")),
+                "label": "Patient Records",
                 "page_index": 3,
-                "requires_admin": False,
+                "group": None,
             },
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "users.svg")),
@@ -227,114 +241,168 @@ class EyeShieldApp(QMainWindow):
                 "display_label": "Users",
                 "page_index": 4,
                 "nav_key": "users",
-                "requires_admin": True,
+                "group": "ADMIN",
             },
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "activity_log.svg")),
                 "label": "Activity Log",
-                "display_label": "Activity\nLog",
+                "display_label": "Activity Log",
                 "page_index": 7,
-                "requires_admin": True,
+                "group": None,
             },
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "trusted referred hospitals.svg")),
                 "label": "Trusted Referrals",
-                "display_label": "Trusted\nReferrals",
+                "display_label": "Trusted Referrals",
                 "page_index": 8,
                 "nav_key": "trusted_referrals",
-                "requires_admin": True,
+                "group": None,
+            },
+            {
+                "icon": self._resolve_existing_path(os.path.join(icons_dir, "urgentcases.svg")),
+                "label": "Priority Cases",
+                "display_label": "Priority Cases",
+                "page_index": 9,
+                "nav_key": "priority_cases",
+                "group": None,
             },
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "settings.svg")),
                 "label": "Settings",
                 "page_index": 5,
-                "requires_admin": False,
+                "group": "SYSTEM",
             },
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "help.svg")),
                 "label": "Help",
                 "page_index": 6,
-                "requires_admin": False,
+                "group": None,
             },
         ]
-        nav_widgets = []
+
         nav_buttons = []
-        nav_labels = []
         nav_label_originals = []
+        last_group = "__unset__"
+
         for nav_item in navs:
             if nav_item["page_index"] not in self.allowed_pages:
                 continue
-            w, btn, label = nav_button_with_label(nav_item["icon"], nav_item.get("display_label", nav_item["label"]))
+
+            # Group heading
+            grp = nav_item.get("group")
+            if grp is not None and grp != last_group:
+                _add_group_label(grp)
+                last_group = grp
+            elif grp is None and last_group == "__unset__":
+                pass
+
+            btn = QPushButton(f"  {nav_item.get('label', '')}")
+            btn.setCursor(Qt.PointingHandCursor)
             btn.setProperty("pageIndex", nav_item["page_index"])
             btn.setProperty("navKey", nav_item.get("nav_key", nav_item["label"]))
-            label.setProperty("pageIndex", nav_item["page_index"])
+            btn.setProperty("navIconPath", nav_item["icon"])
+            btn.setFixedHeight(nav_btn_h)
+            btn.setIconSize(nav_icon)
+            btn.setStyleSheet(self._nav_btn_stylesheet())
 
-            # Seed icon immediately so first paint never shows a missing nav icon.
-            self._set_button_svg_icon(btn, nav_item["icon"], "#495057", QSize(24, 24))
+            self._set_button_svg_icon(btn, nav_item["icon"], self._NAV_ICON_INACTIVE, nav_icon)
 
-            nav_layout.addWidget(w)
-            nav_layout.addStretch(1)
-            nav_widgets.append(w)
+            nav_list_l.addWidget(btn)
             nav_buttons.append(btn)
-            nav_labels.append(label)
             nav_label_originals.append(nav_item["label"])
 
+        nav_list_l.addStretch(1)
+        nav_layout.addWidget(nav_list, 1)
+
         self.nav_buttons = nav_buttons
-        self.nav_labels = nav_labels
-        self.nav_widgets = nav_widgets
+        self.nav_widgets = []
         self._nav_label_originals = nav_label_originals
 
-        logout_btn = QPushButton("")
-        self.logout_btn = logout_btn
+        # ── Sidebar bottom: user chip + logout ───────────────────────────────
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
+        sep2.setFixedHeight(1)
+        sep2.setStyleSheet("background: rgba(255,255,255,0.08); border: none; margin: 4px 4px 12px 4px;")
+        nav_layout.addWidget(sep2)
+
+        user_chip = QWidget()
+        user_chip.setStyleSheet(
+            "background: rgba(255,255,255,0.07);"
+            "border: 1px solid rgba(255,255,255,0.10);"
+            "border-radius: 12px;"
+        )
+        user_chip_l = QHBoxLayout(user_chip)
+        user_chip_l.setContentsMargins(10, 8, 10, 8)
+        user_chip_l.setSpacing(10)
+
+        # Small avatar in chip
+        self._sidebar_avatar_lbl = QLabel()
+        self._sidebar_avatar_lbl.setFixedSize(32, 32)
+        self._sidebar_avatar_lbl.setAlignment(Qt.AlignCenter)
+        self._draw_sidebar_avatar()
+
+        user_text_col = QVBoxLayout()
+        user_text_col.setSpacing(0)
+        user_text_col.setContentsMargins(0, 0, 0, 0)
+
+        self._sidebar_name_lbl = QLabel(self.display_name or self.username)
+        self._sidebar_name_lbl.setStyleSheet(
+            "color: #ffffff; font-size: 12px; font-weight: 700;"
+            "background: transparent; border: none;"
+        )
+        self._sidebar_role_lbl = QLabel(self.display_title.capitalize())
+        self._sidebar_role_lbl.setStyleSheet(
+            "color: rgba(255,255,255,0.45); font-size: 10px; font-weight: 600;"
+            "background: transparent; border: none;"
+        )
+        user_text_col.addWidget(self._sidebar_name_lbl)
+        user_text_col.addWidget(self._sidebar_role_lbl)
+
+        user_chip_l.addWidget(self._sidebar_avatar_lbl)
+        user_chip_l.addLayout(user_text_col)
+        user_chip_l.addStretch()
+
+        logout_btn = QPushButton()
         logout_btn.setObjectName("logoutBtn")
-        logout_btn.setFixedSize(44, 44)
-        logout_btn.setIconSize(QSize(20, 20))
-        logout_btn.setToolTip("Shutdown / Log out")
-        logout_btn.setStyleSheet("""
-            QPushButton {
-                background: #dc3545;
-                color: white;
-                border: 1px solid #bb2d3b;
-                border-radius: 8px;
-                padding: 0px;
-                font-size: 18px;
-                font-weight: 600;
-                text-decoration: none;
-            }
-            QPushButton:hover { background: #c82333; }
-            QPushButton:focus { outline: none; border: 1px solid #bb2d3b; }
-        """)
+        self.logout_btn = logout_btn
+        logout_btn.setFixedSize(28, 28)
+        logout_btn.setCursor(Qt.PointingHandCursor)
+        logout_btn.setToolTip("Log out")
+        logout_btn.setStyleSheet(
+            "QPushButton{background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.25);"
+            "border-radius:8px;padding:0;}"
+            "QPushButton:hover{background:rgba(255,80,80,0.28);border-color:rgba(255,80,80,0.45);}"
+            "QPushButton:focus{outline:none;}"
+        )
+        user_chip_l.addWidget(logout_btn, 0, Qt.AlignVCenter)
+
+        nav_layout.addWidget(user_chip)
+
         self._logout_icon_path = self._resolve_existing_path(os.path.join(icons_dir, "logout.svg"))
         self._update_logout_icon()
         logout_btn.clicked.connect(self.handle_logout)
-        nav_layout.addWidget(logout_btn)
 
         for button in nav_buttons:
             page_index = int(button.property("pageIndex"))
             nav_key = str(button.property("navKey") or "")
             button.clicked.connect(lambda checked=False, idx=page_index, key=nav_key: self._navigate_to(idx, nav_key=key))
 
-        # (All navigation button connections are now handled via nav_buttons list above)
-
         root_layout.addWidget(nav_bar)
 
-        # Main content area
+        # ── Main content area ────────────────────────────────────────────────
         main = QWidget()
-        main.setStyleSheet("background: #f8f9fa;")
+        main.setStyleSheet("background: #f0f4f8;")
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
         self.pages = QStackedWidget()
 
-        # Create main pages first so dashboard can query live data
         self.screening_page = ScreeningPage()
         self.screening_page.username = self.username
         self.screening_page.display_name = self.display_name
         self.screening_page.role = self.role
-        self.camera_page = CameraPage()
         self.reports_page = ReportsPage(
-            self.username,
-            self.role,
+            self.username, self.role,
             display_name=self.display_name,
             specialization=self.specialization,
         )
@@ -344,26 +412,28 @@ class EyeShieldApp(QMainWindow):
         self.settings_page = SettingsPage()
         self.help_support_page = HelpSupportPage()
         self.trusted_hospitals_page = TrustedHospitalsPage()
+        self.reserved_nav_page = QWidget()
+        self.priority_cases_page = QWidget()
 
-        # Dashboard is created after the other pages so it can be refreshed
         self.dashboard_page = self.create_dashboard_page()
 
         self.users_page.parent_app = self
         self.activity_log_page.parent_app = self
 
-        self.pages.addWidget(self.dashboard_page)
-        self.pages.addWidget(self.screening_page)
-        self.pages.addWidget(self.camera_page)
-        self.pages.addWidget(self.reports_page)
-        self.pages.addWidget(self.users_page)
-        self.pages.addWidget(self.settings_page)
-        self.pages.addWidget(self.help_support_page)
-        self.pages.addWidget(self.activity_log_page)
-        self.pages.addWidget(self.trusted_hospitals_page)
+        self.pages.addWidget(self.dashboard_page)         # 0
+        self.pages.addWidget(self.screening_page)         # 1
+        self.pages.addWidget(self.users_page)             # 2
+        self.pages.addWidget(self.reports_page)           # 3
+        self.pages.addWidget(self.activity_log_page)      # 4
+        self.pages.addWidget(self.settings_page)          # 5
+        self.pages.addWidget(self.help_support_page)      # 6
+        self.pages.addWidget(self.trusted_hospitals_page) # 7
+        self.pages.addWidget(self.reserved_nav_page)      # 8
+        self.pages.addWidget(self.priority_cases_page)    # 9
         self.pages.currentChanged.connect(self._on_page_changed)
 
         main_layout.addWidget(self.pages)
-        root_layout.addWidget(main)
+        root_layout.addWidget(main, 1)
         self.setCentralWidget(root)
 
         self._save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self)
@@ -375,23 +445,111 @@ class EyeShieldApp(QMainWindow):
         self.pages.setCurrentIndex(default_page_index)
         self._set_active_nav(self.pages.currentIndex())
 
-        # Ensure nav bar styles are correct for the initial theme
         self._apply_nav_theme(False)
-        # Re-apply active state after theme bootstrap so startup icons/buttons are visible.
         self._set_active_nav(self.pages.currentIndex())
 
-        # Apply saved theme from settings (must run after all pages are parented)
         saved_theme = self.settings_page.theme_combo.currentText()
         if saved_theme == "Dark":
             self.apply_theme("Dark")
 
-        # Apply saved language to all tabs
         saved_lang = self.settings_page.lang_combo.currentText()
         if saved_lang != "English":
             self.apply_language(saved_lang)
 
         self._setup_inactivity_timeout()
         self._setup_dashboard_clock()
+
+    # ── Sidebar helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _nav_btn_stylesheet() -> str:
+        return (
+            "QPushButton{"
+            "background: transparent;"
+            "color: rgba(255,255,255,0.72);"
+            "border: 1px solid transparent;"
+            "border-radius: 10px;"
+            "padding: 0 10px;"
+            "font-size: 13px;"
+            "font-weight: 600;"
+            "font-family: 'Segoe UI Variable','Segoe UI',sans-serif;"
+            "text-align: left;"
+            "}"
+            "QPushButton:hover{"
+            "background: rgba(255,255,255,0.07);"
+            "color: #ffffff;"
+            "border-color: rgba(255,255,255,0.10);"
+            "}"
+            "QPushButton[active='true']{"
+            "background: rgba(255,255,255,0.13);"
+            "color: #ffffff;"
+            "border: 1px solid rgba(255,255,255,0.22);"
+            "}"
+            "QPushButton[active='true']:hover{"
+            "background: rgba(255,255,255,0.17);"
+            "}"
+            "QPushButton:disabled{"
+            "background: transparent;"
+            "color: rgba(255,255,255,0.20);"
+            "border-color: transparent;"
+            "}"
+        )
+
+    def _draw_sidebar_avatar(self):
+        """Draw initials-based circular avatar for sidebar user chip."""
+        size = 32
+        initials = ""
+        name = self.display_name or self.username or ""
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            initials = (parts[0][0] + parts[-1][0]).upper()
+        elif parts:
+            initials = parts[0][:2].upper()
+        else:
+            initials = "U"
+
+        img = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
+        img.fill(Qt.transparent)
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        path = QPainterPath()
+        path.addEllipse(0, 0, size, size)
+        painter.setClipPath(path)
+        painter.fillRect(0, 0, size, size, QColor("#3b82f6"))
+
+        font = QFont("Segoe UI Variable", 11)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(img.rect(), Qt.AlignCenter, initials)
+        painter.end()
+
+        self._sidebar_avatar_lbl.setPixmap(QPixmap.fromImage(img))
+
+    @staticmethod
+    def _make_circle_avatar_pixmap(size: int, initials: str, bg_color: str = "#3b82f6") -> QPixmap:
+        """Render a circle avatar with initials."""
+        img = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
+        img.fill(Qt.transparent)
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        path = QPainterPath()
+        path.addEllipse(0, 0, size, size)
+        painter.setClipPath(path)
+        painter.fillRect(0, 0, size, size, QColor(bg_color))
+
+        font_size = max(8, size // 3)
+        font = QFont("Segoe UI Variable", font_size)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(img.rect(), Qt.AlignCenter, initials)
+        painter.end()
+        return QPixmap.fromImage(img)
+
+    # ── Role / page helpers ───────────────────────────────────────────────────
 
     @classmethod
     def _allowed_pages_for_role(cls, role: str) -> set[int]:
@@ -403,9 +561,10 @@ class EyeShieldApp(QMainWindow):
     def _default_page_index(self) -> int:
         return 0 if 0 in self.allowed_pages else min(self.allowed_pages)
 
+    # ── SVG / icon helpers ────────────────────────────────────────────────────
+
     @staticmethod
     def _load_svg_pixmap(svg_path: str, size: int = 64) -> QPixmap:
-        """Render an SVG file to a QPixmap at the requested size."""
         renderer = QSvgRenderer(svg_path)
         if not renderer.isValid():
             return QPixmap()
@@ -418,7 +577,6 @@ class EyeShieldApp(QMainWindow):
 
     @staticmethod
     def _load_svg_pixmap_colored(svg_path: str, color: str, size: int = 64) -> QPixmap:
-        """Render an SVG with all black strokes/fills replaced by the given color."""
         try:
             with open(svg_path, "r", encoding="utf-8") as f:
                 svg_text = f.read()
@@ -433,7 +591,6 @@ class EyeShieldApp(QMainWindow):
             return f'{attr}="{color}"'
 
         svg_text = re.sub(r'(fill|stroke)=["\']([^"\']+)["\']', _replace_paint, svg_text, flags=re.IGNORECASE)
-
         data = QByteArray(svg_text.encode("utf-8"))
         renderer = QSvgRenderer(data)
         if not renderer.isValid():
@@ -447,79 +604,79 @@ class EyeShieldApp(QMainWindow):
 
     @staticmethod
     def _resolve_existing_path(*paths: str) -> str:
-        """Return the first existing path, or the first candidate as fallback."""
         for path in paths:
             if path and os.path.exists(path):
                 return path
         return paths[0] if paths else ""
 
     def _set_button_svg_icon(self, button: QPushButton, svg_path: str, color: str, size: QSize):
-        """Apply a recolored SVG icon to a button."""
         if not svg_path:
             button.setIcon(QIcon())
+            button.setProperty("navIconColor", "")
+            return
+        cache_key = (str(svg_path), str(color), int(size.width()), int(size.height()))
+        cached_icon = self._svg_icon_cache.get(cache_key)
+        if cached_icon is not None:
+            button.setIcon(cached_icon)
+            button.setIconSize(size)
+            button.setProperty("navIconColor", str(color))
             return
         is_users_icon = os.path.basename(str(svg_path or "")).lower() == "users.svg"
         pixmap = self._load_svg_pixmap_colored(svg_path, color, 256)
-        if is_users_icon and not self._pixmap_has_visible_pixels(pixmap):
+        if not self._pixmap_has_visible_pixels(pixmap):
             pixmap = QPixmap()
         if pixmap.isNull():
-            # Fallback: rasterize first, then tint non-transparent pixels so icons remain visible.
             base_pixmap = self._load_svg_pixmap(svg_path, 256)
             if not base_pixmap.isNull():
                 pixmap = self._tint_pixmap(base_pixmap, color)
-                if is_users_icon and not self._pixmap_has_visible_pixels(pixmap):
+                if not self._pixmap_has_visible_pixels(pixmap):
                     pixmap = QPixmap()
             if pixmap.isNull() and is_users_icon:
                 pixmap = self._build_users_fallback_pixmap(color, 256)
             if pixmap.isNull():
-                # Last-resort fallback to native loading.
-                button.setIcon(QIcon(svg_path))
+                icon = QIcon(svg_path)
+                self._svg_icon_cache[cache_key] = icon
+                button.setIcon(icon)
                 button.setIconSize(size)
+                button.setProperty("navIconColor", str(color))
                 return
-        button.setIcon(QIcon(pixmap))
+        icon = QIcon(pixmap)
+        self._svg_icon_cache[cache_key] = icon
+        button.setIcon(icon)
         button.setIconSize(size)
+        button.setProperty("navIconColor", str(color))
 
     @staticmethod
     def _pixmap_has_visible_pixels(pixmap: QPixmap, min_alpha: int = 24, min_coverage: float = 0.008) -> bool:
         if pixmap.isNull():
             return False
         image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
-        width = image.width()
-        height = image.height()
+        width, height = image.width(), image.height()
         if width <= 0 or height <= 0:
             return False
-        visible = 0
-        total = width * height
-        for y in range(height):
-            for x in range(width):
-                if image.pixelColor(x, y).alpha() >= min_alpha:
-                    visible += 1
-        return (visible / float(total)) >= float(min_coverage)
+        visible = sum(
+            1 for y in range(height) for x in range(width)
+            if image.pixelColor(x, y).alpha() >= min_alpha
+        )
+        return (visible / float(width * height)) >= float(min_coverage)
 
     @staticmethod
     def _build_users_fallback_pixmap(color: str, size: int = 64) -> QPixmap:
-        """Draw a simple users glyph as a hard fallback when SVG rendering is unreliable."""
         image = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.transparent)
         painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(color))
-
-        # Main avatar
         painter.drawEllipse(int(size * 0.34), int(size * 0.17), int(size * 0.32), int(size * 0.32))
         painter.drawRoundedRect(int(size * 0.20), int(size * 0.52), int(size * 0.60), int(size * 0.28), 12, 12)
-
-        # Secondary avatar
         painter.drawEllipse(int(size * 0.10), int(size * 0.27), int(size * 0.22), int(size * 0.22))
         painter.drawRoundedRect(int(size * 0.06), int(size * 0.58), int(size * 0.28), int(size * 0.19), 8, 8)
-
         painter.end()
         return QPixmap.fromImage(image)
 
     @staticmethod
     def _tint_pixmap(source: QPixmap, color: str) -> QPixmap:
-        """Tint a source pixmap using SourceIn composition to preserve alpha shape."""
         if source.isNull():
             return QPixmap()
         tinted = QPixmap(source.size())
@@ -531,23 +688,22 @@ class EyeShieldApp(QMainWindow):
         painter.end()
         return tinted
 
+    # ── Nav active state ──────────────────────────────────────────────────────
+
     def _refresh_nav_button_icons(self, active_index: int):
-        """Recolor navigation SVG icons to match active/inactive and theme state."""
         if not hasattr(self, "nav_buttons"):
             return
-        dark = getattr(self, "_dark_mode", False)
-        active_color = "#89b4fa" if dark else "#1d5fa8"
-        inactive_color = "#a6adc8" if dark else "#495057"
-        disabled_color = "#6c7086" if dark else "#adb5bd"
-        icon_size = QSize(24, 24)
+        icon_size = QSize(20, 20)
         for btn in self.nav_buttons:
             icon_path = btn.property("navIconPath") or ""
             if not btn.isEnabled():
-                color = disabled_color
+                color = "rgba(255,255,255,0.20)"
             elif self._is_nav_button_active(btn, active_index):
-                color = active_color
+                color = self._NAV_ICON_ACTIVE
             else:
-                color = inactive_color
+                color = self._NAV_ICON_INACTIVE
+            if str(btn.property("navIconColor") or "") == str(color):
+                continue
             self._set_button_svg_icon(btn, icon_path, color, icon_size)
 
     def _default_nav_key_for_page(self, index: int) -> str:
@@ -572,106 +728,86 @@ class EyeShieldApp(QMainWindow):
 
     @staticmethod
     def _apply_title_label_font(label):
-        title_font = QFont("Segoe UI Variable", 14)
-        title_font.setBold(True)
-        title_font.setUnderline(False)
-        label.setFont(title_font)
+        f = QFont("Segoe UI Variable", 14)
+        f.setBold(True)
+        f.setUnderline(False)
+        label.setFont(f)
 
     @staticmethod
     def _make_nav_font(size: int) -> QFont:
-        font = QFont("Segoe UI Variable", size)
-        font.setUnderline(False)
-        font.setStrikeOut(False)
-        return font
+        f = QFont("Segoe UI Variable", size)
+        f.setUnderline(False)
+        f.setStrikeOut(False)
+        return f
 
     def _update_logout_icon(self):
-        """Render the logout SVG icon using white for the red button."""
         if hasattr(self, "logout_btn"):
-            self._set_button_svg_icon(self.logout_btn, getattr(self, "_logout_icon_path", ""), "#ffffff", QSize(20, 20))
+            self._set_button_svg_icon(
+                self.logout_btn,
+                getattr(self, "_logout_icon_path", ""),
+                "#ff8080",
+                QSize(16, 16),
+            )
 
     def _apply_nav_theme(self, dark: bool):
-        """Explicitly re-apply nav bar styles so sizes never change between themes."""
+        """Re-apply sidebar styles; called on every theme switch."""
+        if not (hasattr(self, "nav_bar") and
+                getattr(self.nav_bar, "objectName", lambda: "")() == "appSidebar"):
+            return
+
+        nav_bar = self.nav_bar
+        nav_bar.setFixedWidth(self._SIDEBAR_W)
+
         if dark:
-            nav_bg       = "background: #181825; border-bottom: 1px solid #45475a;"
-            title_style  = "color: #89b4fa; font-size: 20px; font-weight: 700; text-decoration: none;"
-            user_style   = (
-                "color: #cdd6f4; background: #313244; border: 1px solid #45475a;"
-                "border-radius: 12px; font-size: 12px; font-weight: 600;"
-                "padding: 2px 8px; margin-left: 12px; margin-right: 8px;"
-            )
-            inactive_lbl = "font-size: 10px; color: #a6adc8; margin-top: 0px; text-decoration: none; border: none;"
+            top, btm = "#06111e", "#091e38"
         else:
-            nav_bg       = "background: #f8f9fa; border-bottom: 1px solid #dee2e6;"
-            title_style  = "color: #007bff; font-size: 20px; font-weight: 700; text-decoration: none;"
-            user_style   = (
-                "color: #007bff; background: #e8f0fe; border: 1px solid #b8d0f7;"
-                "border-radius: 12px; font-size: 12px; font-weight: 600;"
-                "padding: 2px 8px; margin-left: 12px; margin-right: 8px;"
-            )
-            inactive_lbl = "font-size: 10px; color: #495057; margin-top: 0px; text-decoration: none; border: none;"
+            top, btm = self._SIDEBAR_BG_TOP, self._SIDEBAR_BG_BTM
 
-        if hasattr(self, "nav_bar"):
-            self.nav_bar.setFixedHeight(78)
-            self.nav_bar.setStyleSheet(f"QWidget#navBar {{ {nav_bg} }}")
-        if hasattr(self, "title_icon_container"):
-            self.title_icon_container.setFixedSize(165, 70)
-            self.title_icon_container.setStyleSheet("background: transparent;")
+        nav_bar.setStyleSheet(
+            f"QWidget#appSidebar{{"
+            f"background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 {top},stop:1 {btm});"
+            f"border-right: 1px solid rgba(255,255,255,0.05);"
+            f"}}"
+            f"QLabel{{background:transparent;border:none;}}"
+        )
+
         if hasattr(self, "title_label"):
-            self.title_label.setFixedWidth(118)
-            self.title_label.setStyleSheet(title_style)
+            self.title_label.setStyleSheet(
+                "color:#ffffff;font-size:17px;font-weight:800;letter-spacing:0.4px;"
+            )
             self._apply_title_label_font(self.title_label)
-        if hasattr(self, "nav_icon_label"):
-            self.nav_icon_label.setFixedSize(38, 38)
-            self.nav_icon_label.setAlignment(Qt.AlignCenter)
-            self.nav_icon_label.setStyleSheet("background: transparent;")
-        if hasattr(self, "user_info_label"):
-            self.user_info_label.setStyleSheet(user_style)
 
-        # Transparent container so nav-bar background always shows through
-        # Also re-assert fixed sizes so layout cannot shift
-        if hasattr(self, "nav_widgets"):
-            for w in self.nav_widgets:
-                w.setFixedSize(60, 66)
-                w.setStyleSheet("QWidget { background: transparent; }")
-
-        # Re-apply button QSS so nav buttons stay visually consistent across theme switches
-        btn_font = self._make_nav_font(14)
         if hasattr(self, "nav_buttons"):
+            icon_size = QSize(20, 20)
             for btn in self.nav_buttons:
-                btn.setFixedSize(50, 40)
-                if btn.isEnabled():
-                    btn.setStyleSheet(self.get_nav_button_style(icon_only=True))
-                    btn.setFont(btn_font)
+                btn.setFixedHeight(44)
+                btn.setIconSize(icon_size)
+                btn.setFont(self._make_nav_font(10))
+                btn.setStyleSheet(self._nav_btn_stylesheet())
+
             active_index = self.pages.currentIndex() if hasattr(self, "pages") else 0
-            self._refresh_nav_button_icons(active_index)
+            self._set_active_nav(active_index)
+
         self._update_logout_icon()
 
-        # Re-apply label QSS + fresh QFont
-        lbl_font = self._make_nav_font(8)
-        if hasattr(self, "nav_labels"):
-            for lbl in self.nav_labels:
-                lbl.setStyleSheet(inactive_lbl)
-                lbl.setFont(lbl_font)
-
     def _update_nav_icon(self, dark: bool):
-        """Re-render the nav bar icon to match the current theme."""
-        if not hasattr(self, "nav_icon_label"):
+        if not hasattr(self, "_brand_icon_label"):
             return
-        color = "#cdd6f4" if dark else "#007bff"
-        pixmap = QPixmap()
+        color = "#93c5fd" if dark else "#60a5fa"
         logo_path = getattr(self, "_brand_logo_path", "")
+        icons_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+        icon_path = os.path.join(icons_dir, "eyeshield_icon.svg")
+        pix = QPixmap()
         if logo_path and logo_path.lower().endswith(".svg"):
-            pixmap = self._load_svg_pixmap_colored(logo_path, color, 256)
-        elif logo_path:
-            pixmap = QPixmap(logo_path)
-        elif hasattr(self, "_icon_path"):
-            pixmap = self._load_svg_pixmap_colored(self._icon_path, color, 256)
+            pix = self._load_svg_pixmap_colored(logo_path, color, 64)
+        elif os.path.exists(icon_path):
+            pix = self._load_svg_pixmap_colored(icon_path, color, 64)
+        if not pix.isNull():
+            self._brand_icon_label.setPixmap(
+                pix.scaled(QSize(28, 28), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
 
-        pixmap = pixmap.scaled(QSize(38, 38), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        if not pixmap.isNull():
-            self.nav_icon_label.setPixmap(pixmap)
-
-    # Sidebar removed; navigation is now in the top bar
+    # ── Navigation locking ────────────────────────────────────────────────────
 
     def _is_screening_navigation_locked(self) -> bool:
         return bool(
@@ -694,8 +830,7 @@ class EyeShieldApp(QMainWindow):
         if self._is_screening_navigation_locked() and index != 1:
             if show_denied_message:
                 QMessageBox.information(
-                    self,
-                    "Screening In Progress",
+                    self, "Screening In Progress",
                     "Please wait for the image analysis to finish before changing tabs.",
                 )
             if hasattr(self, "pages"):
@@ -703,30 +838,6 @@ class EyeShieldApp(QMainWindow):
                 self._active_nav_key = self._default_nav_key_for_page(1)
                 self._set_active_nav(1)
             return
-        if index == 2 and hasattr(self, "camera_page") and hasattr(self, "screening_page"):
-            has_context = True
-            if hasattr(self.camera_page, "has_active_screening_session"):
-                has_context = bool(self.camera_page.has_active_screening_session())
-            elif hasattr(self.camera_page, "has_required_capture_context"):
-                has_context = bool(self.camera_page.has_required_capture_context())
-            if not has_context:
-                response = QMessageBox.question(
-                    self,
-                    "Screening Context Required",
-                    "No patient screening context was found for Camera capture.\n\n"
-                    "Go to Screening first to select patient and eye?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes,
-                )
-                if response == QMessageBox.StandardButton.Yes:
-                    self._active_nav_key = self._default_nav_key_for_page(1)
-                    self.pages.setCurrentIndex(1)
-                    self._set_active_nav(1)
-                else:
-                    current_index = int(self.pages.currentIndex()) if hasattr(self, "pages") else 0
-                    self._active_nav_key = self._default_nav_key_for_page(current_index)
-                    self._set_active_nav(current_index)
-                return
         if not self._is_page_allowed(index):
             if show_denied_message:
                 QMessageBox.warning(self, "Access Denied", "Your account role cannot access this page.")
@@ -737,9 +848,13 @@ class EyeShieldApp(QMainWindow):
             return
         self._active_nav_key = str(nav_key or self._default_nav_key_for_page(index) or "")
         self.pages.setCurrentIndex(index)
-        # Force immediate refresh so same-index nav targets (Users/Activity Log)
-        # never leave a stale active background when index does not change.
         self._set_active_nav(self.pages.currentIndex())
+        # If user clicks the active page again, currentChanged will not fire.
+        # Force-refresh key data pages so the click always produces visible content.
+        if index == 3 and hasattr(self, "reports_page") and hasattr(self.reports_page, "refresh_report"):
+            QTimer.singleShot(0, self.reports_page.refresh_report)
+        if index == 4 and hasattr(self, "activity_log_page") and hasattr(self.activity_log_page, "load_activity_log"):
+            QTimer.singleShot(0, self.activity_log_page.load_activity_log)
         QTimer.singleShot(0, lambda: self._set_active_nav(self.pages.currentIndex()))
 
     def _global_save_shortcut(self):
@@ -765,130 +880,39 @@ class EyeShieldApp(QMainWindow):
             return
         self._active_nav_key = self._default_nav_key_for_page(index)
         self._set_active_nav(index)
-        if index == 2:
-            self.camera_page.enter_page()
-        else:
-            self.camera_page.leave_page()
+        now = time.monotonic()
         if index == 3:
-            self.reports_page.refresh_report()
+            needs_initial_report_load = not bool(getattr(self.reports_page, "_all_result_rows", []))
+            if needs_initial_report_load or (now - self._last_reports_refresh_at >= 1.0):
+                self._last_reports_refresh_at = now
+                QTimer.singleShot(120, self.reports_page.refresh_report)
         if index == 0:
-            self.refresh_dashboard()
-        if index == 7 and hasattr(self, "activity_log_page") and hasattr(self.activity_log_page, "load_activity_log"):
-            self.activity_log_page.load_activity_log()
+            if now - self._last_dashboard_refresh_at >= 1.0:
+                QTimer.singleShot(120, self.refresh_dashboard)
+        if index == 4 and hasattr(self, "activity_log_page") and hasattr(self.activity_log_page, "load_activity_log"):
+            if now - self._last_activity_log_refresh_at >= 1.0:
+                self._last_activity_log_refresh_at = now
+                QTimer.singleShot(120, self.activity_log_page.load_activity_log)
 
     def _set_active_nav(self, index: int):
-        """Highlight the active navigation button and dim the rest."""
         if not hasattr(self, "nav_buttons"):
             return
-        dark = getattr(self, '_dark_mode', False)
-        if dark:
-            active_btn_style = """
-                QPushButton {
-                    color: #89b4fa;
-                    text-align: center;
-                    padding: 4px 0px;
-                    border: 1px solid transparent;
-                    border-radius: 8px;
-                    font-size: 22px;
-                    font-weight: 500;
-                    background: #313244;
-                    text-decoration: none;
-                }
-                QPushButton:hover { background: #3a3a4f; }
-                QPushButton:focus { outline: none; border: 1px solid transparent; }
-            """
-            inactive_btn_style = """
-                QPushButton {
-                    color: #a6adc8;
-                    text-align: center;
-                    padding: 4px 0px;
-                    border: 1px solid transparent;
-                    border-radius: 8px;
-                    font-size: 22px;
-                    font-weight: 500;
-                    background: transparent;
-                    text-decoration: none;
-                }
-                QPushButton:hover {
-                    background: #45475a;
-                    color: #89b4fa;
-                }
-                QPushButton:focus { outline: none; border: 1px solid transparent; }
-            """
-            active_label = "font-size: 10px; color: #89b4fa; margin-top: 0px; text-decoration: none; border: none;"
-            inactive_label = "font-size: 10px; color: #a6adc8; margin-top: 0px; text-decoration: none; border: none;"
-            disabled_label = "font-size: 10px; color: #6c7086; margin-top: 0px; text-decoration: none; border: none;"
-        else:
-            active_btn_style = """
-                QPushButton {
-                    color: #1d5fa8;
-                    text-align: center;
-                    padding: 4px 0px;
-                    border: 1px solid #a7ccf7;
-                    border-radius: 8px;
-                    font-size: 22px;
-                    font-weight: 600;
-                    background: #deefff;
-                    text-decoration: none;
-                }
-                QPushButton:hover { background: #d1e8ff; }
-                QPushButton:pressed { background: #c1dcfb; }
-                QPushButton:focus { outline: none; border: 1px solid #86bbea; }
-            """
-            screening_active_btn_style = """
-                QPushButton {
-                    color: #14528f;
-                    text-align: center;
-                    padding: 4px 0px;
-                    border: 1px solid #8cbfeb;
-                    border-radius: 8px;
-                    font-size: 22px;
-                    font-weight: 700;
-                    background: #d4eaff;
-                    text-decoration: none;
-                }
-                QPushButton:hover { background: #c8e3ff; }
-                QPushButton:pressed { background: #b9d8fa; }
-                QPushButton:focus { outline: none; border: 1px solid #7cb1e4; }
-            """
-            inactive_btn_style = self.get_nav_button_style(icon_only=True)
-            active_label = "font-size: 10px; color: #1d5fa8; font-weight: 700; margin-top: 0px; text-decoration: none; border: none;"
-            screening_active_label = "font-size: 10px; color: #14528f; font-weight: 800; margin-top: 0px; text-decoration: none; border: none;"
-            inactive_label = "font-size: 10px; color: #495057; margin-top: 0px; text-decoration: none; border: none;"
-            disabled_label = "font-size: 10px; color: #adb5bd; margin-top: 0px; text-decoration: none; border: none;"
-
         for btn in self.nav_buttons:
             is_active = self._is_nav_button_active(btn, index)
-            is_screening_btn = str(btn.property("navKey") or "") == "Screening"
-            if is_active:
-                if not dark and is_screening_btn and index == 1:
-                    btn.setStyleSheet(screening_active_btn_style)
-                else:
-                    btn.setStyleSheet(active_btn_style)
-            elif not btn.isEnabled():
-                btn.setStyleSheet(inactive_btn_style)
-            elif btn.isEnabled():
-                btn.setStyleSheet(inactive_btn_style)
-        for i, label in enumerate(self.nav_labels):
-            if self._is_nav_button_active(self.nav_buttons[i], index):
-                is_screening_label = str(self.nav_buttons[i].property("navKey") or "") == "Screening"
-                if not dark and is_screening_label and index == 1:
-                    label.setStyleSheet(screening_active_label)
-                else:
-                    label.setStyleSheet(active_label)
-            elif not self.nav_buttons[i].isEnabled():
-                label.setStyleSheet(disabled_label)
-            elif self.nav_buttons[i].isEnabled():
-                label.setStyleSheet(inactive_label)
+            was_active = bool(btn.property("active"))
+            if was_active == bool(is_active):
+                continue
+            btn.setProperty("active", bool(is_active))
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
         self._refresh_nav_button_icons(index)
 
+    # ── Theme / language ──────────────────────────────────────────────────────
+
     def apply_theme(self, theme: str):
-        """Apply theme across the entire application while preserving tab layout metrics."""
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
 
-        # Widgets that belong to the nav bar — we manage these explicitly in
-        # _apply_nav_theme so they must never be wiped or blindly restored.
         nav_protected = set()
         if hasattr(self, "nav_bar"):
             nav_protected.add(id(self.nav_bar))
@@ -896,54 +920,30 @@ class EyeShieldApp(QMainWindow):
                 nav_protected.add(id(w))
 
         def _strip_color_rules(stylesheet: str) -> str:
-            # Keep spacing/size/weight rules intact and strip only color paints
-            # so dark mode can recolor without changing layout/text metrics.
-            color_props = {
-                "color",
-                "background",
-                "background-color",
-                "selection-background-color",
-                "alternate-background-color",
-                "gridline-color",
-                "border-color",
-            }
-            border_like_props = {
-                "border",
-                "border-top",
-                "border-right",
-                "border-bottom",
-                "border-left",
-                "outline",
-            }
+            color_props = {"color","background","background-color","selection-background-color",
+                           "alternate-background-color","gridline-color","border-color"}
+            border_like_props = {"border","border-top","border-right","border-bottom","border-left","outline"}
             color_token_pattern = re.compile(
-                r"(#(?:[0-9a-fA-F]{3,8})\\b|rgba?\([^\)]*\)|hsla?\([^\)]*\))"
+                r"(#(?:[0-9a-fA-F]{3,8})\b|rgba?\([^\)]*\)|hsla?\([^\)]*\))"
             )
-
             def _rewrite_declaration(match: re.Match) -> str:
-                prop = match.group("prop")
-                value = match.group("value")
+                prop, value = match.group("prop"), match.group("value")
                 prop_lower = prop.lower()
                 if prop_lower in color_props:
                     return ""
                 if prop_lower in border_like_props:
                     if color_token_pattern.search(value):
-                        stripped_value = color_token_pattern.sub("", value)
-                        stripped_value = re.sub(r"\s+", " ", stripped_value).strip()
-                        if not stripped_value:
-                            return ""
-                        return f"{prop}: {stripped_value};"
+                        stripped_value = re.sub(r"\s+", " ", color_token_pattern.sub("", value)).strip()
+                        return "" if not stripped_value else f"{prop}: {stripped_value};"
                 return match.group(0)
-
-            decl_pattern = re.compile(
-                r"(?P<prop>[a-zA-Z\-]+)\s*:\s*(?P<value>[^;{}]+)\s*;"
+            return re.compile(r"(?P<prop>[a-zA-Z\-]+)\s*:\s*(?P<value>[^;{}]+)\s*;").sub(
+                _rewrite_declaration, stylesheet
             )
-            return decl_pattern.sub(_rewrite_declaration, stylesheet)
 
         if theme == "Dark":
             if self._dark_mode:
                 return
             self._dark_mode = True
-            # Lock nav sizes BEFORE the global stylesheet can affect them
             self._apply_nav_theme(True)
             self._saved_styles = {}
             for widget in self.findChildren(QWidget):
@@ -953,46 +953,36 @@ class EyeShieldApp(QMainWindow):
                     self._saved_styles[id(widget)] = (widget, ss)
                     widget.setStyleSheet(_strip_color_rules(ss))
             app.setStyleSheet(DARK_STYLESHEET)
-            # Re-apply after stylesheet to ensure our values win
             self._apply_nav_theme(True)
         else:
             if not self._dark_mode:
                 return
             self._dark_mode = False
-            # Lock nav sizes BEFORE clearing global stylesheet
             self._apply_nav_theme(False)
             app.setStyleSheet("")
             for _, (widget, ss) in self._saved_styles.items():
                 with contextlib.suppress(RuntimeError):
                     widget.setStyleSheet(ss)
             self._saved_styles = {}
-            # Re-apply after restore
             self._apply_nav_theme(False)
 
-        # Force layout recalculation on nav bar
         if hasattr(self, "nav_bar"):
             self.nav_bar.updateGeometry()
             self.nav_bar.update()
 
-        current_idx = self.pages.currentIndex()
-        self._set_active_nav(current_idx)
+        self._set_active_nav(self.pages.currentIndex())
 
         if hasattr(self, "screening_page") and hasattr(self.screening_page, "apply_theme"):
             self.screening_page.apply_theme(theme)
 
-        # Update nav icon for the new theme
         self._update_nav_icon(self._dark_mode)
-
-        # Refresh entire dashboard with correct theme colors
         self.refresh_dashboard()
 
     def apply_language(self, language: str):
-        """Apply the selected language to all tabs and the navigation bar."""
         from translations import get_pack
         self._current_language = language
         pack = get_pack(language)
 
-        # Navigation bar labels
         _nav_key_map = {
             "Dashboard": "nav_dashboard",
             "Screening": "nav_screening",
@@ -1009,42 +999,30 @@ class EyeShieldApp(QMainWindow):
                 if key:
                     label.setText(pack.get(key, orig))
 
-        # Dashboard welcome label
         if hasattr(self, "welcome_label"):
             self.welcome_label.setText(f"{pack['dash_welcome']}, {self.display_name}")
 
-        # Dashboard section headers
         if hasattr(self, "_dash_severity_title_lbl"):
             self._dash_severity_title_lbl.setText("SCREENED PATIENTS")
         if hasattr(self, "_dash_recent_title_lbl"):
             self._dash_recent_title_lbl.setText(pack.get("dash_recent", "RECENT SCREENINGS"))
 
-        # KPI card title labels (stored with objectName pattern)
-        kpi_map = {
-            "kpiTotal": "dash_kpi_total",
-        }
+        kpi_map = {"kpiTotal": "dash_kpi_total"}
         for obj_name, key in kpi_map.items():
             title_w = self.findChild(QLabel, f"{obj_name}_title")
             if title_w:
                 title_w.setText(pack[key])
 
-        # Propagate to all sub-pages
-        for page in (
-            self.camera_page,
-            self.screening_page,
-            self.reports_page,
-            self.users_page,
-            self.activity_log_page,
-            self.help_support_page,
-        ):
+        for page in (self.screening_page, self.reports_page, self.users_page,
+                     self.activity_log_page, self.help_support_page):
             if hasattr(page, "apply_language"):
                 page.apply_language(language)
 
-        # Refresh dashboard dynamic content
         self.refresh_dashboard()
 
+    # ── Window events ─────────────────────────────────────────────────────────
+
     def closeEvent(self, event):
-        """Ask for confirmation before closing the application."""
         if getattr(self, '_logging_out', False):
             event.accept()
             return
@@ -1052,41 +1030,27 @@ class EyeShieldApp(QMainWindow):
             event.ignore()
             return
         reply = QMessageBox.question(
-            self,
-            "Quit EyeShield",
-            "Are you sure you want to quit EyeShield?",
+            self, "Quit EyeShield", "Are you sure you want to quit EyeShield?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            event.accept()
-        else:
-            event.ignore()
+        event.accept() if reply == QMessageBox.StandardButton.Yes else event.ignore()
 
     def handle_logout(self):
         if self._confirm_quit_during_screening():
             return
-
         reply = QMessageBox.question(
-            self,
-            "Logout",
-            "Are you sure you want to log out?",
+            self, "Logout", "Are you sure you want to log out?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-
         try:
             import user_store
-            user_store.log_activity_event(
-                self.username,
-                "LOGOUT",
-                metadata={"source": "manual"},
-                action_text="Logout",
-            )
+            user_store.log_activity_event(self.username, "LOGOUT",
+                                          metadata={"source": "manual"}, action_text="Logout")
         except Exception:
             pass
-
         from login import LoginWindow
         self._logging_out = True
         self.login = LoginWindow()
@@ -1096,23 +1060,17 @@ class EyeShieldApp(QMainWindow):
     def _is_screening_ongoing_context(self) -> bool:
         if not hasattr(self, "screening_page"):
             return False
-
         page = self.screening_page
         on_screening_tab = bool(hasattr(self, "pages") and self.pages.currentIndex() == 1)
-        on_results_screen = bool(
-            on_screening_tab
-            and hasattr(page, "stacked_widget")
-            and page.stacked_widget.currentIndex() == 1
-        )
+        on_results_screen = bool(on_screening_tab and hasattr(page, "stacked_widget")
+                                 and page.stacked_widget.currentIndex() == 1)
         has_unsaved = bool(hasattr(page, "has_unsaved_result") and page.has_unsaved_result())
         analysis_busy = bool(hasattr(page, "is_navigation_locked") and page.is_navigation_locked())
         return bool(on_results_screen or has_unsaved or analysis_busy)
 
     def _confirm_quit_during_screening(self) -> bool:
-        """Return True when quit/logout should be aborted."""
         if not self._is_screening_ongoing_context():
             return False
-
         box = QMessageBox(self)
         box.setWindowTitle("Screening Ongoing")
         box.setIcon(QMessageBox.Icon.Warning)
@@ -1121,14 +1079,14 @@ class EyeShieldApp(QMainWindow):
         yes_btn = box.addButton("Yes", QMessageBox.ButtonRole.DestructiveRole)
         box.setDefaultButton(no_btn)
         box.exec()
-
         if box.clickedButton() == yes_btn:
             return False
-
         if hasattr(self, "pages"):
             self.pages.setCurrentIndex(1)
             self._set_active_nav(1)
         return True
+
+    # ── Inactivity timeout ────────────────────────────────────────────────────
 
     def _setup_inactivity_timeout(self):
         self._inactivity_timer = QTimer(self)
@@ -1141,12 +1099,16 @@ class EyeShieldApp(QMainWindow):
 
         runtime_enabled = bool(self.settings_page.auto_logout_check.isChecked())
         runtime_minutes = int(self.settings_page.timeout_spin.value())
-        runtime_warning_seconds = int(getattr(self.settings_page, "warning_spin", None).value()) if hasattr(self.settings_page, "warning_spin") else 30
+        runtime_warning_seconds = (
+            int(self.settings_page.warning_spin.value())
+            if hasattr(self.settings_page, "warning_spin") else 30
+        )
         if hasattr(self.settings_page, "get_runtime_inactivity_settings"):
-            runtime_enabled, runtime_minutes, runtime_warning_seconds = self.settings_page.get_runtime_inactivity_settings()
+            runtime_enabled, runtime_minutes, runtime_warning_seconds = (
+                self.settings_page.get_runtime_inactivity_settings()
+            )
 
         self.apply_inactivity_settings(runtime_enabled, runtime_minutes, runtime_warning_seconds)
-
         app = QGuiApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -1162,9 +1124,7 @@ class EyeShieldApp(QMainWindow):
             self._inactivity_timer.stop()
 
     def _restart_inactivity_timer(self):
-        if not hasattr(self, "_inactivity_timer"):
-            return
-        if not self._inactivity_timeout_enabled:
+        if not hasattr(self, "_inactivity_timer") or not self._inactivity_timeout_enabled:
             return
         self._inactivity_timer.start(self._inactivity_timeout_minutes * 60 * 1000)
 
@@ -1179,7 +1139,6 @@ class EyeShieldApp(QMainWindow):
     def _show_inactivity_warning(self):
         if self._inactivity_warning_active:
             return
-
         self._inactivity_warning_active = True
         self._inactivity_warning_remaining_sec = max(10, int(self._inactivity_warning_seconds or 30))
 
@@ -1188,81 +1147,40 @@ class EyeShieldApp(QMainWindow):
         box.setWindowTitle("Inactivity Warning")
         box.setModal(False)
         box.setWindowModality(Qt.WindowModality.NonModal)
-        box.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Tool
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
+        box.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
         box.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        box.setStyleSheet(
-            """
-            QDialog#inactivityWarningToast {
-                background: #fff4e5;
-                border: 1px solid #f59e0b;
-                border-radius: 12px;
-            }
-            QLabel#warningTitle {
-                color: #92400e;
-                font-size: 14px;
-                font-weight: 700;
-            }
-            QLabel#warningBody {
-                color: #7c2d12;
-                font-size: 12px;
-                font-weight: 500;
-            }
-            QPushButton#warningStayBtn {
-                background: #ffffff;
-                border: 1px solid #f59e0b;
-                border-radius: 8px;
-                color: #92400e;
-                padding: 6px 12px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QPushButton#warningStayBtn:hover {
-                background: #fff7ed;
-            }
-            QPushButton#warningLogoutBtn {
-                background: #f59e0b;
-                border: 1px solid #d97706;
-                border-radius: 8px;
-                color: #ffffff;
-                padding: 6px 12px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QPushButton#warningLogoutBtn:hover {
-                background: #d97706;
-            }
-            """
-        )
-
+        box.setStyleSheet("""
+            QDialog#inactivityWarningToast{background:#fff4e5;border:1px solid #f59e0b;border-radius:12px;}
+            QLabel#warningTitle{color:#92400e;font-size:14px;font-weight:700;}
+            QLabel#warningBody{color:#7c2d12;font-size:12px;font-weight:500;}
+            QPushButton#warningStayBtn{background:#ffffff;border:1px solid #f59e0b;border-radius:8px;
+                color:#92400e;padding:6px 12px;font-size:12px;font-weight:600;}
+            QPushButton#warningStayBtn:hover{background:#fff7ed;}
+            QPushButton#warningLogoutBtn{background:#f59e0b;border:1px solid #d97706;border-radius:8px;
+                color:#ffffff;padding:6px 12px;font-size:12px;font-weight:600;}
+            QPushButton#warningLogoutBtn:hover{background:#d97706;}
+        """)
         layout = QVBoxLayout(box)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
-
         title = QLabel("Inactivity warning")
         title.setObjectName("warningTitle")
         layout.addWidget(title)
-
         self._inactivity_warning_text_label = QLabel()
         self._inactivity_warning_text_label.setObjectName("warningBody")
         self._inactivity_warning_text_label.setWordWrap(True)
         layout.addWidget(self._inactivity_warning_text_label)
-
         actions = QHBoxLayout()
         actions.addStretch()
         stay_btn = QPushButton("Stay Signed In")
         stay_btn.setObjectName("warningStayBtn")
-        logout_btn = QPushButton("Log Out Now")
-        logout_btn.setObjectName("warningLogoutBtn")
+        logout_btn_w = QPushButton("Log Out Now")
+        logout_btn_w.setObjectName("warningLogoutBtn")
         actions.addWidget(stay_btn)
-        actions.addWidget(logout_btn)
+        actions.addWidget(logout_btn_w)
         layout.addLayout(actions)
-
         stay_btn.clicked.connect(self._continue_session_after_warning)
-        logout_btn.clicked.connect(self._trigger_auto_logout)
+        logout_btn_w.clicked.connect(self._trigger_auto_logout)
         box.destroyed.connect(lambda *_: self._clear_warning_dialog_reference())
 
         self._inactivity_warning_dialog = box
@@ -1306,8 +1224,7 @@ class EyeShieldApp(QMainWindow):
         mins = self._inactivity_warning_remaining_sec // 60
         secs = self._inactivity_warning_remaining_sec % 60
         self._inactivity_warning_text_label.setText(
-            "No activity detected in your session. "
-            f"Automatic logout in {mins:02d}:{secs:02d}."
+            f"No activity detected. Automatic logout in {mins:02d}:{secs:02d}."
         )
 
     def _tick_inactivity_warning(self):
@@ -1315,7 +1232,6 @@ class EyeShieldApp(QMainWindow):
             if self._inactivity_warning_timer is not None:
                 self._inactivity_warning_timer.stop()
             return
-
         self._inactivity_warning_remaining_sec = max(0, self._inactivity_warning_remaining_sec - 1)
         self._refresh_inactivity_warning_text()
         if self._inactivity_warning_remaining_sec in {20, 10, 5, 4, 3, 2, 1}:
@@ -1340,18 +1256,13 @@ class EyeShieldApp(QMainWindow):
 
     def _trigger_auto_logout(self):
         self._dismiss_inactivity_warning(restart_timer=False)
-
         try:
             import user_store
-            user_store.log_activity_event(
-                self.username,
-                "LOGOUT",
-                metadata={"source": "inactivity_timeout"},
-                action_text="Logout (Inactivity Timeout)",
-            )
+            user_store.log_activity_event(self.username, "LOGOUT",
+                                          metadata={"source": "inactivity_timeout"},
+                                          action_text="Logout (Inactivity Timeout)")
         except Exception:
             pass
-
         self._logging_out = True
         from login import LoginWindow
         self.login = LoginWindow()
@@ -1362,20 +1273,14 @@ class EyeShieldApp(QMainWindow):
         if hasattr(self, "_inactivity_timer") and self._inactivity_timeout_enabled:
             if self._inactivity_warning_active:
                 return super().eventFilter(watched, event)
-            event_type = event.type()
             reset_types = {
-                QEvent.Type.MouseButtonPress,
-                QEvent.Type.MouseButtonRelease,
-                QEvent.Type.MouseButtonDblClick,
-                QEvent.Type.MouseMove,
-                QEvent.Type.KeyPress,
-                QEvent.Type.KeyRelease,
-                QEvent.Type.Wheel,
-                QEvent.Type.TouchBegin,
-                QEvent.Type.TouchUpdate,
-                QEvent.Type.TouchEnd,
+                QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
+                QEvent.Type.MouseButtonDblClick, QEvent.Type.MouseMove,
+                QEvent.Type.KeyPress, QEvent.Type.KeyRelease,
+                QEvent.Type.Wheel, QEvent.Type.TouchBegin,
+                QEvent.Type.TouchUpdate, QEvent.Type.TouchEnd,
             }
-            if event_type in reset_types and self.isVisible():
+            if event.type() in reset_types and self.isVisible():
                 self._restart_inactivity_timer()
         return super().eventFilter(watched, event)
 
@@ -1387,13 +1292,15 @@ class EyeShieldApp(QMainWindow):
         super().moveEvent(event)
         self._position_inactivity_warning()
 
+    # ── Dashboard clock ───────────────────────────────────────────────────────
+
     @staticmethod
     def _format_dashboard_datetime(now: datetime) -> str:
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         now = now.astimezone(EyeShieldApp._ph_now().tzinfo)
         hour = now.strftime("%I").lstrip("0") or "0"
-        return f"{now.strftime('%A , %B %d, %Y  -  ')}{hour}:{now.strftime('%M')} {now.strftime('%p').lower()}"
+        return f"{now.strftime('%A, %B %d, %Y')}  ·  {hour}:{now.strftime('%M')} {now.strftime('%p').lower()}"
 
     @staticmethod
     def _ph_now() -> datetime:
@@ -1415,307 +1322,377 @@ class EyeShieldApp(QMainWindow):
         self._dashboard_clock_timer.start()
         self._update_dashboard_datetime_label()
 
+    # ── Dashboard page ────────────────────────────────────────────────────────
+
     def create_dashboard_page(self):
-        """Create the dashboard page layout."""
+        """Build the modernised dashboard layout."""
         page = QWidget()
         page.setObjectName("dashboardPage")
-        page.setStyleSheet("QWidget#dashboardPage { background: #f8f9fa; }")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page.setStyleSheet("QWidget#dashboardPage { background: #f0f4f8; }")
 
-        # Hero header
-        hero_card = QWidget()
-        hero_card.setObjectName("heroCard")
-        hero_card.setMinimumHeight(112)
-        hero_layout = QHBoxLayout(hero_card)
-        hero_layout.setContentsMargins(20, 18, 20, 18)
-        hero_layout.setSpacing(12)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(28, 24, 28, 24)
+        outer.setSpacing(20)
 
-        self.welcome_label = QLabel(f"Welcome back, {self.display_name}")
+        # ── Hero card ─────────────────────────────────────────────────────────
+        hero = QWidget()
+        hero.setObjectName("heroCard")
+        hero.setMinimumHeight(120)
+        hero_h = QHBoxLayout(hero)
+        hero_h.setContentsMargins(28, 22, 28, 22)
+        hero_h.setSpacing(0)
+
+        # Left stack: greeting / role / date
+        left_stack = QVBoxLayout()
+        left_stack.setSpacing(3)
+        left_stack.setContentsMargins(0, 0, 0, 0)
+
+        self.welcome_label = QLabel(f"Welcome back, {self.display_name}!")
         self.welcome_label.setObjectName("welcomeGreeting")
         self.welcome_label.setStyleSheet(
-            "color: #212529; font-size: 25px; font-weight: 700; background: transparent;"
+            "color: #0f172a; font-size: 26px; font-weight: 800;"
+            "font-family: 'Segoe UI Variable','Segoe UI',sans-serif; background: transparent;"
         )
 
-        self.welcome_role_label = QLabel(f"{self.display_title.capitalize()}")
+        self.welcome_role_label = QLabel(self.display_title.capitalize())
         self.welcome_role_label.setObjectName("welcomeRole")
         self.welcome_role_label.setStyleSheet(
-            "color: #6c757d; font-size: 13px; font-weight: 600; background: transparent;"
+            "color: #64748b; font-size: 13px; font-weight: 600; background: transparent;"
         )
-
 
         self.dashboard_date_label = QLabel("")
         self.dashboard_date_label.setObjectName("dashDate")
-        self.dashboard_date_label.setAlignment(Qt.AlignCenter)
         self.dashboard_date_label.setStyleSheet(
-            "color: #0f6cbd; font-size: 13px; font-weight: 700; background: transparent;"
+            "color: #3b82f6; font-size: 12px; font-weight: 600; background: transparent;"
         )
-        self.dashboard_date_label.setMinimumWidth(250)
 
-        welcome_row = QHBoxLayout()
-        welcome_row.setSpacing(8)
-        left_col = QVBoxLayout()
-        left_col.setSpacing(4)
-        left_col.addWidget(self.welcome_label)
-        left_col.addWidget(self.welcome_role_label)
-        left_col.addStretch(1)
-        welcome_row.addLayout(left_col)
-        welcome_row.addStretch()
-        welcome_row.addWidget(self.dashboard_date_label, 0, Qt.AlignVCenter)
-        hero_layout.addLayout(welcome_row)
-        layout.addWidget(hero_card)
+        left_stack.addWidget(self.welcome_label)
+        left_stack.addWidget(self.welcome_role_label)
+        left_stack.addSpacing(4)
+        left_stack.addWidget(self.dashboard_date_label)
+        left_stack.addStretch()
 
-        # Top metrics row
+        # Right: circular avatar
+        initials = ""
+        parts = (self.display_name or self.username or "").strip().split()
+        if len(parts) >= 2:
+            initials = (parts[0][0] + parts[-1][0]).upper()
+        elif parts:
+            initials = parts[0][:2].upper()
+        else:
+            initials = "U"
+
+        avatar_size = 56
+        avatar_lbl = QLabel()
+        avatar_lbl.setObjectName("heroAvatar")
+        avatar_lbl.setFixedSize(avatar_size, avatar_size)
+        avatar_lbl.setAlignment(Qt.AlignCenter)
+        avatar_lbl.setToolTip(self.display_name or self.username)
+        avatar_pix = self._make_circle_avatar_pixmap(avatar_size * 2, initials, "#3b82f6")
+        avatar_lbl.setPixmap(
+            avatar_pix.scaled(QSize(avatar_size, avatar_size), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
+        self._hero_avatar_lbl = avatar_lbl
+
+        hero_h.addLayout(left_stack, 1)
+        hero_h.addWidget(avatar_lbl, 0, Qt.AlignVCenter)
+
+        outer.addWidget(hero)
+
+        # ── KPI row ───────────────────────────────────────────────────────────
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(16)
 
-        def make_kpi_card(object_name, title_text, accent):
-            """Build a single KPI card with title and value."""
+        def make_kpi(obj_name, title_text, accent):
             card = QWidget()
-            card.setObjectName(object_name)
-            card.setMinimumHeight(96)
-            card.setStyleSheet(f"""
-                QWidget#{object_name} {{
-                    background: white;
-                    border: 1px solid #dee2e6;
-                    border-left: 4px solid {accent};
-                    border-radius: 10px;
-                }}
-            """)
-            v = QVBoxLayout(card)
-            v.setContentsMargins(14, 10, 14, 10)
-            v.setSpacing(4)
-
-            title = QLabel(title_text)
-            title.setObjectName(f"{object_name}_title")
-            title.setStyleSheet(
-                "color: #6c757d; font-size: 10px; font-weight: 700;"
-                "letter-spacing: 0.7px; text-transform: uppercase; background: transparent;"
+            card.setObjectName(obj_name)
+            card.setMinimumHeight(92)
+            card.setStyleSheet(
+                f"QWidget#{obj_name}{{"
+                f"background: #ffffff;"
+                f"border-radius: 14px;"
+                f"border-left: 4px solid {accent};"
+                f"border-top: 1px solid #e2e8f0;"
+                f"border-right: 1px solid #e2e8f0;"
+                f"border-bottom: 1px solid #e2e8f0;"
+                f"}}"
             )
-            value = QLabel("—")
-            value.setObjectName(f"{object_name}_value")
-            value.setStyleSheet("font-size: 24px; font-weight: 800; color: #212529; background: transparent;")
-
-            v.addWidget(title)
-            v.addWidget(value)
+            v = QVBoxLayout(card)
+            v.setContentsMargins(16, 12, 16, 12)
+            v.setSpacing(4)
+            t = QLabel(title_text)
+            t.setObjectName(f"{obj_name}_title")
+            t.setStyleSheet(
+                "color: #94a3b8; font-size: 10px; font-weight: 700;"
+                "letter-spacing: 0.8px; text-transform: uppercase; background: transparent;"
+            )
+            val = QLabel("—")
+            val.setObjectName(f"{obj_name}_value")
+            val.setStyleSheet(
+                f"font-size: 28px; font-weight: 800; color: #0f172a; background: transparent;"
+            )
+            v.addWidget(t)
+            v.addWidget(val)
             v.addStretch()
-            return card, value
+            return card, val
 
-        # Card 1: Total Screenings
-        card_total, self.total_screenings_value = \
-            make_kpi_card("kpiTotal", "TOTAL SCREENINGS", "#0066cc")
+        card_total,    self.total_screenings_value = make_kpi("kpiTotal",    "TOTAL SCREENINGS", "#3b82f6")
+        card_patients, self.unique_patients_value  = make_kpi("kpiPatients", "NO DR CASES",      "#22c55e")
+        card_abnormal, self.abnormal_cases_value   = make_kpi("kpiAbnormal", "ABNORMAL CASES",   "#f59e0b")
+        card_high,     self.high_risk_cases_value  = make_kpi("kpiHighRisk", "HIGH RISK CASES",  "#ef4444")
 
-        # Card 2: No DR Cases
-        card_patients, self.unique_patients_value = \
-            make_kpi_card("kpiPatients", "NO DR CASES", "#2e7d32")
+        for c in (card_total, card_patients, card_abnormal, card_high):
+            kpi_row.addWidget(c, 1)
+        outer.addLayout(kpi_row)
 
-        # Card 3: Abnormal Cases
-        card_abnormal, self.abnormal_cases_value = \
-            make_kpi_card("kpiAbnormal", "ABNORMAL CASES", "#f59e0b")
-
-        # Card 4: High Risk Cases
-        card_high_risk, self.high_risk_cases_value = \
-            make_kpi_card("kpiHighRisk", "HIGH RISK CASES", "#dc3545")
-
-        kpi_row.addWidget(card_total, 1)
-        kpi_row.addWidget(card_patients, 1)
-        kpi_row.addWidget(card_abnormal, 1)
-        kpi_row.addWidget(card_high_risk, 1)
-        layout.addLayout(kpi_row)
-
-        # Main content area
+        # ── Content row ───────────────────────────────────────────────────────
         content_row = QHBoxLayout()
-        content_row.setSpacing(14)
+        content_row.setSpacing(16)
 
-        # Left: Severity distribution chart card
+        # ── Left: severity bar chart ──────────────────────────────────────────
         severity_card = QWidget()
         severity_card.setObjectName("severityCard")
-        severity_card.setMinimumHeight(410)
-        severity_card.setStyleSheet("""
-            QWidget#severityCard {
-                background: white;
-                border: 1px solid #dee2e6;
-                border-radius: 12px;
-            }
-        """)
-        severity_v = QVBoxLayout(severity_card)
-        severity_v.setContentsMargins(18, 10, 18, 16)
-        severity_v.setSpacing(8)
+        severity_card.setMinimumHeight(380)
+        severity_card.setStyleSheet(
+            "QWidget#severityCard{background:#ffffff;border-radius:16px;"
+            "border:1px solid #e2e8f0;}"
+        )
+        sev_v = QVBoxLayout(severity_card)
+        sev_v.setContentsMargins(20, 16, 20, 18)
+        sev_v.setSpacing(0)
 
-        scale_row = QWidget()
-        scale_row.setStyleSheet("background: transparent;")
-        scale_row_layout = QHBoxLayout(scale_row)
-        scale_row_layout.setContentsMargins(0, 0, 0, 0)
-        scale_row_layout.setSpacing(8)
+        sev_header = QHBoxLayout()
+        sev_header.setContentsMargins(0, 0, 0, 0)
+        self._dash_severity_title_lbl = QLabel("SCREENED PATIENTS")
+        self._dash_severity_title_lbl.setStyleSheet(
+            "color:#64748b;font-size:10px;font-weight:800;"
+            "letter-spacing:1.0px;background:transparent;"
+        )
+        sev_header.addWidget(self._dash_severity_title_lbl)
+        sev_header.addStretch()
+        sev_v.addLayout(sev_header)
 
-        scale_left_spacer = QWidget()
-        scale_left_spacer.setFixedWidth(124)
-        scale_left_spacer.setStyleSheet("background: transparent;")
-        scale_row_layout.addWidget(scale_left_spacer)
-
-        scale_bar_spacer = QWidget()
-        scale_bar_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        scale_bar_spacer.setStyleSheet("background: transparent;")
-        scale_row_layout.addWidget(scale_bar_spacer)
-
-        scale_right_spacer = QWidget()
-        scale_right_spacer.setFixedWidth(62)
-        scale_right_spacer.setStyleSheet("background: transparent;")
-        scale_row_layout.addWidget(scale_right_spacer)
-
-        severity_v.addWidget(scale_row)
-
-        scale_line = QWidget()
-        scale_line.setFixedHeight(1)
-        scale_line.setStyleSheet("background: #e9ecef;")
-        severity_v.addWidget(scale_line)
+        sev_divider = QFrame()
+        sev_divider.setFrameShape(QFrame.HLine)
+        sev_divider.setFixedHeight(1)
+        sev_divider.setStyleSheet("background: #f1f5f9; border: none; margin: 10px 0 12px 0;")
+        sev_v.addWidget(sev_divider)
 
         self.severity_bars = {}
-        self._severity_order = [
-            "No DR",
-            "Mild DR",
-            "Moderate DR",
-            "Severe DR",
-            "Proliferative DR",
-        ]
-        for level in self._severity_order:
-            row = QWidget()
-            row.setMinimumHeight(40)
-            row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            row.setStyleSheet("background: transparent;")
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(6)
+        self._severity_order = ["No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"]
 
-            level_lbl = QLabel(level)
-            level_lbl.setFixedWidth(124)
-            level_lbl.setStyleSheet("font-size: 12px; font-weight: 700; color: #495057; background: transparent;")
+        for level in self._severity_order:
+            row_w = QWidget()
+            row_w.setMinimumHeight(46)
+            row_w.setStyleSheet("background: transparent;")
+            row_l = QHBoxLayout(row_w)
+            row_l.setContentsMargins(0, 4, 0, 4)
+            row_l.setSpacing(12)
+
+            lbl = QLabel(level)
+            lbl.setFixedWidth(130)
+            lbl.setStyleSheet("font-size: 12px; font-weight: 700; color: #475569; background: transparent;")
 
             bar = QProgressBar()
             bar.setMinimum(0)
             bar.setMaximum(100)
             bar.setValue(0)
             bar.setTextVisible(False)
-            bar.setFixedHeight(18)
-            bar.setMinimumWidth(220)
+            bar.setFixedHeight(10)
             bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            bar.setFormat("")
 
             count_lbl = QLabel("0")
-            count_lbl.setFixedWidth(62)
-            count_lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            count_lbl.setFixedWidth(40)
             count_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             count_lbl.setStyleSheet(
-                "font-size: 15px; font-weight: 800; color: #212529; background: transparent;"
-                "padding-right: 4px;"
+                "font-size: 14px; font-weight: 800; color: #0f172a; background: transparent;"
             )
 
-            row_layout.addWidget(level_lbl)
-            row_layout.addWidget(bar)
-            row_layout.addWidget(count_lbl)
-            severity_v.addWidget(row, 1)
+            row_l.addWidget(lbl)
+            row_l.addWidget(bar)
+            row_l.addWidget(count_lbl)
+            sev_v.addWidget(row_w, 1)
             self.severity_bars[level] = (bar, count_lbl)
 
-        content_row.addWidget(severity_card, 7)
+        sev_v.addStretch(1)
+        content_row.addWidget(severity_card, 6)
 
-        # Right sidebar: My Availability & Recent Screenings
-        sidebar = QWidget()
-        sidebar.setObjectName("dashSidebar")
-        sidebar.setStyleSheet("QWidget#dashSidebar { background: transparent; }")
-        sidebar_v = QVBoxLayout(sidebar)
-        sidebar_v.setContentsMargins(0, 0, 0, 0)
-        sidebar_v.setSpacing(12)
+        # ── Right sidebar ─────────────────────────────────────────────────────
+        sidebar_w = QWidget()
+        sidebar_w.setObjectName("dashSidebar")
+        sidebar_w.setStyleSheet("QWidget#dashSidebar{background:transparent;}")
+        sb_v = QVBoxLayout(sidebar_w)
+        sb_v.setContentsMargins(0, 0, 0, 0)
+        sb_v.setSpacing(14)
 
-        # My Availability
-        availability_card = QWidget()
-        availability_card.setObjectName("availabilityCard")
-        availability_v = QVBoxLayout(availability_card)
-        availability_v.setContentsMargins(16, 12, 16, 12)
-        availability_v.setSpacing(8)
+        # Quick actions
+        qa_card = QWidget()
+        qa_card.setObjectName("quickActionsCard")
+        qa_card.setStyleSheet(
+            "QWidget#quickActionsCard{background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;}"
+        )
+        qa_v = QVBoxLayout(qa_card)
+        qa_v.setContentsMargins(16, 14, 16, 16)
+        qa_v.setSpacing(10)
+
+        qa_title = QLabel("QUICK ACTIONS")
+        qa_title.setStyleSheet(
+            "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+        )
+        qa_v.addWidget(qa_title)
+
+        def _primary_btn(text, slot):
+            b = QPushButton(text)
+            b.setMinimumHeight(42)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(
+                "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                "stop:0 #2563eb,stop:1 #3b82f6);"
+                "color:#fff;border:none;border-radius:10px;"
+                "padding:0 14px;text-align:left;font-weight:700;font-size:13px;}"
+                "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                "stop:0 #1d4ed8,stop:1 #2563eb);}"
+                "QPushButton:pressed{background:#1e40af;}"
+            )
+            b.clicked.connect(slot)
+            return b
+
+        def _ghost_btn(text, slot):
+            b = QPushButton(text)
+            b.setMinimumHeight(40)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(
+                "QPushButton{background:#f8fafc;color:#334155;border:1px solid #e2e8f0;"
+                "border-radius:10px;padding:0 14px;text-align:left;font-weight:600;font-size:13px;}"
+                "QPushButton:hover{background:#f1f5f9;border-color:#cbd5e1;}"
+                "QPushButton:pressed{background:#e2e8f0;}"
+            )
+            b.clicked.connect(slot)
+            return b
+
+        qa_v.addWidget(_primary_btn("➕  New Screening",
+                                    lambda: self._navigate_to(1, nav_key="Screening")))
+        qa_v.addWidget(_ghost_btn("📊  View Reports",
+                                   lambda: self._navigate_to(3, nav_key="Reports")))
+        sb_v.addWidget(qa_card)
+
+        # Availability
+        av_card = QWidget()
+        av_card.setObjectName("availabilityCard")
+        av_v = QVBoxLayout(av_card)
+        av_v.setContentsMargins(16, 14, 16, 14)
+        av_v.setSpacing(6)
 
         self._dash_availability_title_lbl = QLabel("MY AVAILABILITY")
-        availability_v.addWidget(self._dash_availability_title_lbl)
+        self._dash_availability_title_lbl.setStyleSheet(
+            "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+        )
+        av_v.addWidget(self._dash_availability_title_lbl)
 
         self.availability_days_label = QLabel("Days: Not set")
         self.availability_days_label.setWordWrap(True)
-        availability_v.addWidget(self.availability_days_label)
+        av_v.addWidget(self.availability_days_label)
 
         self.availability_time_label = QLabel("Hours: Not set")
         self.availability_time_label.setWordWrap(True)
-        availability_v.addWidget(self.availability_time_label)
+        av_v.addWidget(self.availability_time_label)
 
-        self.availability_updated_label = QLabel("Update this from Users > Edit Availability")
+        self.availability_updated_label = QLabel("Update from Users > Edit Availability")
         self.availability_updated_label.setWordWrap(True)
-        availability_v.addWidget(self.availability_updated_label)
+        av_v.addWidget(self.availability_updated_label)
 
-        sidebar_v.addWidget(availability_card)
+        sb_v.addWidget(av_card)
 
-        # Recent Screenings
-        recent_card = QWidget()
-        recent_card.setObjectName("recentCard")
-        recent_v = QVBoxLayout(recent_card)
-        recent_v.setContentsMargins(16, 12, 16, 12)
-        recent_v.setSpacing(10)
+        # Recent screenings
+        rec_card = QWidget()
+        rec_card.setObjectName("recentCard")
+        rec_v = QVBoxLayout(rec_card)
+        rec_v.setContentsMargins(16, 14, 16, 14)
+        rec_v.setSpacing(10)
 
         self._dash_recent_title_lbl = QLabel("RECENT SCREENINGS")
-        recent_v.addWidget(self._dash_recent_title_lbl)
+        self._dash_recent_title_lbl.setStyleSheet(
+            "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+        )
+        rec_v.addWidget(self._dash_recent_title_lbl)
 
         self.recent_list_layout = QVBoxLayout()
-        self.recent_list_layout.setSpacing(8)
-        recent_v.addLayout(self.recent_list_layout)
-        recent_v.addStretch(1)
+        self.recent_list_layout.setSpacing(6)
+        rec_v.addLayout(self.recent_list_layout)
+        rec_v.addStretch(1)
+        sb_v.addWidget(rec_card, 1)
 
-        sidebar_v.addWidget(recent_card, 1)
-        content_row.addWidget(sidebar, 3)
-
-        layout.addLayout(content_row, 1)
-        layout.addStretch(1)
+        content_row.addWidget(sidebar_w, 4)
+        outer.addLayout(content_row, 1)
 
         return page
 
-    def refresh_dashboard(self):
-        """Refresh all dashboard widgets with current data and correct theme colors."""
-        from translations import get_pack
+    # ── Dashboard refresh ─────────────────────────────────────────────────────
 
-        _lang = getattr(self, "_current_language", "English")
-        get_pack(_lang)
+    def refresh_dashboard(self):
+        """Refresh all dashboard widgets with current data and theme colours."""
+        self._last_dashboard_refresh_at = time.monotonic()
         dark = getattr(self, "_dark_mode", False)
 
-        # Theme palette
         if dark:
-            bg_page = "#0b1321"
-            card_bg = "#152235"
-            card_border = "transparent"
-            text_primary = "#e6edf7"
-            text_secondary = "#b7c6da"
-            text_muted = "#8799b1"
-            accent_blue = "#6db6ff"
-            sev_green = "#4dd4ac"
-            hero_grad_start = "#1a2c43"
-            hero_grad_end = "#102036"
+            bg_page       = "#070f1a"
+            card_bg       = "#0f1e30"
+            text_primary  = "#e8f0f9"
+            text_secondary = "#8ba5c0"
+            text_muted    = "#5f7a94"
+            accent_blue   = "#60a5fa"
+            sev_green     = "#4ade80"
+            hero_bg       = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0d1f35,stop:1 #0a1828)"
+            border_color  = "rgba(255,255,255,0.06)"
         else:
-            bg_page = "#eef4fb"
-            card_bg = "#ffffff"
-            card_border = "transparent"
-            text_primary = "#11283f"
-            text_secondary = "#3f5f80"
-            text_muted = "#6e829a"
-            accent_blue = "#0e6fcd"
-            sev_green = "#2d9d78"
-            hero_grad_start = "#f2f7ff"
-            hero_grad_end = "#e5f1ff"
+            bg_page       = "#f0f4f8"
+            card_bg       = "#ffffff"
+            text_primary  = "#0f172a"
+            text_secondary = "#64748b"
+            text_muted    = "#94a3b8"
+            accent_blue   = "#3b82f6"
+            sev_green     = "#22c55e"
+            hero_bg       = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #eff6ff,stop:1 #e0f2fe)"
+            border_color  = "#e2e8f0"
 
         severity_colors = {
-            "No DR": sev_green,
-            "Mild DR": "#76b7ff" if dark else "#2b8de0",
-            "Moderate DR": "#f2c96d" if dark else "#d99610",
-            "Severe DR": "#ff9f6e" if dark else "#e26d31",
-            "Proliferative DR": "#ff6b6b" if dark else "#ce3e3e",
+            "No DR":           sev_green,
+            "Mild DR":         "#60a5fa" if dark else "#3b82f6",
+            "Moderate DR":     "#fcd34d" if dark else "#f59e0b",
+            "Severe DR":       "#fb923c" if dark else "#ea580c",
+            "Proliferative DR":"#f87171" if dark else "#ef4444",
         }
 
+        # Page background
+        if hasattr(self, "dashboard_page"):
+            self.dashboard_page.setStyleSheet(
+                f"QWidget#dashboardPage{{background:{bg_page};}}"
+            )
+
+        # Hero card
+        hero_card = self.findChild(QWidget, "heroCard")
+        if hero_card:
+            hero_card.setStyleSheet(
+                f"QWidget#heroCard{{background:{hero_bg};"
+                f"border-radius:18px;border:1px solid {border_color};}}"
+            )
+
+        if hasattr(self, "welcome_label"):
+            self.welcome_label.setStyleSheet(
+                f"color:{text_primary};font-size:26px;font-weight:800;"
+                "font-family:'Segoe UI Variable','Segoe UI',sans-serif;background:transparent;"
+            )
+        if hasattr(self, "welcome_role_label"):
+            self.welcome_role_label.setStyleSheet(
+                f"color:{text_secondary};font-size:13px;font-weight:600;background:transparent;"
+            )
+        if hasattr(self, "dashboard_date_label"):
+            self._update_dashboard_datetime_label()
+            self.dashboard_date_label.setStyleSheet(
+                f"color:{accent_blue};font-size:12px;font-weight:600;background:transparent;"
+            )
+
         # Fetch data
-        total = 0
         rows = []
         with contextlib.suppress(Exception):
             conn = sqlite3.connect(DB_FILE)
@@ -1728,74 +1705,8 @@ class EyeShieldApp(QMainWindow):
             conn.close()
         total = len(rows)
 
-        # Page background
-        if hasattr(self, "dashboard_page"):
-            self.dashboard_page.setStyleSheet(
-                "QWidget#dashboardPage {"
-                f" background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {bg_page}, stop:1 {card_bg});"
-                "}"
-            )
-
-        hero_card = self.findChild(QWidget, "heroCard")
-        if hero_card:
-            hero_card.setStyleSheet(
-                "QWidget#heroCard {"
-                f" background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {hero_grad_start}, stop:1 {hero_grad_end});"
-                " border: none;"
-                " border-radius: 16px;"
-                "}"
-            )
-
-        # Welcome row
-        if hasattr(self, "welcome_label"):
-            self.welcome_label.setStyleSheet(
-                f"color: {text_primary}; font-size: 25px; font-weight: 700; background: transparent;"
-            )
-        if hasattr(self, "welcome_hint_label"):
-            self.welcome_hint_label.setStyleSheet(
-                f"color: {text_secondary}; font-size: 12px; font-weight: 500; background: transparent;"
-            )
-        if hasattr(self, "dashboard_date_label"):
-            self._update_dashboard_datetime_label()
-            self.dashboard_date_label.setStyleSheet(
-                f"color: {accent_blue}; font-size: 13px; font-weight: 700;"
-                "border: none; border-radius: 0px;"
-                "padding: 0px; background: transparent;"
-            )
-        if hasattr(self, "welcome_role_label"):
-            self.welcome_role_label.setStyleSheet(
-                f"color: {text_secondary}; font-size: 12px; font-weight: 700;"
-                "border: none; border-radius: 0px;"
-                "padding: 0px; background: transparent;"
-            )
-
-        # KPI cards
-        kpi_title_style = (
-            f"color: {text_secondary}; font-size: 10px; font-weight: 700;"
-            "letter-spacing: 0.7px; text-transform: uppercase; background: transparent;"
-        )
-        kpi_value_style = f"font-size: 24px; font-weight: 800; color: {text_primary}; background: transparent;"
-
-        def style_kpi(obj_name, accent, value_widget, value_text):
-            card = self.findChild(QWidget, obj_name)
-            if card:
-                card.setStyleSheet(
-                    f"QWidget#{obj_name} {{ background: {card_bg};"
-                    f"  border: none; border-top: 3px solid {accent};"
-                    f"  border-radius: 12px; }}"
-                )
-            title_w = self.findChild(QLabel, f"{obj_name}_title")
-            if title_w:
-                title_w.setStyleSheet(kpi_title_style)
-            if value_widget:
-                value_widget.setStyleSheet(kpi_value_style)
-                value_widget.setText(value_text)
-
-        style_kpi("kpiTotal", accent_blue, self.total_screenings_value, str(total))
-
-        no_dr_count = 0
-        abnormal_count = 0
-        high_risk_count = 0
+        # Counts
+        no_dr_count = abnormal_count = high_risk_count = 0
         for _, _, result, _ in rows:
             level = self._normalize_severity_label(result)
             if level == "No DR":
@@ -1805,198 +1716,172 @@ class EyeShieldApp(QMainWindow):
                 if level in ("Severe DR", "Proliferative DR"):
                     high_risk_count += 1
 
-        style_kpi("kpiPatients", sev_green, self.unique_patients_value, str(no_dr_count))
-        style_kpi("kpiAbnormal", "#f59e0b", self.abnormal_cases_value, str(abnormal_count))
-        style_kpi("kpiHighRisk", "#dc3545", self.high_risk_cases_value, str(high_risk_count))
+        # KPI cards
+        kpi_title_style = (
+            f"color:{text_secondary};font-size:10px;font-weight:700;"
+            "letter-spacing:0.8px;text-transform:uppercase;background:transparent;"
+        )
+        kpi_value_style = (
+            f"font-size:28px;font-weight:800;color:{text_primary};background:transparent;"
+        )
 
-        # My availability card
-        availability_card = self.findChild(QWidget, "availabilityCard")
-        if availability_card:
-            availability_card.setStyleSheet(
-                f"QWidget#availabilityCard {{ background: {card_bg};"
-                "  border: none; border-radius: 12px; }}"
-            )
-        if hasattr(self, "_dash_availability_title_lbl"):
-            self._dash_availability_title_lbl.setStyleSheet(
-                f"color: {text_secondary}; font-size: 11px; font-weight: 800;"
-                "letter-spacing: 0.8px; text-transform: uppercase; background: transparent;"
-            )
-        if hasattr(self, "_dash_availability_hint_lbl"):
-            self._dash_availability_hint_lbl.setStyleSheet(
-                f"color: {text_muted}; font-size: 12px; font-weight: 600; background: transparent;"
-            )
-        if hasattr(self, "availability_days_label"):
-            self.availability_days_label.setStyleSheet(
-                f"font-size: 12px; font-weight: 700; color: {text_primary}; background: transparent;"
-            )
-        if hasattr(self, "availability_time_label"):
-            self.availability_time_label.setStyleSheet(
-                f"font-size: 12px; font-weight: 700; color: {text_primary}; background: transparent;"
-            )
-        if hasattr(self, "availability_updated_label"):
-            self.availability_updated_label.setStyleSheet(
-                f"font-size: 12px; color: {text_muted}; font-weight: 600; background: transparent;"
-            )
+        def style_kpi(obj_name, accent, val_widget, val_text):
+            card = self.findChild(QWidget, obj_name)
+            if card:
+                card.setStyleSheet(
+                    f"QWidget#{obj_name}{{background:{card_bg};"
+                    f"border-radius:14px;border-left:4px solid {accent};"
+                    f"border-top:1px solid {border_color};"
+                    f"border-right:1px solid {border_color};"
+                    f"border-bottom:1px solid {border_color};}}"
+                )
+            t = self.findChild(QLabel, f"{obj_name}_title")
+            if t:
+                t.setStyleSheet(kpi_title_style)
+            if val_widget:
+                val_widget.setStyleSheet(kpi_value_style)
+                val_widget.setText(val_text)
 
-        availability_days_text, availability_time_text, availability_updated_text = self._get_dashboard_availability_text()
-        if hasattr(self, "availability_days_label"):
-            self.availability_days_label.setText(f"Days: {availability_days_text}")
-        if hasattr(self, "availability_time_label"):
-            self.availability_time_label.setText(f"Hours: {availability_time_text}")
-        if hasattr(self, "availability_updated_label"):
-            self.availability_updated_label.setText(availability_updated_text)
+        style_kpi("kpiTotal",    accent_blue, self.total_screenings_value, str(total))
+        style_kpi("kpiPatients", sev_green,   self.unique_patients_value,  str(no_dr_count))
+        style_kpi("kpiAbnormal", "#f59e0b",   self.abnormal_cases_value,   str(abnormal_count))
+        style_kpi("kpiHighRisk", "#ef4444",   self.high_risk_cases_value,  str(high_risk_count))
 
-        # Severity chart card
-        severity_card = self.findChild(QWidget, "severityCard")
-        if severity_card:
-            severity_card.setStyleSheet(
-                f"QWidget#severityCard {{ background: {card_bg}; border: none; border-radius: 12px; }}"
+        # Severity card
+        sev_card = self.findChild(QWidget, "severityCard")
+        if sev_card:
+            sev_card.setStyleSheet(
+                f"QWidget#severityCard{{background:{card_bg};border-radius:16px;"
+                f"border:1px solid {border_color};}}"
             )
         if hasattr(self, "_dash_severity_title_lbl"):
             self._dash_severity_title_lbl.setStyleSheet(
-                f"color: {text_secondary}; font-size: 11px; font-weight: 800;"
-                "letter-spacing: 0.8px; text-transform: uppercase; background: transparent;"
-            )
-        if hasattr(self, "_dash_severity_hint_lbl"):
-            self._dash_severity_hint_lbl.setStyleSheet(
-                f"color: {text_muted}; font-size: 12px; font-weight: 600; background: transparent;"
+                f"color:{text_secondary};font-size:10px;font-weight:800;"
+                "letter-spacing:1.0px;background:transparent;"
             )
 
         severity_counts = {level: 0 for level in getattr(self, "_severity_order", [])}
         for _, _, result, _ in rows:
             level = self._normalize_severity_label(result)
-            if level not in severity_counts:
-                continue
-            severity_counts[level] += 1
+            if level in severity_counts:
+                severity_counts[level] += 1
 
         if hasattr(self, "severity_bars"):
-            total_count = sum(severity_counts.values()) if severity_counts else 0
+            total_sev = sum(severity_counts.values()) or 1
             for level in self._severity_order:
                 bar, count_lbl = self.severity_bars[level]
                 count = severity_counts.get(level, 0)
-                bar.setMaximum(max(1, total_count))
+                color = severity_colors[level]
+                bar.setMaximum(max(1, total_sev))
                 bar.setValue(count)
                 bar.setStyleSheet(
-                    f"QProgressBar {{"
-                    f" background: transparent;"
-                    f" border: 0; border-radius: 6px;"
-                    f" }}"
-                    f"QProgressBar::chunk {{"
-                    f" background: {severity_colors[level]};"
-                    f" border-radius: 6px;"
-                    f" }}"
+                    f"QProgressBar{{background:{'#1e293b' if dark else '#f1f5f9'};"
+                    f"border:none;border-radius:5px;}}"
+                    f"QProgressBar::chunk{{background:{color};border-radius:5px;}}"
                 )
                 count_lbl.setText(str(count))
                 count_lbl.setStyleSheet(
-                    f"font-size: 14px; font-weight: 800; color: {text_primary};"
-                    "background: transparent; padding-right: 4px;"
+                    f"font-size:14px;font-weight:800;color:{text_primary};"
+                    "background:transparent;"
                 )
 
-        recent_card = self.findChild(QWidget, "recentCard")
-        if recent_card:
-            recent_card.setStyleSheet(
-                f"QWidget#recentCard {{ background: {card_bg}; border: none; border-radius: 12px; }}"
+        # Availability card
+        av_card = self.findChild(QWidget, "availabilityCard")
+        if av_card:
+            av_card.setStyleSheet(
+                f"QWidget#availabilityCard{{background:{card_bg};border-radius:16px;"
+                f"border:1px solid {border_color};}}"
+            )
+        if hasattr(self, "_dash_availability_title_lbl"):
+            self._dash_availability_title_lbl.setStyleSheet(
+                f"color:{text_secondary};font-size:10px;font-weight:800;"
+                "letter-spacing:1.0px;background:transparent;"
+            )
+        day_text, time_text, updated_text = self._get_dashboard_availability_text()
+        for attr, text, style in (
+            ("availability_days_label",    f"Days: {day_text}",
+             f"font-size:12px;font-weight:700;color:{text_primary};background:transparent;"),
+            ("availability_time_label",    f"Hours: {time_text}",
+             f"font-size:12px;font-weight:700;color:{text_primary};background:transparent;"),
+            ("availability_updated_label", updated_text,
+             f"font-size:11px;color:{text_muted};font-weight:600;background:transparent;"),
+        ):
+            w = getattr(self, attr, None)
+            if w:
+                w.setText(text)
+                w.setStyleSheet(style)
+
+        # Recent card
+        rec_card = self.findChild(QWidget, "recentCard")
+        if rec_card:
+            rec_card.setStyleSheet(
+                f"QWidget#recentCard{{background:{card_bg};border-radius:16px;"
+                f"border:1px solid {border_color};}}"
             )
         if hasattr(self, "_dash_recent_title_lbl"):
             self._dash_recent_title_lbl.setStyleSheet(
-                f"color: {text_secondary}; font-size: 11px; font-weight: 800;"
-                "letter-spacing: 0.8px; text-transform: uppercase; background: transparent;"
+                f"color:{text_secondary};font-size:10px;font-weight:800;"
+                "letter-spacing:1.0px;background:transparent;"
             )
 
-        metric_defs = {
-            "impactHigh": ("High Risk", high_risk_count, "#ce3e3e" if not dark else "#ff6b6b"),
-            "impactAbnormal": ("Abnormal", abnormal_count, "#d99610" if not dark else "#f2c96d"),
-            "impactClear": ("No DR", no_dr_count, sev_green),
-        }
-        for chip_name, (title_text, value, accent) in metric_defs.items():
-            chip = self.findChild(QWidget, chip_name)
-            title = self.findChild(QLabel, f"{chip_name}_title")
-            value_lbl = self.findChild(QLabel, f"{chip_name}_value")
-            sub_lbl = self.findChild(QLabel, f"{chip_name}_sub")
-            if chip:
-                chip.setStyleSheet(
-                    f"QWidget#{chip_name} {{ background-color: {card_bg};"
-                    f" border: 1px solid {card_border};"
-                    " border-radius: 10px; }"
-                )
-            if title:
-                title.setText(title_text)
-                title.setStyleSheet(
-                    f"font-size: 10px; color: {text_secondary}; font-weight: 700;"
-                    "text-transform: uppercase; letter-spacing: 0.8px; background: transparent;"
-                )
-            if value_lbl:
-                value_lbl.setText(str(value))
-                value_lbl.setStyleSheet(
-                    f"font-size: 24px; color: {text_primary}; font-weight: 800; background: transparent;"
-                )
-            if sub_lbl:
-                pct = (value / total) * 100 if total else 0.0
-                sub_lbl.setText(f"{pct:.1f}% of total")
-                sub_lbl.setStyleSheet(
-                    f"font-size: 11px; color: {text_muted}; font-weight: 600; background: transparent;"
-                )
-
-        # Populate Recent Screenings list
+        # Populate recent list
         if hasattr(self, "recent_list_layout"):
-            # Clear old items
             while self.recent_list_layout.count():
                 item = self.recent_list_layout.takeAt(0)
                 if w := item.widget():
                     w.deleteLater()
 
             if not rows:
-                empty_lbl = QLabel("No screenings available.")
-                empty_lbl.setStyleSheet(
-                    f"font-size: 12px; color: {text_muted}; font-weight: 600; background: transparent; padding: 8px 0;"
+                empty = QLabel("No screenings yet.")
+                empty.setStyleSheet(
+                    f"font-size:12px;color:{text_muted};font-weight:600;"
+                    "background:transparent;padding:8px 0;"
                 )
-                self.recent_list_layout.addWidget(empty_lbl)
+                self.recent_list_layout.addWidget(empty)
             else:
                 for row_data in rows[:4]:
                     patient_id = row_data[0]
-                    name = row_data[1] or "Unknown"
-                    result = self._normalize_severity_label(row_data[2]) or "Pending"
-                    
+                    name       = row_data[1] or "Unknown"
+                    result     = self._normalize_severity_label(row_data[2]) or "Pending"
+
                     item_w = QWidget()
                     item_w.setStyleSheet(
-                        "QWidget {"
-                        "background: transparent;"
-                        "border: none;"
-                        "border-radius: 0px;"
-                        "}"
+                        f"QWidget{{background:{'#1a2d42' if dark else '#f8fafc'};"
+                        f"border:1px solid {border_color};"
+                        "border-radius:10px;}}"
                     )
                     item_v = QVBoxLayout(item_w)
-                    item_v.setContentsMargins(10, 8, 10, 8)
-                    item_v.setSpacing(4)
-                    
+                    item_v.setContentsMargins(12, 8, 12, 8)
+                    item_v.setSpacing(3)
+
                     name_lbl = QLabel(name)
                     name_lbl.setStyleSheet(
-                        f"font-size: 13px; font-weight: 700; color: {text_primary}; background: transparent;"
+                        f"font-size:13px;font-weight:700;color:{text_primary};background:transparent;"
                     )
-                    
+
                     sub_row = QHBoxLayout()
                     sub_row.setContentsMargins(0, 0, 0, 0)
-                    sub_row.setSpacing(8)
-                    
+                    sub_row.setSpacing(6)
+
                     id_lbl = QLabel(patient_id)
                     id_lbl.setStyleSheet(
-                        f"font-size: 12px; font-weight: 600; color: {text_muted}; background: transparent;"
+                        f"font-size:11px;font-weight:600;color:{text_muted};background:transparent;"
                     )
-                    
-                    res_lbl = QLabel(result)
                     res_color = severity_colors.get(result, text_secondary)
+                    res_lbl = QLabel(result)
                     res_lbl.setStyleSheet(
-                        f"font-size: 12px; font-weight: 700; color: {res_color}; background: transparent;"
+                        f"font-size:11px;font-weight:700;color:{res_color};background:transparent;"
                     )
-                    
+
                     sub_row.addWidget(id_lbl)
                     sub_row.addStretch()
                     sub_row.addWidget(res_lbl)
-                    
+
                     item_v.addWidget(name_lbl)
                     item_v.addLayout(sub_row)
-                    
                     self.recent_list_layout.addWidget(item_w)
+
+    # ── Static helpers ────────────────────────────────────────────────────────
 
     @staticmethod
     def _normalize_severity_label(result_text):
@@ -2019,7 +1904,7 @@ class EyeShieldApp(QMainWindow):
     def _is_high_attention_result(result_text):
         text = str(result_text or "").lower()
         keywords = ("moderate", "severe", "proliferative", "refer", "urgent", "dr detected")
-        return any(word in text for word in keywords)
+        return any(w in text for w in keywords)
 
     @staticmethod
     def _extract_confidence_value(conf_text):
@@ -2034,49 +1919,38 @@ class EyeShieldApp(QMainWindow):
 
     def _get_dashboard_availability_text(self):
         profile = get_user_profile(self.username) or {}
-        raw_availability = profile.get("availability_json")
-        if not raw_availability:
-            return "Not set", "Not set", "Update this from Users > Edit Availability"
-
+        raw = profile.get("availability_json")
+        if not raw:
+            return "Not set", "Not set", "Update from Users > Edit Availability"
         try:
-            payload = json.loads(raw_availability) if isinstance(raw_availability, str) else raw_availability
+            payload = json.loads(raw) if isinstance(raw, str) else raw
         except Exception:
             payload = {}
-
         if not isinstance(payload, dict):
-            return "Not set", "Not set", "Update this from Users > Edit Availability"
+            return "Not set", "Not set", "Update from Users > Edit Availability"
 
-        start_time = str(payload.get("start_time") or "").strip()
-        end_time = str(payload.get("end_time") or "").strip()
+        start = str(payload.get("start_time") or "").strip()
+        end   = str(payload.get("end_time")   or "").strip()
         time_text = "Not set"
-        if start_time and end_time:
-            formatted_start = self._format_availability_time(start_time)
-            formatted_end = self._format_availability_time(end_time)
-            time_text = f"{formatted_start} - {formatted_end}"
+        if start and end:
+            time_text = f"{self._format_availability_time(start)} – {self._format_availability_time(end)}"
 
         selected_days = payload.get("days") or []
-        weekday_order = [
-            ("mon", "Mon"),
-            ("tue", "Tue"),
-            ("wed", "Wed"),
-            ("thu", "Thu"),
-            ("fri", "Fri"),
-            ("sat", "Sat"),
-            ("sun", "Sun"),
-        ]
+        weekday_order = [("mon","Mon"),("tue","Tue"),("wed","Wed"),("thu","Thu"),
+                         ("fri","Fri"),("sat","Sat"),("sun","Sun")]
         day_text = "Not set"
         if isinstance(selected_days, list) and selected_days:
-            selected_set = {str(value).strip().lower() for value in selected_days}
-            ordered_days = [label for key, label in weekday_order if key in selected_set]
-            if ordered_days:
-                day_text = ", ".join(ordered_days)
+            sel = {str(v).strip().lower() for v in selected_days}
+            ordered = [lbl for k, lbl in weekday_order if k in sel]
+            if ordered:
+                day_text = ", ".join(ordered)
 
         updated_at = str(payload.get("updated_at") or "").strip()
-        updated_text = "Update this from Users > Edit Availability"
+        updated_text = "Update from Users > Edit Availability"
         if updated_at:
             with contextlib.suppress(Exception):
-                parsed_updated_at = datetime.fromisoformat(updated_at)
-                updated_text = f"Last updated: {parsed_updated_at.strftime('%b %d, %Y %I:%M %p')}"
+                parsed = datetime.fromisoformat(updated_at)
+                updated_text = f"Last updated: {parsed.strftime('%b %d, %Y %I:%M %p')}"
 
         return day_text, time_text, updated_text
 
@@ -2085,58 +1959,24 @@ class EyeShieldApp(QMainWindow):
         text = str(value or "").strip()
         if not text:
             return ""
-        for candidate, fmt in (
-            (text.upper(), "%I:%M %p"),
-            (text, "%H:%M"),
-        ):
+        for candidate, fmt in ((text.upper(), "%I:%M %p"), (text, "%H:%M")):
             with contextlib.suppress(ValueError):
                 return datetime.strptime(candidate, fmt).strftime("%I:%M %p").lstrip("0")
         return text
 
     @staticmethod
     def get_nav_button_style(icon_only=False):
-        """Get navigation button stylesheet. If icon_only, use smaller font and center icon."""
         if icon_only:
-            return """
-                QPushButton {
-                    color: #495057;
-                    text-align: center;
-                    padding: 4px 0px;
-                    border: 1px solid transparent;
-                    border-radius: 8px;
-                    font-size: 22px;
-                    font-weight: 500;
-                    background: transparent;
-                    text-decoration: none;
-                }
-                QPushButton:hover {
-                    background: #eef6ff;
-                    color: #1d5fa8;
-                }
-                QPushButton:pressed { background: #e2f0ff; }
-                QPushButton:focus {
-                    outline: none;
-                    border: 1px solid transparent;
-                }
-            """
-        else:
-            return """
-                QPushButton {
-                    color: #495057;
-                    text-align: left;
-                    padding: 15px 20px;
-                    border: none;
-                    border-radius: 6px;
-                    font-size: 14px;
-                    font-weight: 500;
-                    background: transparent;
-                }
-                QPushButton:hover {
-                    background: #e9ecef;
-                    color: #007bff;
-                }
-                QPushButton:focus {
-                    outline: none;
-                    border: none;
-                }
-            """
+            return (
+                "QPushButton{color:#475057;text-align:center;padding:4px 0;border:1px solid transparent;"
+                "border-radius:8px;font-size:22px;font-weight:500;background:transparent;text-decoration:none;}"
+                "QPushButton:hover{background:#eef6ff;color:#1d5fa8;}"
+                "QPushButton:pressed{background:#e2f0ff;}"
+                "QPushButton:focus{outline:none;border:1px solid transparent;}"
+            )
+        return (
+            "QPushButton{color:#495057;text-align:left;padding:15px 20px;border:none;"
+            "border-radius:6px;font-size:14px;font-weight:500;background:transparent;}"
+            "QPushButton:hover{background:#e9ecef;color:#007bff;}"
+            "QPushButton:focus{outline:none;border:none;}"
+        )
