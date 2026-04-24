@@ -13,7 +13,12 @@ app/uploads/
 data/backups/
 data/**/*.db
 
-# Allow committing the seed user database
+# Allow committing the seeded databases needed for a fresh clone to work
 !users.db
 !app/users.db
 !data/users.db
+!data/patient_records.db
+
+# Prevent accidental commits of app-local sqlite artifacts
+app/*.db
+!app/users.db
