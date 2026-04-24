@@ -469,7 +469,10 @@ class LoginWindow(QWidget):
 
     def handle_login(self):
         """Handle login button click"""
-        from dashboard import EyeShieldApp
+        try:
+            from .dashboard import EyeShieldApp
+        except Exception:  # pragma: no cover
+            from dashboard import EyeShieldApp
 
         if self.lockout_remaining_seconds > 0:
             QMessageBox.warning(
@@ -503,7 +506,10 @@ class LoginWindow(QWidget):
             os.environ["EYESHIELD_CURRENT_CONTACT"] = contact
 
             try:
-                import user_store
+                try:
+                    from . import user_store
+                except Exception:  # pragma: no cover
+                    import user_store
                 user_store.log_activity(username, "Login")
             except Exception:
                 pass

@@ -10,7 +10,10 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from auth import get_connection, UserManager
+try:
+    from .auth import get_connection, UserManager
+except Exception:  # pragma: no cover
+    from auth import get_connection, UserManager
 
 
 def _utc_now_iso() -> str:

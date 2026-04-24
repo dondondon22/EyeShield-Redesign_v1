@@ -18,8 +18,12 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image
 
-from auth import UserManager, get_connection
-from activity_logger import log_action as log_activity
+try:
+    from .auth import UserManager, get_connection
+    from .activity_logger import log_action as log_activity
+except Exception:  # pragma: no cover
+    from auth import UserManager, get_connection
+    from activity_logger import log_action as log_activity
 
 # -------------------- M5 configurable thresholds (named constants; env can override) --------------------
 BLUR_THRESHOLD = float(os.environ.get("EYESHIELD_BLUR_THRESHOLD", os.environ.get("EYESHIELD_QUALITY_BLUR_MIN", "100.0")))

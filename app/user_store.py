@@ -1,4 +1,7 @@
-from auth import UserManager as AuthUserManager
+try:
+    from .auth import UserManager as AuthUserManager
+except Exception:  # pragma: no cover
+    from auth import UserManager as AuthUserManager
 
 class UserStore:
     @classmethod

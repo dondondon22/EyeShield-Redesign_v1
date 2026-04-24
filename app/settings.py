@@ -28,9 +28,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtCore import QTime, Qt
 
-import user_store
-from auth import UserManager
-from user_auth import get_user_profile
+try:
+    from . import user_store
+    from .auth import UserManager
+    from .user_auth import get_user_profile
+except Exception:  # pragma: no cover
+    import user_store
+    from auth import UserManager
+    from user_auth import get_user_profile
 
 _WEEKDAY_OPTIONS = [
     ("mon", "Monday"),

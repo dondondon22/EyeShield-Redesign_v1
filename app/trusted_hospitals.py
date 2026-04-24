@@ -20,8 +20,12 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
-from auth import UserManager
-import user_store
+try:
+    from .auth import UserManager
+    from . import user_store
+except Exception:  # pragma: no cover
+    from auth import UserManager
+    import user_store
 
 
 class ReferralHospitalDialog(QDialog):

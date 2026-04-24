@@ -32,26 +32,44 @@ from PySide6.QtCore import Qt, QSize, QByteArray, QEvent, QTimer, QCoreApplicati
 from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication, QPainterPath
 from PySide6.QtSvg import QSvgRenderer
 
-from screening import ScreeningPage
-from reports import ReportsPage
-from users import UsersPage, ActivityLogPage
-from settings import SettingsPage, DARK_STYLESHEET
-from help_support import HelpSupportPage
-from trusted_hospitals import TrustedHospitalsPage
-from camera import CameraPage
-from auth import UserManager
-from app_paths import PATIENT_RECORDS_DB_PATH
+try:
+    from .screening import ScreeningPage
+    from .reports import ReportsPage
+    from .users import UsersPage, ActivityLogPage
+    from .settings import SettingsPage, DARK_STYLESHEET
+    from .help_support import HelpSupportPage
+    from .trusted_hospitals import TrustedHospitalsPage
+    from .camera import CameraPage
+    from .auth import UserManager
+    from .app_paths import PATIENT_RECORDS_DB_PATH
+except Exception:  # pragma: no cover
+    from screening import ScreeningPage
+    from reports import ReportsPage
+    from users import UsersPage, ActivityLogPage
+    from settings import SettingsPage, DARK_STYLESHEET
+    from help_support import HelpSupportPage
+    from trusted_hospitals import TrustedHospitalsPage
+    from camera import CameraPage
+    from auth import UserManager
+    from app_paths import PATIENT_RECORDS_DB_PATH
 try:
     from db import get_records_conn, ensure_patient_records_db_schema
 except Exception:
     from .db import get_records_conn, ensure_patient_records_db_schema
 
-import emr_service as emr
+try:
+    from . import emr_service as emr
+except Exception:  # pragma: no cover
+    import emr_service as emr
 
 
 DB_FILE = str(PATIENT_RECORDS_DB_PATH)
-from user_auth import get_user_profile
-from emr_pages import EmrVisitsPage
+try:
+    from .user_auth import get_user_profile
+    from .emr_pages import EmrVisitsPage
+except Exception:  # pragma: no cover
+    from user_auth import get_user_profile
+    from emr_pages import EmrVisitsPage
 
 
 class EyeShieldApp(QMainWindow):
@@ -1743,7 +1761,72 @@ class EyeShieldApp(QMainWindow):
         rec_v.addLayout(self.recent_list_layout)
         rec_v.addStretch(1)
         if role_l in {"frontdesk"}:
-            content_row.addWidget(rec_card, 6)
+            # Frontdesk: left column = stats + compact recent list
+            left_col = QWidget()
+            left_col.setObjectName("frontdeskLeftCol")
+            left_l = QVBoxLayout(left_col)
+            left_l.setContentsMargins(0, 0, 0, 0)
+            left_l.setSpacing(14)
+
+            stats_card = QWidget()
+            stats_card.setObjectName("frontdeskStatsCard")
+            stats_card.setStyleSheet(
+                "QWidget#frontdeskStatsCard{background:#ffffff;border:none;border-radius:18px;}"
+            )
+            stats_l = QVBoxLayout(stats_card)
+            stats_l.setContentsMargins(16, 14, 16, 14)
+            stats_l.setSpacing(10)
+
+            stats_title = QLabel("DATA")
+            stats_title.setStyleSheet(
+                "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+            )
+            stats_l.addWidget(stats_title)
+
+            tiles = QHBoxLayout()
+            tiles.setSpacing(12)
+
+            def _tile(title_text: str, accent: str):
+                w = QWidget()
+                w.setStyleSheet(
+                    "background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffffff, stop:1 #f8fbff);"
+                    "border:none;border-radius:16px;"
+                )
+                v = QVBoxLayout(w)
+                v.setContentsMargins(14, 10, 14, 10)
+                v.setSpacing(4)
+                t = QLabel(title_text)
+                t.setStyleSheet(
+                    "color:#64748b;font-size:10px;font-weight:800;letter-spacing:0.8px;background:transparent;"
+                )
+                val = QLabel("—")
+                val.setStyleSheet(
+                    f"color:#0f172a;font-size:24px;font-weight:900;background:transparent;"
+                )
+                accent_bar = QFrame()
+                accent_bar.setFixedHeight(4)
+                accent_bar.setStyleSheet(f"background:{accent};border:none;border-radius:2px;")
+                v.addWidget(t)
+                v.addWidget(val)
+                v.addWidget(accent_bar)
+                return w, val
+
+            tile_total, self._fd_stat_total = _tile("TOTAL SCREENINGS", "#2563eb")
+            tile_no_dr, self._fd_stat_no_dr = _tile("NO DR CASES", "#22c55e")
+            tile_abn, self._fd_stat_abnormal = _tile("ABNORMAL CASES", "#f59e0b")
+
+            tiles.addWidget(tile_total, 1)
+            tiles.addWidget(tile_no_dr, 1)
+            tiles.addWidget(tile_abn, 1)
+            stats_l.addLayout(tiles)
+
+            # Make recent screenings visually smaller under stats.
+            rec_card.setMinimumHeight(260)
+
+            left_l.addWidget(stats_card, 0)
+            left_l.addWidget(rec_card, 1)
+
+            content_row.addWidget(left_col, 6)
         else:
             sb_v.addWidget(rec_card, 1)
 
@@ -1968,7 +2051,7 @@ class EyeShieldApp(QMainWindow):
             ensure_patient_records_db_schema(conn)
             cur = conn.cursor()
             cur.execute(
-                "SELECT patient_id, name, result, confidence "
+                "SELECT patient_id, name, result, confidence, screened_at "
                 "FROM patient_records WHERE archived_at IS NULL ORDER BY id DESC"
             )
             rows = cur.fetchall()
@@ -1989,7 +2072,7 @@ class EyeShieldApp(QMainWindow):
 
         # Counts
         no_dr_count = abnormal_count = high_risk_count = 0
-        for _, _, result, _ in rows:
+        for _, _, result, _, _screened_at in rows:
             level = self._normalize_severity_label(result)
             if level == "No DR":
                 no_dr_count += 1
@@ -1997,6 +2080,38 @@ class EyeShieldApp(QMainWindow):
                 abnormal_count += 1
                 if level in ("Severe DR", "Proliferative DR"):
                     high_risk_count += 1
+
+        # Frontdesk dashboard should match Patient Records list:
+        # one row per patient (latest active record per patient).
+        fd_total_patients = None
+        fd_no_dr_patients = None
+        fd_abnormal_patients = None
+        if role_l in {"frontdesk"}:
+            seen_patients: set[str] = set()
+            fd_no = 0
+            fd_abn = 0
+            for patient_id, _name, result, _conf, _screened_at in rows:  # rows are ordered by id DESC
+                pid = str(patient_id or "").strip()
+                if not pid or pid in seen_patients:
+                    continue
+                seen_patients.add(pid)
+                level = self._normalize_severity_label(result)
+                if level == "No DR":
+                    fd_no += 1
+                elif level:
+                    fd_abn += 1
+            fd_total_patients = len(seen_patients)
+            fd_no_dr_patients = fd_no
+            fd_abnormal_patients = fd_abn
+
+        # Frontdesk summary tiles
+        if role_l in {"frontdesk"}:
+            if hasattr(self, "_fd_stat_total"):
+                self._fd_stat_total.setText(str(fd_total_patients if fd_total_patients is not None else total))
+            if hasattr(self, "_fd_stat_no_dr"):
+                self._fd_stat_no_dr.setText(str(fd_no_dr_patients if fd_no_dr_patients is not None else no_dr_count))
+            if hasattr(self, "_fd_stat_abnormal"):
+                self._fd_stat_abnormal.setText(str(fd_abnormal_patients if fd_abnormal_patients is not None else abnormal_count))
 
         # KPI cards (not shown for frontdesk; also guard when widgets were not created)
         if role_l not in {"frontdesk"}:
@@ -2044,30 +2159,30 @@ class EyeShieldApp(QMainWindow):
                     "letter-spacing:1.0px;background:transparent;"
                 )
 
-            severity_counts = {level: 0 for level in getattr(self, "_severity_order", [])}
-            for _, _, result, _ in rows:
-                level = self._normalize_severity_label(result)
-                if level in severity_counts:
-                    severity_counts[level] += 1
+        severity_counts = {level: 0 for level in getattr(self, "_severity_order", [])}
+        for _, _, result, _conf, _screened_at in rows:
+            level = self._normalize_severity_label(result)
+            if level in severity_counts:
+                severity_counts[level] += 1
 
-            if hasattr(self, "severity_bars"):
-                total_sev = sum(severity_counts.values()) or 1
-                for level in self._severity_order:
-                    bar, count_lbl = self.severity_bars[level]
-                    count = severity_counts.get(level, 0)
-                    color = severity_colors[level]
-                    bar.setMaximum(max(1, total_sev))
-                    bar.setValue(count)
-                    bar.setStyleSheet(
-                        f"QProgressBar{{background:{'#1e293b' if dark else '#f1f5f9'};"
-                        f"border:none;border-radius:5px;}}"
-                        f"QProgressBar::chunk{{background:{color};border-radius:5px;}}"
-                    )
-                    count_lbl.setText(str(count))
-                    count_lbl.setStyleSheet(
-                        f"font-size:14px;font-weight:800;color:{text_primary};"
-                        "background:transparent;"
-                    )
+        if hasattr(self, "severity_bars"):
+            total_sev = sum(severity_counts.values()) or 1
+            for level in self._severity_order:
+                bar, count_lbl = self.severity_bars[level]
+                count = severity_counts.get(level, 0)
+                color = severity_colors[level]
+                bar.setMaximum(max(1, total_sev))
+                bar.setValue(count)
+                bar.setStyleSheet(
+                    f"QProgressBar{{background:{'#1e293b' if dark else '#f1f5f9'};"
+                    f"border:none;border-radius:5px;}}"
+                    f"QProgressBar::chunk{{background:{color};border-radius:5px;}}"
+                )
+                count_lbl.setText(str(count))
+                count_lbl.setStyleSheet(
+                    f"font-size:14px;font-weight:800;color:{text_primary};"
+                    "background:transparent;"
+                )
 
         # Availability card
         av_card = self.findChild(QWidget, "availabilityCard")
@@ -2098,10 +2213,15 @@ class EyeShieldApp(QMainWindow):
         # Recent card
         rec_card = self.findChild(QWidget, "recentCard")
         if rec_card:
-            rec_card.setStyleSheet(
-                f"QWidget#recentCard{{background:{card_bg};border-radius:16px;"
-                f"border:1px solid {border_color};}}"
-            )
+            if role_l in {"frontdesk"}:
+                rec_card.setStyleSheet(
+                    f"QWidget#recentCard{{background:{card_bg};border-radius:18px;border:none;}}"
+                )
+            else:
+                rec_card.setStyleSheet(
+                    f"QWidget#recentCard{{background:{card_bg};border-radius:16px;"
+                    f"border:1px solid {border_color};}}"
+                )
         if hasattr(self, "_dash_recent_title_lbl"):
             self._dash_recent_title_lbl.setStyleSheet(
                 f"color:{text_secondary};font-size:10px;font-weight:800;"
@@ -2126,21 +2246,22 @@ class EyeShieldApp(QMainWindow):
                 for row_data in rows[:4]:
                     patient_id = row_data[0]
                     name       = row_data[1] or "Unknown"
-                    result     = self._normalize_severity_label(row_data[2]) or "Pending"
+                    screened_at = str(row_data[4] or "").strip()
+                    # Use a friendly date label; fall back to raw value if parsing fails.
+                    date_label = screened_at[:10] if len(screened_at) >= 10 else (screened_at or "—")
 
                     item_w = QWidget()
                     item_w.setStyleSheet(
-                        f"QWidget{{background:{'#1a2d42' if dark else '#f8fafc'};"
-                        f"border:1px solid {border_color};"
-                        "border-radius:10px;}}"
+                        f"QWidget{{background:{'#13273a' if dark else '#f8fbff'};"
+                        "border:none;border-radius:14px;}}"
                     )
                     item_v = QVBoxLayout(item_w)
-                    item_v.setContentsMargins(12, 8, 12, 8)
-                    item_v.setSpacing(3)
+                    item_v.setContentsMargins(14, 10, 14, 10)
+                    item_v.setSpacing(4)
 
                     name_lbl = QLabel(name)
                     name_lbl.setStyleSheet(
-                        f"font-size:13px;font-weight:700;color:{text_primary};background:transparent;"
+                        f"font-size:15px;font-weight:800;color:{text_primary};background:transparent;"
                     )
 
                     sub_row = QHBoxLayout()
@@ -2149,17 +2270,16 @@ class EyeShieldApp(QMainWindow):
 
                     id_lbl = QLabel(patient_id)
                     id_lbl.setStyleSheet(
-                        f"font-size:11px;font-weight:600;color:{text_muted};background:transparent;"
+                        f"font-size:12px;font-weight:700;color:{text_muted};background:transparent;"
                     )
-                    res_color = severity_colors.get(result, text_secondary)
-                    res_lbl = QLabel(result)
-                    res_lbl.setStyleSheet(
-                        f"font-size:11px;font-weight:700;color:{res_color};background:transparent;"
+                    date_lbl = QLabel(f"Date of screening: {date_label}")
+                    date_lbl.setStyleSheet(
+                        f"font-size:12px;font-weight:700;color:{text_secondary};background:transparent;"
                     )
 
                     sub_row.addWidget(id_lbl)
                     sub_row.addStretch()
-                    sub_row.addWidget(res_lbl)
+                    sub_row.addWidget(date_lbl)
 
                     item_v.addWidget(name_lbl)
                     item_v.addLayout(sub_row)

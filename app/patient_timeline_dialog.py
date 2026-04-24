@@ -141,6 +141,9 @@ class PatientTimelineDialog(QWidget):
         self._on_compare     = on_compare
         self._on_export      = on_export
 
+        # Vital Signs UI was removed; keep an empty mapping so refresh paths stay safe.
+        self.vital_rows: dict[str, QLabel] = {}
+
         self.setStyleSheet("QWidget#PatientOverviewPanel{background:#f1f5f9;}")
         self.setObjectName("PatientOverviewPanel")
         self.setAutoFillBackground(True)
@@ -275,7 +278,6 @@ class PatientTimelineDialog(QWidget):
         """Two-page tab body: Overview vs Screening History."""
         # Build cards once so _refresh always updates the same widgets.
         self._card_patient_info = self._build_patient_info_card()
-        self._card_vitals = self._build_vitals_card()
         self._card_history = self._build_history_card()
         self._card_screening = self._build_screening_card()
         self._card_images = self._build_images_card()
@@ -288,7 +290,8 @@ class PatientTimelineDialog(QWidget):
         # IMPORTANT: a QWidget can only have one parent. Do not place the same card widget on two pages.
         # Overview: patient demographics + vitals + clinical history + latest screening/context + images/actions
         overview_page = self._build_three_col_page(
-            left_widgets=[self._card_patient_info, self._card_vitals, self._card_history],
+            # Vital Signs & Symptoms removed from Patient Overview per request.
+            left_widgets=[self._card_patient_info, self._card_history],
             center_widgets=[self._card_screening, self._card_images],
             right_widgets=[self._card_context] + ([self._card_actions] if self._show_actions else []),
         )
@@ -874,38 +877,7 @@ class PatientTimelineDialog(QWidget):
         self._si("weight", f"{w2} kg" if w2 else "-")
         self._si("bmi",    _opt(bmi))
 
-        # Vitals
-        va_l = _opt(record.get("visual_acuity_left"))
-        va_r = _opt(record.get("visual_acuity_right"))
-        bp_s = _opt(record.get("blood_pressure_systolic"))
-        bp_d = _opt(record.get("blood_pressure_diastolic"))
-        fb   = _opt(record.get("fasting_blood_sugar"))
-        rb   = _opt(record.get("random_blood_sugar"))
-
-        va_text = " | ".join(p for p in [
-            f"L: {va_l}" if va_l != "-" else "",
-            f"R: {va_r}" if va_r != "-" else "",
-        ] if p) or "-"
-        bp_text = (f"{bp_s}/{bp_d} mmHg" if bp_s != "-" and bp_d != "-"
-                   else (bp_s if bp_s != "-" else bp_d if bp_d != "-" else "-"))
-        bg_text = " | ".join(p for p in [
-            f"Fasting: {fb}" if fb != "-" else "",
-            f"Random: {rb}"  if rb != "-" else "",
-        ] if p) or "-"
-
-        symptoms = []
-        for k, lbl in [("symptom_blurred_vision", "Blurred vision"),
-                        ("symptom_floaters",       "Floaters"),
-                        ("symptom_flashes",        "Flashes"),
-                        ("symptom_vision_loss",    "Vision loss")]:
-            if str(record.get(k) or "").strip().lower() in {"1", "true", "yes", "y"}:
-                symptoms.append(lbl)
-        symp_text = ", ".join(symptoms) if symptoms else "None noted"
-
-        self._sv("visual_acuity",  va_text)
-        self._sv("blood_pressure", bp_text)
-        self._sv("blood_glucose",  bg_text)
-        self._sv("symptoms",       symp_text)
+        # Vitals & Symptoms removed from Patient Overview UI.
 
         # Clinical history
         dur   = str(record.get("duration") or "").strip()
@@ -993,7 +965,12 @@ class PatientTimelineDialog(QWidget):
         return self._active_eye_record
 
     def _si(self, k, v): self.info_rows.get(k) and self.info_rows[k].setText(str(v or "-"))
-    def _sv(self, k, v): self.vital_rows.get(k) and self.vital_rows[k].setText(str(v or "-"))
+    def _sv(self, k, v):
+        rows = getattr(self, "vital_rows", None)
+        if not isinstance(rows, dict):
+            return
+        if rows.get(k):
+            rows[k].setText(str(v or "-"))
     def _sh(self, k, v):
         if hasattr(self, "history_rows") and k in self.history_rows:
             self.history_rows[k].setText(str(v or "-"))

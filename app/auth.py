@@ -15,8 +15,12 @@ import shutil
 from datetime import timezone
 from datetime import datetime
 from typing import Any, Optional
-from app_paths import BACKUPS_DIR, CONFIG_DIR, USERS_DB_PATH
-from referrals import ReferralService
+try:
+    from .app_paths import BACKUPS_DIR, CONFIG_DIR, USERS_DB_PATH
+    from .referrals import ReferralService
+except Exception:  # pragma: no cover
+    from app_paths import BACKUPS_DIR, CONFIG_DIR, USERS_DB_PATH
+    from referrals import ReferralService
 
 DB_FILE = str(USERS_DB_PATH)
 VALID_ROLES = {"clinician", "admin", "frontdesk"}

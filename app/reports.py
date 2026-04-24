@@ -8,8 +8,12 @@ import csv
 import json
 from html import escape
 import os
-from patientInfo import handle_patient_info_double_click
-from patient_timeline_dialog import PatientTimelineDialog
+try:
+    from .patientInfo import handle_patient_info_double_click
+    from .patient_timeline_dialog import PatientTimelineDialog
+except Exception:  # pragma: no cover
+    from patientInfo import handle_patient_info_double_click
+    from patient_timeline_dialog import PatientTimelineDialog
 from pathlib import Path
 import sqlite3
 from datetime import datetime
@@ -24,9 +28,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, QRect
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QFont
 
-from auth import UserManager
-from app_paths import PATIENT_RECORDS_DB_PATH
-from patient_record_groups import group_patient_record_rows
+try:
+    from .auth import UserManager
+    from .app_paths import PATIENT_RECORDS_DB_PATH
+    from .patient_record_groups import group_patient_record_rows
+except Exception:  # pragma: no cover
+    from auth import UserManager
+    from app_paths import PATIENT_RECORDS_DB_PATH
+    from patient_record_groups import group_patient_record_rows
 
 try:
     from db import get_records_conn, ensure_patient_records_db_schema

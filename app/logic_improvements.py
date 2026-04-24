@@ -16,8 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    from app_paths import PATIENT_RECORDS_DB_PATH
-except ImportError:
+    from .app_paths import PATIENT_RECORDS_DB_PATH
+except Exception:  # pragma: no cover
     from app_paths import PATIENT_RECORDS_DB_PATH
 
 DB_FILE = str(PATIENT_RECORDS_DB_PATH)

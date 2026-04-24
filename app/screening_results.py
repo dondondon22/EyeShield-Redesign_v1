@@ -18,10 +18,16 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QIcon, QPalette, QImage, QPdfWriter, QPageSize, QPageLayout, QTextDocument
 from PySide6.QtCore import Qt, QSize, QEvent, QTimer, QByteArray, QBuffer, QIODevice, QMarginsF
 
-from screening_styles import DR_COLORS, DR_RECOMMENDATIONS, PROGRESSBAR_STYLE
-from screening_widgets import ClickableImageLabel
-from safety_runtime import can_write_directory, get_free_space_mb, write_activity
-from auth import UserManager
+try:
+    from .screening_styles import DR_COLORS, DR_RECOMMENDATIONS, PROGRESSBAR_STYLE
+    from .screening_widgets import ClickableImageLabel
+    from .safety_runtime import can_write_directory, get_free_space_mb, write_activity
+    from .auth import UserManager
+except Exception:  # pragma: no cover
+    from screening_styles import DR_COLORS, DR_RECOMMENDATIONS, PROGRESSBAR_STYLE
+    from screening_widgets import ClickableImageLabel
+    from safety_runtime import can_write_directory, get_free_space_mb, write_activity
+    from auth import UserManager
 
 ICDR_OPTIONS = ["No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"]
 

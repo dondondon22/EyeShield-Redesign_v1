@@ -45,7 +45,7 @@ try:
     )
     from .app_paths import PATIENT_RECORDS_DB_PATH
     from .auth import UserManager
-    import emr_service as emr
+    from . import emr_service as emr
     from .safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
 except ImportError:
     from screening_styles import (
@@ -1014,8 +1014,25 @@ class ScreeningPage(QWidget):
         c1.addLayout(row2(field("Age", self.p_age, "scr_label_age"), field("Sex", self.p_sex, "scr_label_sex")))
         self.p_eye.hide()
 
+        # Contact fields (split per request)
+        self.p_phone = QLineEdit()
+        self.p_phone.setPlaceholderText("Phone number")
+        self.p_email = QLineEdit()
+        self.p_email.setPlaceholderText("Email")
+
+        # Backward-compat field used throughout legacy code paths.
+        # Keep it in sync so we don't have to refactor the entire module at once.
         self.p_contact = QLineEdit()
         self.p_contact.setPlaceholderText("Phone or Email")
+        self.p_contact.hide()
+
+        def _sync_contact_summary() -> None:
+            phone = self.p_phone.text().strip() if hasattr(self, "p_phone") else ""
+            email = self.p_email.text().strip() if hasattr(self, "p_email") else ""
+            self.p_contact.setText(phone or email)
+
+        self.p_phone.textChanged.connect(lambda *_: _sync_contact_summary())
+        self.p_email.textChanged.connect(lambda *_: _sync_contact_summary())
 
         # Height, Weight, and BMI
         self.height = QDoubleSpinBox()
@@ -1050,7 +1067,7 @@ class ScreeningPage(QWidget):
         )
         c1.addWidget(self.bmi_classification_label)
 
-        c1.addLayout(field("Contact", self.p_contact, "scr_label_contact"))
+        c1.addLayout(row2(field("Phone Number", self.p_phone, "scr_label_contact"), field("Email", self.p_email)))
 
         # Vitals widgets (rendered in a separate card below top row).
         self.va_left = QLineEdit()
@@ -1177,11 +1194,12 @@ class ScreeningPage(QWidget):
         top_row.addWidget(card2, 1)
         left_col.addLayout(top_row)
 
+        # Vital Signs & Symptoms section removed from Assessment UI (kept in data model for compatibility).
+        # Widgets are still instantiated above so existing save/load logic remains stable.
         card_vitals, cv = make_card()
         section_title(cv, "VITAL SIGNS & SYMPTOMS", "scr_vitals")
         cv.addLayout(row2(field("Visual Acuity - Left", self.va_left), field("Visual Acuity - Right", self.va_right)))
         cv.addLayout(row2(field("Blood Pressure", bp_w), field("Blood Glucose", bg_w)))
-
         cv.addWidget(lbl("Symptoms"))
         symptoms_grid = QGridLayout()
         symptoms_grid.setHorizontalSpacing(8)
@@ -1192,29 +1210,52 @@ class ScreeningPage(QWidget):
         symptoms_grid.addWidget(self.symptom_other, 0, 3)
         symptoms_grid.setColumnStretch(4, 1)
         cv.addLayout(symptoms_grid)
-        left_col.addWidget(card_vitals)
+        card_vitals.hide()
+        self._card_vitals = card_vitals
 
         # Front desk quick actions (shown only when upload is restricted).
         self._fd_action_row = QFrame()
         self._fd_action_row.setObjectName("card")
-        fd_actions = QHBoxLayout(self._fd_action_row)
+        # Keep this card compact; don't stretch full width.
+        self._fd_action_row.setMaximumWidth(360)
+        self._fd_action_row.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        fd_actions = QVBoxLayout(self._fd_action_row)
         fd_actions.setContentsMargins(12, 10, 12, 10)
-        fd_actions.setSpacing(8)
-        fd_actions.addWidget(QLabel("Purpose:"), 0)
+        fd_actions.setSpacing(10)
+
+        purpose_row = QHBoxLayout()
+        purpose_row.setSpacing(8)
+        purpose_lbl = QLabel("Purpose:")
+        purpose_lbl.setFixedWidth(72)
+        purpose_row.addWidget(purpose_lbl, 0, Qt.AlignVCenter)
         self.fd_purpose_combo = QComboBox()
         self.fd_purpose_combo.addItems(["New patient", "Follow-up patient"])
         self.fd_purpose_combo.setFixedHeight(34)
-        self.fd_purpose_combo.setMinimumWidth(170)
+        self.fd_purpose_combo.setMinimumWidth(200)
         self.fd_purpose_combo.setCursor(Qt.PointingHandCursor)
-        fd_actions.addWidget(self.fd_purpose_combo, 0)
-        self.btn_fd_save_queue = QPushButton("Save && Queue Patient")
+        # Ensure readable (white) dropdown on Windows.
+        self.fd_purpose_combo.setStyleSheet(
+            "QComboBox{background:#ffffff;color:#0f172a;border:1px solid #dbe4ee;border-radius:8px;padding:6px 10px;}"
+            "QComboBox::drop-down{border:none;width:24px;}"
+            "QComboBox QAbstractItemView{background:#ffffff;color:#0f172a;selection-background-color:#dbeafe;selection-color:#0f172a;}"
+        )
+        purpose_row.addWidget(self.fd_purpose_combo, 0, Qt.AlignVCenter)
+        purpose_row.addStretch(1)
+        fd_actions.addLayout(purpose_row)
+
+        btn_row = QHBoxLayout()
+        # Align button with dropdown left edge (after the "Purpose:" label).
+        btn_row.addSpacing(72 + 8)
+        self.btn_fd_save_queue = QPushButton("Save & Queue Patient")
         self.btn_fd_save_queue.setObjectName("btnPrimary")
-        self.btn_fd_save_queue.setMinimumHeight(38)
+        self.btn_fd_save_queue.setMinimumHeight(40)
+        self.btn_fd_save_queue.setMinimumWidth(220)
         self.btn_fd_save_queue.clicked.connect(self._save_and_queue_patient)
-        fd_actions.addStretch(1)
-        fd_actions.addWidget(self.btn_fd_save_queue)
+        btn_row.addWidget(self.btn_fd_save_queue, 0, Qt.AlignLeft)
+        btn_row.addStretch(1)
+        fd_actions.addLayout(btn_row)
         self._fd_action_row.hide()
-        left_col.addWidget(self._fd_action_row)
+        left_col.addWidget(self._fd_action_row, 0, Qt.AlignRight)
 
         left_col.addStretch()
         splitter.addWidget(left_panel)
@@ -1379,7 +1420,15 @@ class ScreeningPage(QWidget):
             return
 
         sex = self.p_sex.currentText().strip()
+        phone = self.p_phone.text().strip() if hasattr(self, "p_phone") else ""
+        email = self.p_email.text().strip() if hasattr(self, "p_email") else ""
         contact = self.p_contact.text().strip()
+        if not (phone or email or contact):
+            QMessageBox.warning(self, "Missing Information", "Please enter a phone number or email.")
+            return
+        # Keep legacy contact summary populated for downstream flows.
+        if hasattr(self, "p_contact") and not self.p_contact.text().strip():
+            self.p_contact.setText(phone or email)
 
         # Visit-scoped details (do NOT write into emr_patients; these vary per date/visit).
         height_cm = float(self.height.value()) if self.height.value() > 0 else None
@@ -1399,7 +1448,8 @@ class ScreeningPage(QWidget):
                 first_name=first_name,
                 date_of_birth=dob_str,
                 sex=sex,
-                contact_number=contact,
+                contact_number=phone or contact,
+                email=email,
             )
         except Exception as exc:
             QMessageBox.warning(self, "Save Failed", f"Could not save patient information.\n\n{exc}")
@@ -1519,8 +1569,14 @@ class ScreeningPage(QWidget):
     def _set_tab_order_unified(self):
         self.setTabOrder(self.p_name, self.p_dob)
         self.setTabOrder(self.p_dob, self.p_sex)
-        self.setTabOrder(self.p_sex, self.p_contact)
-        self.setTabOrder(self.p_contact, self.p_eye)
+        # Tab order: sex -> phone -> email -> eye (hidden)
+        if hasattr(self, "p_phone") and hasattr(self, "p_email"):
+            self.setTabOrder(self.p_sex, self.p_phone)
+            self.setTabOrder(self.p_phone, self.p_email)
+            self.setTabOrder(self.p_email, self.p_eye)
+        else:
+            self.setTabOrder(self.p_sex, self.p_contact)
+            self.setTabOrder(self.p_contact, self.p_eye)
         self.setTabOrder(self.p_eye, self.diabetes_type)
         self.setTabOrder(self.diabetes_type, self.diabetes_diagnosis_date)
         self.setTabOrder(self.diabetes_diagnosis_date, self.diabetes_duration)
@@ -1931,9 +1987,17 @@ class ScreeningPage(QWidget):
         self.p_sex.addItems(["", "Male", "Female", "Other"])
         patient_form.addRow("Sex:", self.p_sex)
 
+        self.p_phone = QLineEdit()
+        self.p_phone.setPlaceholderText("Phone number")
+        self.p_email = QLineEdit()
+        self.p_email.setPlaceholderText("Email")
+        # Keep legacy summary for older code paths.
         self.p_contact = QLineEdit()
-        self.p_contact.setPlaceholderText("Phone or Email")
-        patient_form.addRow("Contact:", self.p_contact)
+        self.p_contact.hide()
+        self.p_phone.textChanged.connect(lambda *_: self.p_contact.setText(self.p_phone.text().strip() or self.p_email.text().strip()))
+        self.p_email.textChanged.connect(lambda *_: self.p_contact.setText(self.p_phone.text().strip() or self.p_email.text().strip()))
+        patient_form.addRow("Phone Number:", self.p_phone)
+        patient_form.addRow("Email:", self.p_email)
 
         self.p_eye = QComboBox()
         self.p_eye.addItems(["", "Both Eyes", "Left Eye", "Right Eye"])

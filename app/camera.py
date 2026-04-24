@@ -36,7 +36,10 @@ from PySide6.QtMultimedia import QCamera, QMediaCaptureSession, QMediaDevices, Q
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtSvg import QSvgRenderer
 from typing import Optional
-from safety_runtime import write_activity
+try:
+    from .safety_runtime import write_activity
+except Exception:  # pragma: no cover
+    from safety_runtime import write_activity
 
 
 class CameraPage(QWidget):

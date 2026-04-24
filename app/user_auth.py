@@ -1,4 +1,7 @@
-from auth import UserManager
+try:
+    from .auth import UserManager
+except Exception:  # pragma: no cover
+    from auth import UserManager
 
 class UserAuth:
     @staticmethod

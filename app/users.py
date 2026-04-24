@@ -24,7 +24,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont, QAction, QIcon, QColor
 from PySide6.QtCore import Qt, QTime, QDate, QTimer
-import user_store
+try:
+    from . import user_store
+except Exception:  # pragma: no cover
+    import user_store
 
 
 # â”€â”€ Role badge colours â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

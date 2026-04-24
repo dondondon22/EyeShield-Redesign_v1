@@ -5,7 +5,10 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from app_paths import PATIENT_RECORDS_DB_PATH, USERS_DB_PATH
+try:
+    from .app_paths import PATIENT_RECORDS_DB_PATH, USERS_DB_PATH
+except Exception:  # pragma: no cover
+    from app_paths import PATIENT_RECORDS_DB_PATH, USERS_DB_PATH
 
 
 def get_users_conn() -> sqlite3.Connection:

@@ -1,6 +1,10 @@
 from PySide6.QtWidgets import QMessageBox
-from patient_timeline_dialog import PatientTimelineDialog
-from auth import UserManager
+try:
+    from .patient_timeline_dialog import PatientTimelineDialog
+    from .auth import UserManager
+except Exception:  # pragma: no cover
+    from patient_timeline_dialog import PatientTimelineDialog
+    from auth import UserManager
 
 def handle_patient_info_double_click(parent, get_selected_record, fetch_patient_timeline_records, username,
                                     on_follow_up=None, on_view_report=None, on_compare=None, on_export=None):

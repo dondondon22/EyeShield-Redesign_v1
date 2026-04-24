@@ -91,7 +91,7 @@ class DoctorDiagnosisForm(QWidget):
         left_l.setContentsMargins(0, 0, 0, 0)
         left_l.setSpacing(8)
         left_l.addWidget(self._build_patient_info_card())
-        left_l.addWidget(self._build_vital_signs_card())
+        # Vital Signs & Symptoms removed from UI per request.
         left_l.addWidget(self._build_clinical_history_card())
         left_l.addStretch(1)
 
@@ -133,24 +133,13 @@ class DoctorDiagnosisForm(QWidget):
 
     def _bind_screening_summary_refresh(self) -> None:
         for name, signal_name in (
-            ("va_left", "textChanged"),
-            ("va_right", "textChanged"),
-            ("bp_systolic", "valueChanged"),
-            ("bp_diastolic", "valueChanged"),
-            ("fbs", "valueChanged"),
-            ("rbs", "valueChanged"),
             ("diabetes_type", "currentTextChanged"),
             ("diabetes_duration", "valueChanged"),
             ("hba1c", "valueChanged"),
             ("diabetes_diagnosis_date", "textChanged"),
             ("treatment_regimen", "currentTextChanged"),
             ("prev_dr_stage", "currentTextChanged"),
-            ("symptom_other", "textChanged"),
             ("prev_treatment", "toggled"),
-            ("symptom_blurred", "toggled"),
-            ("symptom_floaters", "toggled"),
-            ("symptom_flashes", "toggled"),
-            ("symptom_vision_loss", "toggled"),
         ):
             widget = getattr(self.screening, name, None)
             signal = getattr(widget, signal_name, None) if widget is not None else None
@@ -289,35 +278,6 @@ class DoctorDiagnosisForm(QWidget):
             self._content_row.setContentsMargins(0 if on_results else 12, 0, 0 if on_results else 12, 12)
             self._content_row.setSpacing(0 if on_results else 10)
 
-    def _build_vital_signs_card(self) -> QWidget:
-        card = QFrame()
-        card.setStyleSheet("QFrame{background:#ffffff;border:none;border-radius:12px;}")
-        v = QVBoxLayout(card)
-        v.setContentsMargins(16, 12, 16, 12)
-        v.setSpacing(8)
-        self._add_card_header(v, "Vital Signs", with_edit=True)
-
-        self._vs = {}
-
-        def kv(label: str, key: str):
-            row = QHBoxLayout()
-            row.setSpacing(10)
-            k = QLabel(label)
-            k.setStyleSheet("font-size:10px;color:#64748b;font-weight:600;")
-            val = QLabel("-")
-            val.setStyleSheet("font-size:11px;color:#0f172a;font-weight:700;")
-            val.setWordWrap(True)
-            self._vs[key] = val
-            row.addWidget(k, 2)
-            row.addWidget(val, 5)
-            v.addLayout(row)
-
-        kv("Visual Acuity", "va")
-        kv("Blood Pressure", "bp")
-        kv("Blood Glucose", "bg")
-        kv("Symptoms", "symptoms")
-        return card
-
     def _build_clinical_history_card(self) -> QWidget:
         card = QFrame()
         card.setStyleSheet("QFrame{background:#ffffff;border:none;border-radius:12px;}")
@@ -381,22 +341,6 @@ class DoctorDiagnosisForm(QWidget):
             return "-"
         return text
 
-    def _symptom_summary(self) -> str:
-        symptoms: list[str] = []
-        for attr, label in (
-            ("symptom_blurred", "Blurred vision"),
-            ("symptom_floaters", "Floaters"),
-            ("symptom_flashes", "Flashes"),
-            ("symptom_vision_loss", "Vision loss"),
-        ):
-            widget = getattr(self.screening, attr, None)
-            if widget is not None and hasattr(widget, "isChecked") and widget.isChecked():
-                symptoms.append(label)
-        other = str(getattr(getattr(self.screening, "symptom_other", None), "text", lambda: "")() or "").strip()
-        if other:
-            symptoms.append(other)
-        return ", ".join(symptoms) if symptoms else "None noted"
-
     def _set_line_edit_text(self, widget, value: str) -> None:
         if widget is None or not hasattr(widget, "setText"):
             return
@@ -431,18 +375,6 @@ class DoctorDiagnosisForm(QWidget):
         widget.setChecked(bool(checked))
 
     def _refresh_screening_fields_from_dialog(self, values: dict) -> None:
-        va_left = str(values.get("va_left") or "").strip()
-        va_right = str(values.get("va_right") or "").strip()
-        if hasattr(self.screening, "_normalize_visual_acuity"):
-            va_left, _ = self.screening._normalize_visual_acuity(va_left)
-            va_right, _ = self.screening._normalize_visual_acuity(va_right)
-
-        self._set_line_edit_text(getattr(self.screening, "va_left", None), va_left)
-        self._set_line_edit_text(getattr(self.screening, "va_right", None), va_right)
-        self._set_spinbox_value(getattr(self.screening, "bp_systolic", None), int(values.get("bp_systolic") or 0))
-        self._set_spinbox_value(getattr(self.screening, "bp_diastolic", None), int(values.get("bp_diastolic") or 0))
-        self._set_spinbox_value(getattr(self.screening, "fbs", None), int(values.get("fbs") or 0))
-        self._set_spinbox_value(getattr(self.screening, "rbs", None), int(values.get("rbs") or 0))
         self._set_combo_value(getattr(self.screening, "diabetes_type", None), values.get("diabetes_type") or "", blank_values={"Select"})
         self._set_spinbox_value(getattr(self.screening, "diabetes_duration", None), int(values.get("dm_duration_years") or 0))
         self._set_spinbox_value(getattr(self.screening, "hba1c", None), float(values.get("hba1c") or 0))
@@ -458,11 +390,6 @@ class DoctorDiagnosisForm(QWidget):
             blank_values={"Select"},
         )
         self._set_checked(getattr(self.screening, "prev_treatment", None), bool(values.get("prev_treatment")))
-        self._set_checked(getattr(self.screening, "symptom_blurred", None), bool(values.get("symptom_blurred")))
-        self._set_checked(getattr(self.screening, "symptom_floaters", None), bool(values.get("symptom_floaters")))
-        self._set_checked(getattr(self.screening, "symptom_flashes", None), bool(values.get("symptom_flashes")))
-        self._set_checked(getattr(self.screening, "symptom_vision_loss", None), bool(values.get("symptom_vision_loss")))
-        self._set_line_edit_text(getattr(self.screening, "symptom_other", None), values.get("symptom_other") or "")
 
         # Anthropometrics (visit-scoped)
         try:
@@ -531,29 +458,6 @@ class DoctorDiagnosisForm(QWidget):
         self._pi.get("height") and self._pi["height"].setText(h_txt)
         self._pi.get("weight") and self._pi["weight"].setText(w_txt)
         self._pi.get("bmi") and self._pi["bmi"].setText(bmi_txt)
-
-        # Vital Signs (if available on the embedded ScreeningPage; otherwise show "-").
-        if hasattr(self, "_vs") and isinstance(self._vs, dict):
-            va_l = getattr(getattr(self.screening, "va_left", None), "text", lambda: "")()
-            va_r = getattr(getattr(self.screening, "va_right", None), "text", lambda: "")()
-            va_l = str(va_l or "").strip()
-            va_r = str(va_r or "").strip()
-            va = " | ".join([x for x in [f"L: {va_l}" if va_l else "", f"R: {va_r}" if va_r else ""] if x]) or "-"
-            bp_s = getattr(getattr(self.screening, "bp_systolic", None), "value", lambda: 0)()
-            bp_d = getattr(getattr(self.screening, "bp_diastolic", None), "value", lambda: 0)()
-            bp = f"{bp_s}/{bp_d} mmHg" if int(bp_s or 0) and int(bp_d or 0) else "-"
-            fbs = getattr(getattr(self.screening, "fbs", None), "value", lambda: 0)()
-            rbs = getattr(getattr(self.screening, "rbs", None), "value", lambda: 0)()
-            bg_parts = []
-            if int(fbs or 0):
-                bg_parts.append(f"Fasting: {int(fbs)}")
-            if int(rbs or 0):
-                bg_parts.append(f"Random: {int(rbs)}")
-            bg = " | ".join(bg_parts) or "-"
-            self._vs.get("va") and self._vs["va"].setText(va)
-            self._vs.get("bp") and self._vs["bp"].setText(bp)
-            self._vs.get("bg") and self._vs["bg"].setText(bg)
-            self._vs.get("symptoms") and self._vs["symptoms"].setText(self._symptom_summary())
 
         # Clinical history from EMR patient fields
         if hasattr(self, "_ch") and isinstance(self._ch, dict):
@@ -659,44 +563,6 @@ class DoctorDiagnosisForm(QWidget):
             in_hba1c.setValue(0)
         form.addRow("Height", in_height)
         form.addRow("Weight", in_weight)
-        form.addRow(QLabel("Vital Signs"))
-        in_va_left = QLineEdit(str(getattr(getattr(self.screening, "va_left", None), "text", lambda: "")() or ""))
-        in_va_right = QLineEdit(str(getattr(getattr(self.screening, "va_right", None), "text", lambda: "")() or ""))
-        in_bp_systolic = QSpinBox()
-        in_bp_systolic.setRange(0, 300)
-        in_bp_systolic.setValue(int(getattr(getattr(self.screening, "bp_systolic", None), "value", lambda: 0)() or 0))
-        in_bp_diastolic = QSpinBox()
-        in_bp_diastolic.setRange(0, 200)
-        in_bp_diastolic.setValue(int(getattr(getattr(self.screening, "bp_diastolic", None), "value", lambda: 0)() or 0))
-        in_fbs = QSpinBox()
-        in_fbs.setRange(0, 600)
-        in_fbs.setValue(int(getattr(getattr(self.screening, "fbs", None), "value", lambda: 0)() or 0))
-        in_rbs = QSpinBox()
-        in_rbs.setRange(0, 600)
-        in_rbs.setValue(int(getattr(getattr(self.screening, "rbs", None), "value", lambda: 0)() or 0))
-        in_symptom_blurred = QCheckBox("Blurred vision")
-        in_symptom_blurred.setChecked(bool(getattr(getattr(self.screening, "symptom_blurred", None), "isChecked", lambda: False)()))
-        in_symptom_floaters = QCheckBox("Floaters")
-        in_symptom_floaters.setChecked(bool(getattr(getattr(self.screening, "symptom_floaters", None), "isChecked", lambda: False)()))
-        in_symptom_flashes = QCheckBox("Flashes")
-        in_symptom_flashes.setChecked(bool(getattr(getattr(self.screening, "symptom_flashes", None), "isChecked", lambda: False)()))
-        in_symptom_vision_loss = QCheckBox("Vision loss")
-        in_symptom_vision_loss.setChecked(bool(getattr(getattr(self.screening, "symptom_vision_loss", None), "isChecked", lambda: False)()))
-        in_symptom_other = QLineEdit(str(getattr(getattr(self.screening, "symptom_other", None), "text", lambda: "")() or ""))
-        symptoms_row = QWidget()
-        symptoms_layout = QVBoxLayout(symptoms_row)
-        symptoms_layout.setContentsMargins(0, 0, 0, 0)
-        symptoms_layout.setSpacing(6)
-        for checkbox in (in_symptom_blurred, in_symptom_floaters, in_symptom_flashes, in_symptom_vision_loss):
-            symptoms_layout.addWidget(checkbox)
-        symptoms_layout.addWidget(in_symptom_other)
-        form.addRow("Visual acuity - Left", in_va_left)
-        form.addRow("Visual acuity - Right", in_va_right)
-        form.addRow("BP systolic", in_bp_systolic)
-        form.addRow("BP diastolic", in_bp_diastolic)
-        form.addRow("Fasting blood sugar", in_fbs)
-        form.addRow("Random blood sugar", in_rbs)
-        form.addRow("Symptoms", symptoms_row)
 
         form.addRow(QLabel("Clinical History"))
         in_dm_type = QComboBox()
@@ -747,9 +613,6 @@ class DoctorDiagnosisForm(QWidget):
         lay.addLayout(btn_row)
 
         def _save():
-            if in_bp_systolic.value() and in_bp_diastolic.value() and in_bp_diastolic.value() >= in_bp_systolic.value():
-                QMessageBox.warning(dlg, "Vital Signs", "Diastolic pressure must be lower than systolic pressure.")
-                return
             fields = {
                 "first_name": in_first.text().strip() or None,
                 "last_name": in_last.text().strip() or None,
@@ -784,12 +647,6 @@ class DoctorDiagnosisForm(QWidget):
                 qid = 0
             if qid:
                 visit_details = {
-                    "visual_acuity_left": in_va_left.text().strip(),
-                    "visual_acuity_right": in_va_right.text().strip(),
-                    "blood_pressure_systolic": int(in_bp_systolic.value()) if in_bp_systolic.value() > 0 else None,
-                    "blood_pressure_diastolic": int(in_bp_diastolic.value()) if in_bp_diastolic.value() > 0 else None,
-                    "fasting_blood_sugar": float(in_fbs.value()) if in_fbs.value() > 0 else None,
-                    "random_blood_sugar": float(in_rbs.value()) if in_rbs.value() > 0 else None,
                     "diabetes_type": (in_dm_type.currentText().strip() if in_dm_type.currentText().strip() != "Select" else None),
                     "dm_duration_years": float(in_dm_dur.value()) if in_dm_dur.value() > 0 else None,
                     "hba1c": float(in_hba1c.value()) if in_hba1c.value() > 0 else None,
@@ -797,28 +654,12 @@ class DoctorDiagnosisForm(QWidget):
                     "treatment_regimen": in_treatment_regimen.currentText().strip() or None,
                     "prev_dr_stage": in_prev_dr_stage.currentText().strip() or None,
                     "prev_treatment": "Yes" if in_prev_treatment.isChecked() else "No",
-                    "symptom_blurred_vision": 1 if in_symptom_blurred.isChecked() else 0,
-                    "symptom_floaters": 1 if in_symptom_floaters.isChecked() else 0,
-                    "symptom_flashes": 1 if in_symptom_flashes.isChecked() else 0,
-                    "symptom_vision_loss": 1 if in_symptom_vision_loss.isChecked() else 0,
-                    "symptom_other": in_symptom_other.text().strip() or None,
                     "height_cm": float(in_height.value()) if in_height.value() > 0 else None,
                     "weight_kg": float(in_weight.value()) if in_weight.value() > 0 else None,
                 }
                 emr.upsert_visit_details(queue_id=qid, patient_id=int(pid_pk), captured_by=int(uid), details=visit_details)
             self._refresh_screening_fields_from_dialog(
                 {
-                    "va_left": in_va_left.text().strip(),
-                    "va_right": in_va_right.text().strip(),
-                    "bp_systolic": in_bp_systolic.value(),
-                    "bp_diastolic": in_bp_diastolic.value(),
-                    "fbs": in_fbs.value(),
-                    "rbs": in_rbs.value(),
-                    "symptom_blurred": in_symptom_blurred.isChecked(),
-                    "symptom_floaters": in_symptom_floaters.isChecked(),
-                    "symptom_flashes": in_symptom_flashes.isChecked(),
-                    "symptom_vision_loss": in_symptom_vision_loss.isChecked(),
-                    "symptom_other": in_symptom_other.text().strip(),
                     "diabetes_type": in_dm_type.currentText().strip(),
                     "dm_duration_years": in_dm_dur.value(),
                     "hba1c": in_hba1c.value(),
@@ -869,17 +710,6 @@ class DoctorDiagnosisForm(QWidget):
             if vd:
                 self._refresh_screening_fields_from_dialog(
                     {
-                        "va_left": vd.get("visual_acuity_left") or "",
-                        "va_right": vd.get("visual_acuity_right") or "",
-                        "bp_systolic": vd.get("blood_pressure_systolic") or 0,
-                        "bp_diastolic": vd.get("blood_pressure_diastolic") or 0,
-                        "fbs": vd.get("fasting_blood_sugar") or 0,
-                        "rbs": vd.get("random_blood_sugar") or 0,
-                        "symptom_blurred": bool(vd.get("symptom_blurred_vision")),
-                        "symptom_floaters": bool(vd.get("symptom_floaters")),
-                        "symptom_flashes": bool(vd.get("symptom_flashes")),
-                        "symptom_vision_loss": bool(vd.get("symptom_vision_loss")),
-                        "symptom_other": vd.get("symptom_other") or "",
                         "diabetes_type": vd.get("diabetes_type") or "",
                         "dm_duration_years": vd.get("dm_duration_years") or 0,
                         "hba1c": vd.get("hba1c") or 0,

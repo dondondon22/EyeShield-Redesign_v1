@@ -40,8 +40,12 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
 )
 
-import emr_service as emr
-from ui_feedback import show_success, show_error, show_warning, confirm, loading_state
+try:
+    from . import emr_service as emr
+    from .ui_feedback import show_success, show_error, show_warning, confirm, loading_state
+except Exception:  # pragma: no cover
+    import emr_service as emr
+    from ui_feedback import show_success, show_error, show_warning, confirm, loading_state
 try:
     from .patient_record_groups import group_patient_record_rows
 except Exception:
