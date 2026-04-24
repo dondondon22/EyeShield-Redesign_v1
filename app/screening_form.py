@@ -21,7 +21,17 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit, QCalendarWidget, QStackedWidget,
     QGridLayout, QFrame, QSizePolicy, QScrollArea, QSplitter, QAbstractSpinBox,
 )
-from PySide6.QtGui import QPixmap, QFont, QRegularExpressionValidator, QIcon, QPainter, QColor, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import (
+    QPixmap,
+    QFont,
+    QRegularExpressionValidator,
+    QIcon,
+    QPainter,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QGuiApplication,
+)
 from PySide6.QtCore import Qt, QDate, QRegularExpression, QSize, Signal, QTimer
 
 try:
@@ -858,7 +868,8 @@ class ScreeningPage(QWidget):
         root = QWidget()
         root.setStyleSheet(_REDESIGN_STYLESHEET)
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(20, 20, 20, 20)
+        # Wider side gutters improve readability (less edge-to-edge scanning).
+        root_layout.setContentsMargins(24, 20, 24, 20)
         root_layout.setSpacing(12)
 
         # Follow-up Context Header
@@ -888,11 +899,34 @@ class ScreeningPage(QWidget):
         
         root_layout.addWidget(self.followup_header)
 
+        # Center the main content area so it doesn't feel edge-to-edge on wide screens.
+        # Keep it wide enough for the intake + upload split, but not "ultra wide".
+        center_wrap = QWidget()
+        center_wrap.setStyleSheet("background: transparent;")
+        center_row = QHBoxLayout(center_wrap)
+        center_row.setContentsMargins(0, 0, 0, 0)
+        center_row.setSpacing(0)
+        center_row.addStretch(1)
+
         content_root = QWidget()
+        content_root.setStyleSheet("background: transparent;")
+        # Keep the assessment form in a "comfortable" middle width.
+        # Wide enough for the intake + upload split, but not edge-to-edge on large screens.
+        screen = QGuiApplication.primaryScreen()
+        screen_w = int(screen.availableGeometry().width()) if screen else 1366
+        assess_max_w = max(1100, min(1440, int(screen_w * 0.92)))
+        assess_min_w = max(880, min(1120, int(screen_w * 0.70)))
+        content_root.setMinimumWidth(assess_min_w)
+        content_root.setMaximumWidth(assess_max_w)
+        content_root.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         content_layout = QHBoxLayout(content_root)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(8)
-        root_layout.addWidget(content_root)
+
+        center_row.addWidget(content_root, 1)
+        center_row.addStretch(1)
+        root_layout.addWidget(center_wrap, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -961,7 +995,7 @@ class ScreeningPage(QWidget):
         left_col.setSpacing(10)
 
         card1, c1 = make_card()
-        section_title(c1, "PATIENT INFORMATION", "scr_patient_info")
+        section_title(c1, "Patient Information", "scr_patient_info")
 
         self.p_id = QLineEdit()
         self.p_id.setReadOnly(True)
@@ -992,7 +1026,12 @@ class ScreeningPage(QWidget):
             cal.clicked.connect(self._on_dob_calendar_selected)
             cal.activated.connect(self._on_dob_calendar_selected)
         self._apply_dob_theme_style()
-        c1.addLayout(row2(field("Full Name", self.p_name, "scr_label_name"), field("Date of Birth", self.p_dob, "scr_label_dob")))
+        c1.addLayout(
+            row2(
+                field("Full Name", self.p_name, "scr_label_name"),
+                field("Date of Birth", self.p_dob, "scr_label_dob"),
+            )
+        )
 
         self.p_age = QSpinBox()
         self.p_age.setRange(0, 120)
@@ -1172,14 +1211,16 @@ class ScreeningPage(QWidget):
         self.treatment_regimen.setObjectName("treatmentRegimenDropdown")
         self.treatment_regimen.addItems(["Select", "Insulin only", "Oral medications only", "Insulin + Oral medications", "Diet control only", "None/Unknown"])
         self._apply_visible_dropdown_style(self.treatment_regimen)
-        c2.addLayout(field("Treatment Regimen", self.treatment_regimen, "scr_label_treatment"))
+        # Keep related dropdowns on the same row for readability.
+        # (Treatment regimen + previous DR stage are commonly reviewed together.)
+        # They were previously stacked; keep them paired to reduce vertical scrolling.
 
         # Previous DR stage dropdown
         self.prev_dr_stage = QComboBox()
         self.prev_dr_stage.setObjectName("prevDRStageDropdown")
         self.prev_dr_stage.addItems(["Select", "No previous DR", "Mild NPDR", "Moderate NPDR", "Severe NPDR", "PDR (Proliferative)", "Unknown"])
         self._apply_visible_dropdown_style(self.prev_dr_stage)
-        c2.addLayout(field("Previous DR Stage", self.prev_dr_stage, "scr_label_prev_dr"))
+        c2.addLayout(row2(field("Treatment Regimen", self.treatment_regimen, "scr_label_treatment"), field("Previous DR Stage", self.prev_dr_stage, "scr_label_prev_dr")))
 
         self.prev_treatment = QCheckBox("Previous DR Treatment (Laser/Injection)")
         c2.addWidget(self.prev_treatment)
@@ -1188,11 +1229,10 @@ class ScreeningPage(QWidget):
         self.notes.setMinimumHeight(72)
         self.notes.setMaximumHeight(90)
         self.notes.hide()
-        top_row = QHBoxLayout()
-        top_row.setSpacing(10)
-        top_row.addWidget(card1, 1)
-        top_row.addWidget(card2, 1)
-        left_col.addLayout(top_row)
+        # Single-column Assessment layout:
+        # Patient Information (card1) → Clinical History (card2)
+        left_col.addWidget(card1)
+        left_col.addWidget(card2)
 
         # Vital Signs & Symptoms section removed from Assessment UI (kept in data model for compatibility).
         # Widgets are still instantiated above so existing save/load logic remains stable.
@@ -1323,7 +1363,7 @@ class ScreeningPage(QWidget):
         self._intake_splitter = splitter
         splitter.setStretchFactor(0, 6)
         splitter.setStretchFactor(1, 5)
-        splitter.setSizes([640, 520])
+        # Avoid hard-coded pixel sizes so the Assessment tab scales with window width.
         handle = splitter.handle(1)
         handle.setDisabled(True)
         handle.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1345,9 +1385,16 @@ class ScreeningPage(QWidget):
             self._fd_action_row.setVisible(restricted)
         if hasattr(self, "_intake_splitter"):
             if restricted:
-                self._intake_splitter.setSizes([1, 0])
+                # When upload is restricted (frontdesk), give the intake form the
+                # full available width instead of leaving unused whitespace.
+                self._intake_splitter.setStretchFactor(0, 1)
+                self._intake_splitter.setStretchFactor(1, 0)
+                self._intake_splitter.setSizes([10_000, 0])
             else:
-                self._intake_splitter.setSizes([640, 520])
+                # Keep proportional sizing so the Assessment layout scales with the
+                # centered max-width container instead of snapping to fixed pixels.
+                self._intake_splitter.setStretchFactor(0, 6)
+                self._intake_splitter.setStretchFactor(1, 5)
         if hasattr(self, "btn_upload"):
             self.btn_upload.setEnabled(not restricted)
         if hasattr(self, "btn_clear"):

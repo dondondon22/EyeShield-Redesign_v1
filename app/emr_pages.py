@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
     QStackedWidget,
     QTabWidget,
     QTableWidget,
@@ -1061,58 +1062,127 @@ class EmrVisitsPage(QWidget):
 
     def _build(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(18)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
         self.setStyleSheet(
-            "QWidget#emrRoot{background:#f0f4f8;}"
+            "QWidget#emrRoot{background:#f1f5f9;}"
             + _input_style()
             + """
-            QGroupBox{
-                background:#ffffff;
-                border:1px solid #dbe4ee;
-                border-radius:12px;
-                margin-top:0px;
-            }
-            QFrame#queueCard{
-                background:#ffffff;
-                border:1px solid #dbe4ee;
-                border-radius:12px;
-            }
             QTableWidget#queueTable{
                 background:#ffffff;
-                border:1px solid #dbe4ee;
-                border-radius:10px;
-                gridline-color:#eef2f7;
-                selection-background-color:#e8f1ff;
-                selection-color:#0f172a;
+                border:none;
+                border-radius:12px;
+                gridline-color:transparent;
+                alternate-background-color:#f8fafc;
             }
             QHeaderView::section{
-                background:#f8fbff;
-                color:#334155;
+                background:#eff6ff;
+                color:#1d4ed8;
                 border:none;
-                border-bottom:1px solid #dbe4ee;
-                padding:10px 8px;
-                font-size:12px;
+                border-bottom:1px solid #e2e8f0;
+                padding:10px 10px;
+                font-size:11px;
                 font-weight:700;
             }
-            QPushButton#queuePrimary{
-                background:#2563eb;
-                color:#ffffff;
-                border:none;
-                border-radius:8px;
-                padding:7px 14px;
-                font-weight:600;
+            QTableWidget::item{
+                padding:8px 10px;
+                color:#0f172a;
+                border-bottom:1px solid #f1f5f9;
             }
-            QPushButton#queuePrimary:hover{background:#1d4ed8;}
-            QPushButton#queueNeutral{
+            QTableWidget::item:selected{
+                background:#dbeafe;
+                color:#0f172a;
+            }
+            QTableWidget::item:hover{
+                background:#e0f2fe;
+            }
+            QFrame#queueHeaderCard, QFrame#queueTableCard{
                 background:#ffffff;
-                color:#334155;
-                border:1px solid #cbd5e1;
-                border-radius:8px;
-                padding:7px 14px;
-                font-weight:600;
+                border:1px solid #e2e8f0;
+                border-radius:12px;
             }
-            QPushButton#queueNeutral:hover{background:#f8fafc;border-color:#94a3b8;}
+            QFrame#queueHeaderCard{
+                border-top:3px solid #2563eb;
+            }
+            QLabel#queueTitle{
+                font-size:16px;
+                font-weight:700;
+                color:#0f172a;
+            }
+            QLabel#queueSubtitle{
+                font-size:11px;
+                font-weight:400;
+                color:#64748b;
+            }
+            QLabel#queueChip{
+                background:#f8fafc;
+                border:none;
+                border-radius:10px;
+                padding:6px 10px;
+                font-size:11px;
+                font-weight:600;
+                color:#0f172a;
+            }
+            QLabel#queueChipMuted{
+                background:#f8fafc;
+                border:none;
+                border-radius:10px;
+                padding:6px 10px;
+                font-size:11px;
+                font-weight:600;
+                color:#64748b;
+            }
+            QLineEdit#queueSearch{
+                background:#ffffff;
+                border:1px solid #e2e8f0;
+                border-radius:10px;
+                padding:8px 10px;
+                font-size:12px;
+                color:#111827;
+            }
+            QLineEdit#queueSearch:focus{border-color:#93c5fd;}
+            QComboBox#queueFilter{
+                background:#ffffff;
+                border:1px solid #e2e8f0;
+                border-radius:10px;
+                padding:6px 10px;
+                font-size:12px;
+                color:#111827;
+                min-height:34px;
+            }
+            QPushButton#queueBtnPrimary{
+                background:#dbeafe;
+                color:#111827;
+                border:1px solid #93c5fd;
+                border-radius:10px;
+                padding:9px 14px;
+                font-size:12px;
+                font-weight:700;
+                text-align:left;
+            }
+            QPushButton#queueBtnPrimary:hover{background:#bfdbfe;border-color:#60a5fa;}
+            QPushButton#queueBtnSecondary{
+                background:#ffffff;
+                color:#111827;
+                border:1px solid #e2e8f0;
+                border-radius:10px;
+                padding:9px 12px;
+                font-size:12px;
+                font-weight:600;
+                text-align:left;
+            }
+            QPushButton#queueBtnSecondary:hover{background:#f8fafc;border-color:#cbd5e1;}
+            QPushButton#queueBtnDanger{
+                background:#fee2e2;
+                color:#111827;
+                border:1px solid #fecaca;
+                border-radius:10px;
+                padding:9px 12px;
+                font-size:12px;
+                font-weight:700;
+                text-align:left;
+            }
+            QPushButton#queueBtnDanger:hover{background:#fecaca;border-color:#fca5a5;}
             """
         )
         self.setObjectName("emrRoot")
@@ -1123,72 +1193,117 @@ class EmrVisitsPage(QWidget):
         queue_page = QWidget()
         qp_layout = QVBoxLayout(queue_page)
         qp_layout.setContentsMargins(0, 0, 0, 0)
-        qp_layout.setSpacing(18)
+        qp_layout.setSpacing(0)
 
-        _title = QLabel("Patient Queue")
-        _title.setStyleSheet("font-size:26px;font-weight:700;color:#1f6fe5;font-family:'Segoe UI';")
-        qp_layout.addWidget(_title)
+        # Centered content column with breathing room (wide, but not edge-to-edge).
+        # This avoids wasted whitespace on ultra-wide displays while still allowing
+        # a spacious table on typical desktop resolutions.
+        _QUEUE_GUTTER_PX = 40
+        _QUEUE_MAX_W = 2240
+        center_wrap = QWidget()
+        center_wrap.setStyleSheet("background: transparent;")
+        center_row = QHBoxLayout(center_wrap)
+        # Match the "wide, near-full" look (small gutters).
+        center_row.setContentsMargins(_QUEUE_GUTTER_PX, 0, _QUEUE_GUTTER_PX, 0)
+        center_row.setSpacing(0)
+        center_row.addStretch(1)
 
-        controls_group = QGroupBox("")
-        controls_layout = QVBoxLayout(controls_group)
-        controls_layout.setContentsMargins(18, 16, 18, 16)
-        controls_layout.setSpacing(12)
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Let the queue breathe on 1080p/1440p without going edge-to-edge.
+        content.setMaximumWidth(_QUEUE_MAX_W)
+        content_l = QVBoxLayout(content)
+        content_l.setContentsMargins(0, 0, 0, 0)
+        content_l.setSpacing(10)
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(12)
+        center_row.addWidget(content, 1)
+        center_row.addStretch(1)
+        qp_layout.addWidget(center_wrap, 1)
+
+        # ── Header card (match PatientTimeline aesthetic) ────────────────────
+        header_card = QFrame()
+        header_card.setObjectName("queueHeaderCard")
+        header_l = QVBoxLayout(header_card)
+        header_l.setContentsMargins(14, 12, 14, 12)
+        header_l.setSpacing(10)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(1)
+        # Debuggable title: confirms which layout settings are live.
+        title = QLabel(f"Patient Queue  (gutter {_QUEUE_GUTTER_PX}px, max {_QUEUE_MAX_W}px)")
+        title.setObjectName("queueTitle")
+        title_col.addWidget(title)
+        title_row.addLayout(title_col, 1)
+        header_l.addLayout(title_row)
+
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(10)
+
         self.queue_search = QLineEdit()
-        self.queue_search.setPlaceholderText("Search")
-        self.queue_search.setMinimumHeight(40)
+        self.queue_search.setObjectName("queueSearch")
+        self.queue_search.setPlaceholderText("Search name, queue number, sex…")
+        self.queue_search.setMinimumHeight(36)
         self.queue_search.textChanged.connect(self.refresh)
-        top_row.addWidget(self.queue_search, 1)
-        self.total_queue_label = QLabel("Total Queue: 0")
-        self.total_queue_label.setStyleSheet(
-            "color:#475569;font-size:13px;font-weight:700;"
-            "background:#f8fbff;border:1px solid #dbeafe;border-radius:8px;padding:8px 12px;"
-        )
-        top_row.addWidget(self.total_queue_label, 0)
-        controls_layout.addLayout(top_row)
+        controls_row.addWidget(self.queue_search, 1)
 
-        row = QHBoxLayout()
-        self.btn_new_patient_visit = QPushButton("➕  New Patient / Visit")
-        self.btn_new_patient_visit.setObjectName("queuePrimary")
+        # Clinical filter: active vs all
+        self._clinic_filter = QComboBox()
+        self._clinic_filter.setObjectName("queueFilter")
+        self._clinic_filter.addItems(["Active visits", "All visits (today)"])
+        self._clinic_filter.setVisible(self._is_clinical())
+        self._clinic_filter.currentIndexChanged.connect(self._on_clinic_filter_changed)
+        controls_row.addWidget(self._clinic_filter, 0)
+
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setObjectName("queueBtnSecondary")
+        self.btn_refresh.setCursor(Qt.PointingHandCursor)
+        self.btn_refresh.clicked.connect(self.refresh)
+        controls_row.addWidget(self.btn_refresh, 0)
+
+        # Front desk actions (grouped on the right)
+        self.btn_new_patient_visit = QPushButton("+ New patient / visit")
+        self.btn_new_patient_visit.setObjectName("queueBtnPrimary")
         self.btn_new_patient_visit.setCursor(Qt.PointingHandCursor)
         self.btn_new_patient_visit.clicked.connect(self._go_to_new_patient_intake)
         self.btn_new_patient_visit.setVisible(self._is_front())
-        row.addWidget(self.btn_new_patient_visit)
-        b_refresh = QPushButton("Refresh")
-        b_refresh.setObjectName("queueNeutral")
-        b_refresh.clicked.connect(self.refresh)
-        row.addWidget(b_refresh)
-        self.btn_clear_queue = QPushButton("Clear Queue")
-        self.btn_clear_queue.setObjectName("queueNeutral")
-        self.btn_clear_queue.clicked.connect(self._clear_today_queue)
-        self.btn_clear_queue.setVisible(self._is_front())
-        row.addWidget(self.btn_clear_queue)
-        self.btn_cancel_visit = QPushButton("Cancel Visit")
-        self.btn_cancel_visit.setObjectName("queuePrimary")
+        controls_row.addWidget(self.btn_new_patient_visit, 0)
+
+        self.btn_cancel_visit = QPushButton("Cancel visit")
+        self.btn_cancel_visit.setObjectName("queueBtnDanger")
+        self.btn_cancel_visit.setCursor(Qt.PointingHandCursor)
         self.btn_cancel_visit.clicked.connect(self._cancel_selected_visit)
         self.btn_cancel_visit.setVisible(self._is_front())
-        row.addWidget(self.btn_cancel_visit)
-        row.addStretch()
-        controls_layout.addLayout(row)
-        qp_layout.addWidget(controls_group)
+        controls_row.addWidget(self.btn_cancel_visit, 0)
 
-        results_group = QGroupBox("")
-        results_layout = QVBoxLayout(results_group)
-        results_layout.setContentsMargins(18, 16, 18, 18)
-        results_layout.setSpacing(14)
+        self.btn_clear_queue = QPushButton("Clear today’s queue")
+        self.btn_clear_queue.setObjectName("queueBtnSecondary")
+        self.btn_clear_queue.setCursor(Qt.PointingHandCursor)
+        self.btn_clear_queue.clicked.connect(self._clear_today_queue)
+        self.btn_clear_queue.setVisible(self._is_front())
+        controls_row.addWidget(self.btn_clear_queue, 0)
 
-        _ncol = 7 if self._is_clinical() else 6
+        header_l.addLayout(controls_row)
+        content_l.addWidget(header_card)
+
+        # ── Table card ───────────────────────────────────────────────────────
+        table_card = QFrame()
+        table_card.setObjectName("queueTableCard")
+        results_layout = QVBoxLayout(table_card)
+        results_layout.setContentsMargins(12, 12, 12, 10)
+        results_layout.setSpacing(8)
+
+        # Columns:
+        # 0 Name | 1 Age | 2 Sex | 3 Purpose | 4 Arrived | 5 Status | 6 queue_id(hidden) | 7 Action (clinical)
+        _ncol = 8 if self._is_clinical() else 7
         self.table = QTableWidget(0, _ncol)
         self.table.setObjectName("queueTable")
+        headers = ["Name", "Age", "Sex", "Purpose", "Arrived", "Status", "queue_id"]
         if self._is_clinical():
-            self.table.setHorizontalHeaderLabels(
-                ["Name", "Age", "Sex", "Purpose", "Queue number (timestamp)", "queue_id", "Diagnosis"]
-            )
-        else:
-            self.table.setHorizontalHeaderLabels(["Name", "Age", "Sex", "Purpose", "Queue number (timestamp)", "queue_id"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            headers.append("Actions")
+        self.table.setHorizontalHeaderLabels(headers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1196,18 +1311,29 @@ class EmrVisitsPage(QWidget):
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
         self.table.doubleClicked.connect(self._on_row_activated)
-        self.table.setColumnHidden(5, True)
+        self.table.setColumnHidden(6, True)
+
+        # Column sizing (aesthetic + scannable)
+        hh = self.table.horizontalHeader()
+        hh.setStretchLastSection(False)
+        hh.setSectionResizeMode(0, QHeaderView.Stretch)          # Name
+        hh.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Age
+        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Sex
+        hh.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Purpose
+        hh.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Arrived
+        hh.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Status
         if self._is_clinical():
-            self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+            hh.setSectionResizeMode(7, QHeaderView.ResizeToContents) # Actions
         results_layout.addWidget(self.table)
+
         self._queue_stack = QStackedWidget()
-        qp_layout.addWidget(self._queue_stack, 1)
+        content_l.addWidget(self._queue_stack, 1)
 
         queue_list_page = QWidget()
         qlp = QVBoxLayout(queue_list_page)
         qlp.setContentsMargins(0, 0, 0, 0)
         qlp.setSpacing(0)
-        qlp.addWidget(results_group, 1)
+        qlp.addWidget(table_card, 1)
         self._queue_stack.addWidget(queue_list_page)  # 0
 
         review_page = QWidget()
@@ -1274,7 +1400,7 @@ class EmrVisitsPage(QWidget):
                 int(r.get("queue_id") or 0),
             )
         )
-        self.total_queue_label.setText(f"Total Queue: {wait_n}")
+        _ = wait_n  # computed for internal checks/analytics; no UI chip shown
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             name = f"{r.get('first_name', '')} {r.get('last_name', '')}".strip()
@@ -1282,38 +1408,35 @@ class EmrVisitsPage(QWidget):
             sex = str(r.get("sex", "") or "-")
             purpose_raw = str(r.get("screening_purpose") or "new").strip().lower()
             purpose = "Follow-up" if purpose_raw == "follow_up" else "New"
-            qlabel = self._queue_with_timestamp(str(r.get("queue_number", "")), str(r.get("created_at", "")))
+            qlabel = _fmt_queue_time(r.get("created_at"))
+            status = str(r.get("status") or "").strip().lower() or "-"
             self.table.setItem(i, 0, QTableWidgetItem(name))
             self.table.setItem(i, 1, QTableWidgetItem(age))
             self.table.setItem(i, 2, QTableWidgetItem(sex))
             self.table.setItem(i, 3, QTableWidgetItem(purpose))
             self.table.setItem(i, 4, QTableWidgetItem(qlabel))
-            self.table.setItem(i, 5, QTableWidgetItem(str(r.get("queue_id", ""))))
-            if self._is_clinical() and self.table.columnCount() > 6:
+            self.table.setItem(i, 5, _status_item(status))
+            self.table.setItem(i, 6, QTableWidgetItem(str(r.get("queue_id", ""))))
+            if self._is_clinical() and self.table.columnCount() > 7:
                 qid = r.get("queue_id")
                 pid = r.get("patient_id")
                 btn = QPushButton("Start diagnosis")
-                btn.setObjectName("queuePrimary")
-                btn.setMaximumHeight(34)
+                btn.setObjectName("queueBtnPrimary")
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setFixedHeight(34)
                 btn.clicked.connect(
                     lambda checked=False, q=qid, p=pid: self._on_start_diagnosis_clicked(q, p)
                 )
-                self.table.setCellWidget(i, 6, btn)
-        self.table.resizeColumnsToContents()
-        self.table.horizontalHeader().setStretchLastSection(False)
-        for col in range(self.table.columnCount()):
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
-        if self._is_clinical() and self.table.columnCount() > 6:
-            self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+                self.table.setCellWidget(i, 7, btn)
         for row in range(self.table.rowCount()):
-            self.table.setRowHeight(row, 38)
+            self.table.setRowHeight(row, 42)
 
     def _selected_queue_and_patient(self) -> tuple[int | None, int | None]:
         r = self.table.currentRow()
         if r < 0:
             return None, None
         try:
-            qid = int(self.table.item(r, 5).text())
+            qid = int(self.table.item(r, 6).text())
         except (TypeError, ValueError, AttributeError):
             qid = None
         # patient from row data — re-query list (unfiltered) by queue id
