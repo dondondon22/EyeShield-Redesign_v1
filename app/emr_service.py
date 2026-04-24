@@ -186,6 +186,255 @@ def find_duplicate_patient(first_name: str, last_name: str, date_of_birth: str) 
         conn.close()
 
 
+def find_patient_by_name_dob(first_name: str, last_name: str, date_of_birth: str) -> Optional[dict[str, Any]]:
+    """
+    Resolve an existing patient using the project's chosen identity key: (first_name, last_name, date_of_birth).
+
+    This intentionally matches the same predicate as `find_duplicate_patient`, but returns the full patient row
+    so the caller can reuse/update it without creating duplicates.
+    """
+    fn = (first_name or "").strip()
+    ln = (last_name or "").strip()
+    dob = (date_of_birth or "").strip()[:10]
+    if not fn or not ln or not dob:
+        return None
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT *
+            FROM emr_patients
+            WHERE lower(trim(first_name)) = lower(trim(?))
+              AND lower(trim(last_name)) = lower(trim(?))
+              AND date_of_birth = ?
+            ORDER BY patient_id ASC
+            LIMIT 1
+            """,
+            (fn, ln, dob),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+    finally:
+        conn.close()
+
+
+def upsert_patient_by_name_dob(
+    acting_user_id: int,
+    *,
+    last_name: str,
+    first_name: str,
+    date_of_birth: str,
+    middle_name: str = "",
+    sex: str = "",
+    contact_number: str = "",
+    email: str = "",
+    address: str = "",
+    height_cm: Optional[float] = None,
+    weight_kg: Optional[float] = None,
+    diabetes_type: str = "",
+    dm_duration_years: Optional[float] = None,
+    hba1c: Optional[float] = None,
+    current_medications: str = "",
+    known_allergies: str = "",
+    other_conditions: str = "",
+    current_eye_treatment: str = "",
+    previous_eye_treatment: str = "",
+    last_eye_exam_date: str = "",
+) -> tuple[int, bool]:
+    """
+    Upsert patient using (first_name,last_name,dob) as identity.
+
+    Returns (patient_id, created_new).
+    """
+    existing = find_patient_by_name_dob(first_name, last_name, date_of_birth)
+    if not existing:
+        pid = create_patient(
+            acting_user_id,
+            last_name=last_name,
+            first_name=first_name,
+            middle_name=middle_name,
+            date_of_birth=date_of_birth,
+            sex=sex,
+            contact_number=contact_number,
+            email=email,
+            address=address,
+            height_cm=height_cm,
+            weight_kg=weight_kg,
+            diabetes_type=diabetes_type,
+            dm_duration_years=dm_duration_years,
+            hba1c=hba1c,
+            current_medications=current_medications,
+            known_allergies=known_allergies,
+            other_conditions=other_conditions,
+            current_eye_treatment=current_eye_treatment,
+            previous_eye_treatment=previous_eye_treatment,
+            last_eye_exam_date=last_eye_exam_date,
+        )
+        return pid, True
+
+    pid = int(existing["patient_id"])
+    fields: dict[str, Any] = {
+        # Keep identity fields consistent too (normalise casing/spacing through the UI).
+        "last_name": (last_name or "").strip(),
+        "first_name": (first_name or "").strip(),
+        "middle_name": (middle_name or "").strip() or None,
+        "date_of_birth": (date_of_birth or "").strip()[:10],
+        "sex": (sex or "").strip() or None,
+        "contact_number": (contact_number or "").strip() or None,
+        "email": (email or "").strip() or None,
+        "address": (address or "").strip() or None,
+        "height_cm": height_cm,
+        "weight_kg": weight_kg,
+        "diabetes_type": (diabetes_type or "").strip() or None,
+        "dm_duration_years": dm_duration_years,
+        "hba1c": hba1c,
+        "current_medications": (current_medications or "").strip() or None,
+        "known_allergies": (known_allergies or "").strip() or None,
+        "other_conditions": (other_conditions or "").strip() or None,
+        "current_eye_treatment": (current_eye_treatment or "").strip() or None,
+        "previous_eye_treatment": (previous_eye_treatment or "").strip() or None,
+        "last_eye_exam_date": (last_eye_exam_date or "").strip() or None,
+    }
+    # Best-effort update; if nothing changes, it's fine.
+    update_patient_fields(pid, fields, acting_user_id, action="UPSERT_PATIENT_IDENTITY", target_type="patient")
+    return pid, False
+
+
+def ensure_visit_details_row(queue_id: int, patient_id: int, captured_by: Optional[int]) -> bool:
+    """
+    Ensure a visit has a persisted encounter row even before diagnosis/images.
+    """
+    qid = int(queue_id)
+    pid = int(patient_id)
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT visit_detail_id FROM emr_visit_details WHERE queue_id = ? LIMIT 1", (qid,))
+        existing = cur.fetchone()
+        if existing:
+            return True
+        cur.execute(
+            "INSERT INTO emr_visit_details (queue_id, patient_id, captured_by) VALUES (?, ?, ?)",
+            (qid, pid, captured_by),
+        )
+        conn.commit()
+        log_emr_action(captured_by, "CREATE_VISIT_DETAILS_STUB", "queue_entries", qid, "")
+        return True
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+
+
+def ensure_legacy_patient_record_stub(
+    *,
+    queue_id: int,
+    patient_id: int,
+    captured_by: Optional[int],
+    screening_purpose: str = "new",
+) -> bool:
+    """
+    Ensure the "Patient Records" (legacy `data/patient_records.db`) has a row for this visit
+    even before any fundus image exists.
+
+    The UI for Patient Records (Reports/Dashboard) is backed by `patient_records.db`, so this
+    creates a minimal "pending" record that can later be superseded by the clinician screening
+    entries.
+    """
+    qid = int(queue_id)
+    pid = int(patient_id)
+    purpose = str(screening_purpose or "new").strip().lower()
+    stype = "follow_up" if purpose == "follow_up" else "initial"
+    group_id = f"queue-{qid}"
+
+    # Import lazily to avoid hard coupling / circular imports at module load.
+    try:
+        from db import get_records_conn, ensure_patient_records_db_schema
+    except Exception:  # pragma: no cover
+        from .db import get_records_conn, ensure_patient_records_db_schema
+
+    # Source demographics from EMR patient table.
+    patient = get_patient(pid) or {}
+    if not patient:
+        return False
+
+    name = f"{patient.get('first_name', '')} {patient.get('last_name', '')}".strip()
+    patient_code = str(patient.get("patient_code") or "").strip()
+    birthdate = str(patient.get("date_of_birth") or "").strip()[:10]
+    age = str(patient.get("age") or "").strip()
+    sex = str(patient.get("sex") or "").strip()
+    contact = str(patient.get("contact_number") or "").strip()
+    diabetes_type = str(patient.get("diabetes_type") or "").strip()
+    duration = str(patient.get("dm_duration_years") or "").strip()
+    hba1c = str(patient.get("hba1c") or "").strip()
+
+    conn = None
+    try:
+        conn = get_records_conn()
+        ensure_patient_records_db_schema(conn)
+        cur = conn.cursor()
+        # Idempotency: if this queue encounter already has a legacy stub, don't insert again.
+        cur.execute(
+            "SELECT id FROM patient_records WHERE archived_at IS NULL AND screening_group_id = ? LIMIT 1",
+            (group_id,),
+        )
+        if cur.fetchone():
+            return True
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        follow_up_flag = "Yes" if stype == "follow_up" else ""
+        followup_date = now if stype == "follow_up" else ""
+        followup_label = "Follow-up screening" if stype == "follow_up" else ""
+
+        cur.execute(
+            """
+            INSERT INTO patient_records (
+                patient_id, name, birthdate, age, sex, contact, eyes,
+                diabetes_type, duration, hba1c, prev_treatment, notes,
+                result, confidence, screened_at,
+                follow_up, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id,
+                decision_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                patient_code,
+                name,
+                birthdate,
+                age,
+                sex,
+                contact,
+                "",  # eyes unknown at intake
+                diabetes_type,
+                duration,
+                hba1c,
+                "",  # prev_treatment
+                "",  # notes
+                "",  # result => Pending
+                "",  # confidence
+                now,
+                follow_up_flag,
+                followup_date,
+                followup_label,
+                stype,
+                None,
+                group_id,
+                "pending",
+            ),
+        )
+        conn.commit()
+        # Best-effort audit in EMR action logs.
+        log_emr_action(captured_by, "CREATE_LEGACY_VISIT_STUB", "patient_records", None, group_id)
+        return True
+    except Exception:
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            if conn is not None:
+                conn.close()
 def get_today_active_queue_for_patient(patient_id: int) -> Optional[dict[str, Any]]:
     """Active = visit_date today and status in (waiting, in_progress)."""
     vd = date.today().isoformat()
@@ -753,6 +1002,19 @@ def assign_queue_entry(
             (patient_id, label, vd, assigned_by, purpose, (notes or "").strip() or None),
         )
         qid = int(cur.lastrowid)
+        # Create the "encounter" row immediately so the patient visit exists in records
+        # even before any fundus images / diagnosis are attached.
+        with contextlib.suppress(Exception):
+            ensure_visit_details_row(qid, int(patient_id), int(assigned_by) if assigned_by is not None else None)
+        # Also create a Patient Records row (legacy patient_records.db) so the visit is visible
+        # under Patient Records immediately, even without a fundus image.
+        with contextlib.suppress(Exception):
+            ensure_legacy_patient_record_stub(
+                queue_id=qid,
+                patient_id=int(patient_id),
+                captured_by=int(assigned_by) if assigned_by is not None else None,
+                screening_purpose=purpose,
+            )
         conn.commit()
         log_emr_action(
             assigned_by,

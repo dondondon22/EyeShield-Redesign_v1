@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QGroupBox, QMessageBox, QProgressBar, QSizePolicy,
     QFrame, QMenu, QInputDialog, QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QHeaderView, QDialog, QApplication, QLineEdit
+    QHeaderView, QDialog, QApplication, QLineEdit, QCalendarWidget
 )
 from PySide6.QtCore import Qt, QSize, QByteArray, QEvent, QTimer, QCoreApplication
 from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter, QFont, QShortcut, QKeySequence, QColor, QGuiApplication, QPainterPath
@@ -45,6 +45,8 @@ try:
     from db import get_records_conn, ensure_patient_records_db_schema
 except Exception:
     from .db import get_records_conn, ensure_patient_records_db_schema
+
+import emr_service as emr
 
 
 DB_FILE = str(PATIENT_RECORDS_DB_PATH)
@@ -1430,6 +1432,49 @@ class EyeShieldApp(QMainWindow):
 
         outer.addWidget(hero)
 
+        # ── Frontdesk quick patient search (top) ──────────────────────────────
+        # Keep workflow: uses the same follow-up queue logic via _open_frontdesk_rescreen_search.
+        role_l = str(getattr(self, "role", "") or "").strip().lower()
+        if role_l in {"frontdesk"}:
+            fd_bar = QWidget()
+            fd_bar.setObjectName("frontdeskSearchBar")
+            fd_l = QHBoxLayout(fd_bar)
+            fd_l.setContentsMargins(18, 14, 18, 14)
+            fd_l.setSpacing(10)
+
+            lbl = QLabel("Patient search")
+            lbl.setStyleSheet("color:#64748b;font-size:12px;font-weight:800;background:transparent;")
+
+            self._dash_fd_search = QLineEdit()
+            self._dash_fd_search.setPlaceholderText("Search patient (name / patient code) to rescreen or follow-up…")
+            self._dash_fd_search.setMinimumHeight(40)
+            self._dash_fd_search.setClearButtonEnabled(True)
+            self._dash_fd_search.setStyleSheet(
+                "QLineEdit{background:#ffffff;color:#0f172a;border:1px solid #e2e8f0;"
+                "border-radius:12px;padding:0 12px;font-size:13px;font-weight:600;}"
+                "QLineEdit:focus{border-color:#93c5fd;}"
+            )
+            self._dash_fd_search.returnPressed.connect(self._open_frontdesk_rescreen_search)
+
+            btn = QPushButton("Search")
+            btn.setMinimumHeight(40)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton{background:#2563eb;color:#fff;border:none;border-radius:12px;"
+                "padding:0 16px;font-weight:800;font-size:13px;}"
+                "QPushButton:hover{background:#1d4ed8;}"
+                "QPushButton:pressed{background:#1e40af;}"
+            )
+            btn.clicked.connect(self._open_frontdesk_rescreen_search)
+
+            fd_bar.setStyleSheet(
+                "QWidget#frontdeskSearchBar{background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;}"
+            )
+            fd_l.addWidget(lbl, 0, Qt.AlignVCenter)
+            fd_l.addWidget(self._dash_fd_search, 1)
+            fd_l.addWidget(btn, 0)
+            outer.addWidget(fd_bar)
+
         # DB health banner (hidden unless DB errors)
         self._dash_db_error_banner = QLabel("")
         self._dash_db_error_banner.setWordWrap(True)
@@ -1440,123 +1485,176 @@ class EyeShieldApp(QMainWindow):
         )
         outer.addWidget(self._dash_db_error_banner)
 
-        # ── KPI row ───────────────────────────────────────────────────────────
-        kpi_row = QHBoxLayout()
-        kpi_row.setSpacing(16)
+        # ── KPI row (not shown for frontdesk) ─────────────────────────────────
+        if role_l not in {"frontdesk"}:
+            kpi_row = QHBoxLayout()
+            kpi_row.setSpacing(16)
 
-        def make_kpi(obj_name, title_text, accent):
-            card = QWidget()
-            card.setObjectName(obj_name)
-            card.setMinimumHeight(92)
-            card.setStyleSheet(
-                f"QWidget#{obj_name}{{"
-                f"background: #ffffff;"
-                f"border-radius: 14px;"
-                f"border-left: 4px solid {accent};"
-                f"border-top: 1px solid #e2e8f0;"
-                f"border-right: 1px solid #e2e8f0;"
-                f"border-bottom: 1px solid #e2e8f0;"
-                f"}}"
-            )
-            v = QVBoxLayout(card)
-            v.setContentsMargins(16, 12, 16, 12)
-            v.setSpacing(4)
-            t = QLabel(title_text)
-            t.setObjectName(f"{obj_name}_title")
-            t.setStyleSheet(
-                "color: #94a3b8; font-size: 10px; font-weight: 700;"
-                "letter-spacing: 0.8px; text-transform: uppercase; background: transparent;"
-            )
-            val = QLabel("—")
-            val.setObjectName(f"{obj_name}_value")
-            val.setStyleSheet(
-                f"font-size: 28px; font-weight: 800; color: #0f172a; background: transparent;"
-            )
-            v.addWidget(t)
-            v.addWidget(val)
-            v.addStretch()
-            return card, val
+            def make_kpi(obj_name, title_text, accent):
+                card = QWidget()
+                card.setObjectName(obj_name)
+                card.setMinimumHeight(92)
+                card.setStyleSheet(
+                    f"QWidget#{obj_name}{{"
+                    f"background: #ffffff;"
+                    f"border-radius: 14px;"
+                    f"border-left: 4px solid {accent};"
+                    f"border-top: 1px solid #e2e8f0;"
+                    f"border-right: 1px solid #e2e8f0;"
+                    f"border-bottom: 1px solid #e2e8f0;"
+                    f"}}"
+                )
+                v = QVBoxLayout(card)
+                v.setContentsMargins(16, 12, 16, 12)
+                v.setSpacing(4)
+                t = QLabel(title_text)
+                t.setObjectName(f"{obj_name}_title")
+                t.setStyleSheet(
+                    "color: #94a3b8; font-size: 10px; font-weight: 700;"
+                    "letter-spacing: 0.8px; text-transform: uppercase; background: transparent;"
+                )
+                val = QLabel("—")
+                val.setObjectName(f"{obj_name}_value")
+                val.setStyleSheet(
+                    f"font-size: 28px; font-weight: 800; color: #0f172a; background: transparent;"
+                )
+                v.addWidget(t)
+                v.addWidget(val)
+                v.addStretch()
+                return card, val
 
-        card_total,    self.total_screenings_value = make_kpi("kpiTotal",    "TOTAL SCREENINGS", "#3b82f6")
-        card_patients, self.unique_patients_value  = make_kpi("kpiPatients", "NO DR CASES",      "#22c55e")
-        card_abnormal, self.abnormal_cases_value   = make_kpi("kpiAbnormal", "ABNORMAL CASES",   "#f59e0b")
-        card_high,     self.high_risk_cases_value  = make_kpi("kpiHighRisk", "HIGH RISK CASES",  "#ef4444")
+            card_total,    self.total_screenings_value = make_kpi("kpiTotal",    "TOTAL SCREENINGS", "#3b82f6")
+            card_patients, self.unique_patients_value  = make_kpi("kpiPatients", "NO DR CASES",      "#22c55e")
+            card_abnormal, self.abnormal_cases_value   = make_kpi("kpiAbnormal", "ABNORMAL CASES",   "#f59e0b")
+            card_high,     self.high_risk_cases_value  = make_kpi("kpiHighRisk", "HIGH RISK CASES",  "#ef4444")
 
-        for c in (card_total, card_patients, card_abnormal, card_high):
-            kpi_row.addWidget(c, 1)
-        outer.addLayout(kpi_row)
+            for c in (card_total, card_patients, card_abnormal, card_high):
+                kpi_row.addWidget(c, 1)
+            outer.addLayout(kpi_row)
 
         # ── Content row ───────────────────────────────────────────────────────
         content_row = QHBoxLayout()
         content_row.setSpacing(16)
 
-        # ── Left: severity bar chart ──────────────────────────────────────────
-        severity_card = QWidget()
-        severity_card.setObjectName("severityCard")
-        severity_card.setMinimumHeight(380)
-        severity_card.setStyleSheet(
-            "QWidget#severityCard{background:#ffffff;border-radius:16px;"
-            "border:1px solid #e2e8f0;}"
-        )
-        sev_v = QVBoxLayout(severity_card)
-        sev_v.setContentsMargins(20, 16, 20, 18)
-        sev_v.setSpacing(0)
-
-        sev_header = QHBoxLayout()
-        sev_header.setContentsMargins(0, 0, 0, 0)
-        self._dash_severity_title_lbl = QLabel("SCREENED PATIENTS")
-        self._dash_severity_title_lbl.setStyleSheet(
-            "color:#64748b;font-size:10px;font-weight:800;"
-            "letter-spacing:1.0px;background:transparent;"
-        )
-        sev_header.addWidget(self._dash_severity_title_lbl)
-        sev_header.addStretch()
-        sev_v.addLayout(sev_header)
-
-        sev_divider = QFrame()
-        sev_divider.setFrameShape(QFrame.HLine)
-        sev_divider.setFixedHeight(1)
-        sev_divider.setStyleSheet("background: #f1f5f9; border: none; margin: 10px 0 12px 0;")
-        sev_v.addWidget(sev_divider)
-
-        self.severity_bars = {}
-        self._severity_order = ["No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"]
-
-        for level in self._severity_order:
-            row_w = QWidget()
-            row_w.setMinimumHeight(46)
-            row_w.setStyleSheet("background: transparent;")
-            row_l = QHBoxLayout(row_w)
-            row_l.setContentsMargins(0, 4, 0, 4)
-            row_l.setSpacing(12)
-
-            lbl = QLabel(level)
-            lbl.setFixedWidth(130)
-            lbl.setStyleSheet("font-size: 12px; font-weight: 700; color: #475569; background: transparent;")
-
-            bar = QProgressBar()
-            bar.setMinimum(0)
-            bar.setMaximum(100)
-            bar.setValue(0)
-            bar.setTextVisible(False)
-            bar.setFixedHeight(10)
-            bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-            count_lbl = QLabel("0")
-            count_lbl.setFixedWidth(40)
-            count_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            count_lbl.setStyleSheet(
-                "font-size: 14px; font-weight: 800; color: #0f172a; background: transparent;"
+        # Left content:
+        # - frontdesk: recent screenings (calendar moves to sidebar)
+        # - others: severity bar chart (screened patients)
+        cal_card = None
+        if role_l in {"frontdesk"}:
+            cal_card = QWidget()
+            cal_card.setObjectName("frontdeskCalendarCard")
+            cal_card.setMinimumHeight(380)
+            cal_card.setStyleSheet(
+                "QWidget#frontdeskCalendarCard{background:#ffffff;border-radius:16px;border:1px solid #e2e8f0;}"
             )
+            cal_v = QVBoxLayout(cal_card)
+            cal_v.setContentsMargins(20, 16, 20, 18)
+            cal_v.setSpacing(10)
 
-            row_l.addWidget(lbl)
-            row_l.addWidget(bar)
-            row_l.addWidget(count_lbl)
-            sev_v.addWidget(row_w, 1)
-            self.severity_bars[level] = (bar, count_lbl)
+            title = QLabel("CALENDAR")
+            title.setStyleSheet(
+                "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+            )
+            cal_v.addWidget(title)
 
-        sev_v.addStretch(1)
-        content_row.addWidget(severity_card, 6)
+            self._dash_calendar = QCalendarWidget()
+            self._dash_calendar.setGridVisible(False)
+            self._dash_calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+            self._dash_calendar.setNavigationBarVisible(True)  # built-in month forward/back controls
+            self._dash_calendar.setStyleSheet(
+                "QCalendarWidget QWidget{alternate-background-color:#f8fafc;}"
+                "QCalendarWidget QToolButton{"
+                "color:#0f172a;background:transparent;border:none;font-weight:800;"
+                "margin:0;padding:4px 8px;min-height:26px;"
+                "}"
+                "QCalendarWidget QToolButton:hover{background:#f1f5f9;border-radius:8px;}"
+                "QCalendarWidget QToolButton:pressed{background:#e2e8f0;border-radius:8px;}"
+                "QCalendarWidget QToolButton#qt_calendar_monthbutton,"
+                "QCalendarWidget QToolButton#qt_calendar_yearbutton{"
+                "padding-right:18px;"
+                "}"
+                "QCalendarWidget QToolButton::menu-indicator{"
+                "subcontrol-position: right center;"
+                "subcontrol-origin: padding;"
+                "width:10px;height:10px;"
+                "right:6px;"
+                "}"
+                "QCalendarWidget QMenu{background:#ffffff;border:1px solid #e2e8f0;}"
+                "QCalendarWidget QAbstractItemView{"
+                "selection-background-color:#2563eb;selection-color:#ffffff;"
+                "outline:0;background:#ffffff;color:#0f172a;border:1px solid #e2e8f0;border-radius:12px;"
+                "}"
+                "QCalendarWidget QAbstractItemView:disabled{color:#94a3b8;}"
+            )
+            cal_v.addWidget(self._dash_calendar, 1)
+        else:
+            # ── Left: severity bar chart ──────────────────────────────────────
+            severity_card = QWidget()
+            severity_card.setObjectName("severityCard")
+            severity_card.setMinimumHeight(380)
+            severity_card.setStyleSheet(
+                "QWidget#severityCard{background:#ffffff;border-radius:16px;"
+                "border:1px solid #e2e8f0;}"
+            )
+            sev_v = QVBoxLayout(severity_card)
+            sev_v.setContentsMargins(20, 16, 20, 18)
+            sev_v.setSpacing(0)
+
+            sev_header = QHBoxLayout()
+            sev_header.setContentsMargins(0, 0, 0, 0)
+            self._dash_severity_title_lbl = QLabel("SCREENED PATIENTS")
+            self._dash_severity_title_lbl.setStyleSheet(
+                "color:#64748b;font-size:10px;font-weight:800;"
+                "letter-spacing:1.0px;background:transparent;"
+            )
+            sev_header.addWidget(self._dash_severity_title_lbl)
+            sev_header.addStretch()
+            sev_v.addLayout(sev_header)
+
+            sev_divider = QFrame()
+            sev_divider.setFrameShape(QFrame.HLine)
+            sev_divider.setFixedHeight(1)
+            sev_divider.setStyleSheet("background: #f1f5f9; border: none; margin: 10px 0 12px 0;")
+            sev_v.addWidget(sev_divider)
+
+            self.severity_bars = {}
+            self._severity_order = ["No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"]
+
+            for level in self._severity_order:
+                row_w = QWidget()
+                row_w.setMinimumHeight(46)
+                row_w.setStyleSheet("background: transparent;")
+                row_l = QHBoxLayout(row_w)
+                row_l.setContentsMargins(0, 4, 0, 4)
+                row_l.setSpacing(12)
+
+                lbl = QLabel(level)
+                lbl.setFixedWidth(130)
+                lbl.setStyleSheet("font-size: 12px; font-weight: 700; color: #475569; background: transparent;")
+
+                bar = QProgressBar()
+                bar.setMinimum(0)
+                bar.setMaximum(100)
+                bar.setValue(0)
+                bar.setTextVisible(False)
+                bar.setFixedHeight(10)
+                bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+                count_lbl = QLabel("0")
+                count_lbl.setFixedWidth(40)
+                count_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                count_lbl.setStyleSheet(
+                    "font-size: 14px; font-weight: 800; color: #0f172a; background: transparent;"
+                )
+
+                row_l.addWidget(lbl)
+                row_l.addWidget(bar)
+                row_l.addWidget(count_lbl)
+                sev_v.addWidget(row_w, 1)
+                self.severity_bars[level] = (bar, count_lbl)
+
+            sev_v.addStretch(1)
+            content_row.addWidget(severity_card, 6)
 
         # ── Right sidebar ─────────────────────────────────────────────────────
         sidebar_w = QWidget()
@@ -1613,41 +1711,19 @@ class EyeShieldApp(QMainWindow):
 
         role_l = str(getattr(self, "role", "") or "").strip().lower()
         if role_l in {"frontdesk"}:
-            qa_v.addWidget(_primary_btn("➕  New Patient / Visit",
+            qa_v.addWidget(_primary_btn("➕  New Patient",
                                         lambda: self._navigate_to(1, nav_key="Screening")))
         else:
             qa_v.addWidget(_primary_btn("➕  New Screening",
                                         lambda: self._navigate_to(1, nav_key="Screening")))
-        qa_v.addWidget(_ghost_btn("📊  View Reports",
-                                   lambda: self._navigate_to(3, nav_key="Reports")))
+        qa_v.addWidget(_ghost_btn("📁  View Patient Records",
+                                  lambda: self._navigate_to(3, nav_key="Reports")))
         sb_v.addWidget(qa_card)
 
-        # Availability
-        av_card = QWidget()
-        av_card.setObjectName("availabilityCard")
-        av_v = QVBoxLayout(av_card)
-        av_v.setContentsMargins(16, 14, 16, 14)
-        av_v.setSpacing(6)
-
-        self._dash_availability_title_lbl = QLabel("MY AVAILABILITY")
-        self._dash_availability_title_lbl.setStyleSheet(
-            "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
-        )
-        av_v.addWidget(self._dash_availability_title_lbl)
-
-        self.availability_days_label = QLabel("Days: Not set")
-        self.availability_days_label.setWordWrap(True)
-        av_v.addWidget(self.availability_days_label)
-
-        self.availability_time_label = QLabel("Hours: Not set")
-        self.availability_time_label.setWordWrap(True)
-        av_v.addWidget(self.availability_time_label)
-
-        self.availability_updated_label = QLabel("Update from Users > Edit Availability")
-        self.availability_updated_label.setWordWrap(True)
-        av_v.addWidget(self.availability_updated_label)
-
-        sb_v.addWidget(av_card)
+        # Frontdesk: show calendar in the sidebar (below quick actions).
+        if role_l in {"frontdesk"} and cal_card is not None:
+            cal_card.setMinimumHeight(320)
+            sb_v.addWidget(cal_card)
 
         # Recent screenings
         rec_card = QWidget()
@@ -1666,12 +1742,157 @@ class EyeShieldApp(QMainWindow):
         self.recent_list_layout.setSpacing(6)
         rec_v.addLayout(self.recent_list_layout)
         rec_v.addStretch(1)
-        sb_v.addWidget(rec_card, 1)
+        if role_l in {"frontdesk"}:
+            content_row.addWidget(rec_card, 6)
+        else:
+            sb_v.addWidget(rec_card, 1)
 
         content_row.addWidget(sidebar_w, 4)
         outer.addLayout(content_row, 1)
 
         return page
+
+    def _open_frontdesk_rescreen_search(self) -> None:
+        """Dashboard shortcut for frontdesk: search existing patient and queue follow-up."""
+        if str(getattr(self, "role", "") or "").strip().lower() != "frontdesk":
+            return
+        query = ""
+        if hasattr(self, "_dash_fd_search"):
+            query = str(self._dash_fd_search.text() or "").strip()
+        if not query:
+            QMessageBox.information(self, "Search", "Type a patient name or code to search.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Search patient")
+        dlg.setMinimumSize(640, 420)
+        dlg.setStyleSheet(
+            "QDialog{background:#f0f4f8;}"
+            "QTableWidget{background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;}"
+            "QHeaderView::section{background:#f8fbff;color:#334155;border:none;border-bottom:1px solid #dbe4ee;"
+            "padding:10px 8px;font-size:12px;font-weight:700;}"
+        )
+        root = QVBoxLayout(dlg)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(10)
+
+        top = QHBoxLayout()
+        field = QLineEdit(query)
+        field.setPlaceholderText("Search by name or patient code…")
+        field.setMinimumHeight(38)
+        field.setClearButtonEnabled(True)
+        top.addWidget(field, 1)
+        btn_find = QPushButton("Search")
+        btn_find.setMinimumHeight(38)
+        btn_find.setCursor(Qt.PointingHandCursor)
+        btn_find.setStyleSheet(
+            "QPushButton{background:#2563eb;color:#fff;border:none;border-radius:10px;padding:0 14px;font-weight:700;}"
+            "QPushButton:hover{background:#1d4ed8;}"
+        )
+        top.addWidget(btn_find)
+        root.addLayout(top)
+
+        table = QTableWidget(0, 5)
+        table.setHorizontalHeaderLabels(["ID", "Code", "Name", "DOB", "Sex"])
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.setColumnHidden(0, True)  # keep patient_id internal
+        root.addWidget(table, 1)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        btn_queue = QPushButton("Queue follow-up (rescreen)")
+        btn_queue.setMinimumHeight(40)
+        btn_queue.setCursor(Qt.PointingHandCursor)
+        btn_queue.setStyleSheet(
+            "QPushButton{background:#059669;color:#fff;border:none;border-radius:10px;padding:0 14px;font-weight:800;}"
+            "QPushButton:hover{background:#047857;}"
+        )
+        btn_queue.setEnabled(False)
+        btn_cancel = QPushButton("Close")
+        btn_cancel.setMinimumHeight(40)
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setStyleSheet(
+            "QPushButton{background:#ffffff;color:#334155;border:1px solid #cbd5e1;border-radius:10px;"
+            "padding:0 14px;font-weight:700;}"
+            "QPushButton:hover{background:#f8fafc;border-color:#94a3b8;}"
+        )
+        actions.addWidget(btn_cancel)
+        actions.addWidget(btn_queue)
+        root.addLayout(actions)
+
+        def _load_results() -> None:
+            q = field.text().strip()
+            rows = emr.search_patients(q) if q else []
+            table.setRowCount(len(rows))
+            for i, p in enumerate(rows):
+                pid = str(p.get("patient_id", ""))
+                code = str(p.get("patient_code", ""))
+                name = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+                dob = str(p.get("date_of_birth", "") or "")[:10]
+                sex = str(p.get("sex", "") or "")
+                table.setItem(i, 0, QTableWidgetItem(pid))
+                table.setItem(i, 1, QTableWidgetItem(code))
+                table.setItem(i, 2, QTableWidgetItem(name))
+                table.setItem(i, 3, QTableWidgetItem(dob))
+                table.setItem(i, 4, QTableWidgetItem(sex))
+            if rows:
+                table.selectRow(0)
+            btn_queue.setEnabled(bool(rows))
+
+        def _selected_patient_id() -> int | None:
+            r = table.currentRow()
+            if r < 0:
+                return None
+            it = table.item(r, 0)
+            if not it:
+                return None
+            try:
+                return int(it.text())
+            except Exception:
+                return None
+
+        def _queue_follow_up() -> None:
+            pid = _selected_patient_id()
+            if pid is None:
+                QMessageBox.information(dlg, "Queue", "Select a patient first.")
+                return
+            uid = emr.get_user_id(str(getattr(self, "username", "") or ""))
+            if not uid:
+                QMessageBox.warning(dlg, "Queue", "Could not resolve current user.")
+                return
+            ok, reason = emr.can_create_visit_for_patient(int(pid))
+            if not ok:
+                QMessageBox.information(dlg, "Already queued", str(reason or "This patient is already queued today."))
+                return
+            try:
+                qid = emr.assign_queue_entry(int(pid), int(uid), screening_purpose="follow_up")
+            except Exception as exc:
+                QMessageBox.warning(dlg, "Queue", f"Could not queue follow-up visit.\n\n{exc}")
+                return
+
+            # Frontdesk workflow: after queuing follow-up, go to Assessment.
+            # (Queue entry is still created; we only change the landing page.)
+            self._navigate_to(1, nav_key="Screening")
+            sp = getattr(self, "screening_page", None)
+            if sp is not None and hasattr(sp, "reset_screening"):
+                try:
+                    sp.reset_screening(confirm_unsaved=False)
+                except TypeError:
+                    sp.reset_screening()
+            dlg.accept()
+
+        btn_find.clicked.connect(_load_results)
+        field.returnPressed.connect(_load_results)
+        table.itemSelectionChanged.connect(lambda: btn_queue.setEnabled(_selected_patient_id() is not None))
+        btn_queue.clicked.connect(_queue_follow_up)
+        btn_cancel.clicked.connect(dlg.reject)
+
+        _load_results()
+        dlg.exec()
 
     # ── Dashboard refresh ─────────────────────────────────────────────────────
 
@@ -1679,6 +1900,7 @@ class EyeShieldApp(QMainWindow):
         """Refresh all dashboard widgets with current data and theme colours."""
         self._last_dashboard_refresh_at = time.monotonic()
         dark = getattr(self, "_dark_mode", False)
+        role_l = str(getattr(self, "role", "") or "").strip().lower()
 
         if dark:
             bg_page       = "#070f1a"
@@ -1776,100 +1998,102 @@ class EyeShieldApp(QMainWindow):
                 if level in ("Severe DR", "Proliferative DR"):
                     high_risk_count += 1
 
-        # KPI cards
-        kpi_title_style = (
-            f"color:{text_secondary};font-size:10px;font-weight:700;"
-            "letter-spacing:0.8px;text-transform:uppercase;background:transparent;"
-        )
-        kpi_value_style = (
-            f"font-size:28px;font-weight:800;color:{text_primary};background:transparent;"
-        )
+        # KPI cards (not shown for frontdesk; also guard when widgets were not created)
+        if role_l not in {"frontdesk"}:
+            kpi_title_style = (
+                f"color:{text_secondary};font-size:10px;font-weight:700;"
+                "letter-spacing:0.8px;text-transform:uppercase;background:transparent;"
+            )
+            kpi_value_style = (
+                f"font-size:28px;font-weight:800;color:{text_primary};background:transparent;"
+            )
 
-        def style_kpi(obj_name, accent, val_widget, val_text):
-            card = self.findChild(QWidget, obj_name)
-            if card:
-                card.setStyleSheet(
-                    f"QWidget#{obj_name}{{background:{card_bg};"
-                    f"border-radius:14px;border-left:4px solid {accent};"
-                    f"border-top:1px solid {border_color};"
-                    f"border-right:1px solid {border_color};"
-                    f"border-bottom:1px solid {border_color};}}"
-                )
-            t = self.findChild(QLabel, f"{obj_name}_title")
-            if t:
-                t.setStyleSheet(kpi_title_style)
-            if val_widget:
-                val_widget.setStyleSheet(kpi_value_style)
-                val_widget.setText(val_text)
+            def style_kpi(obj_name, accent, val_widget, val_text):
+                card = self.findChild(QWidget, obj_name)
+                if card:
+                    card.setStyleSheet(
+                        f"QWidget#{obj_name}{{background:{card_bg};"
+                        f"border-radius:14px;border-left:4px solid {accent};"
+                        f"border-top:1px solid {border_color};"
+                        f"border-right:1px solid {border_color};"
+                        f"border-bottom:1px solid {border_color};}}"
+                    )
+                t = self.findChild(QLabel, f"{obj_name}_title")
+                if t:
+                    t.setStyleSheet(kpi_title_style)
+                if val_widget:
+                    val_widget.setStyleSheet(kpi_value_style)
+                    val_widget.setText(val_text)
 
-        style_kpi("kpiTotal",    accent_blue, self.total_screenings_value, str(total))
-        style_kpi("kpiPatients", sev_green,   self.unique_patients_value,  str(no_dr_count))
-        style_kpi("kpiAbnormal", "#f59e0b",   self.abnormal_cases_value,   str(abnormal_count))
-        style_kpi("kpiHighRisk", "#ef4444",   self.high_risk_cases_value,  str(high_risk_count))
+            style_kpi("kpiTotal",    accent_blue, getattr(self, "total_screenings_value", None), str(total))
+            style_kpi("kpiPatients", sev_green,   getattr(self, "unique_patients_value", None),  str(no_dr_count))
+            style_kpi("kpiAbnormal", "#f59e0b",   getattr(self, "abnormal_cases_value", None),   str(abnormal_count))
+            style_kpi("kpiHighRisk", "#ef4444",   getattr(self, "high_risk_cases_value", None),  str(high_risk_count))
 
         # Severity card
-        sev_card = self.findChild(QWidget, "severityCard")
-        if sev_card:
-            sev_card.setStyleSheet(
-                f"QWidget#severityCard{{background:{card_bg};border-radius:16px;"
-                f"border:1px solid {border_color};}}"
-            )
-        if hasattr(self, "_dash_severity_title_lbl"):
-            self._dash_severity_title_lbl.setStyleSheet(
-                f"color:{text_secondary};font-size:10px;font-weight:800;"
-                "letter-spacing:1.0px;background:transparent;"
-            )
-
-        severity_counts = {level: 0 for level in getattr(self, "_severity_order", [])}
-        for _, _, result, _ in rows:
-            level = self._normalize_severity_label(result)
-            if level in severity_counts:
-                severity_counts[level] += 1
-
-        if hasattr(self, "severity_bars"):
-            total_sev = sum(severity_counts.values()) or 1
-            for level in self._severity_order:
-                bar, count_lbl = self.severity_bars[level]
-                count = severity_counts.get(level, 0)
-                color = severity_colors[level]
-                bar.setMaximum(max(1, total_sev))
-                bar.setValue(count)
-                bar.setStyleSheet(
-                    f"QProgressBar{{background:{'#1e293b' if dark else '#f1f5f9'};"
-                    f"border:none;border-radius:5px;}}"
-                    f"QProgressBar::chunk{{background:{color};border-radius:5px;}}"
+        if role_l not in {"frontdesk"}:
+            sev_card = self.findChild(QWidget, "severityCard")
+            if sev_card:
+                sev_card.setStyleSheet(
+                    f"QWidget#severityCard{{background:{card_bg};border-radius:16px;"
+                    f"border:1px solid {border_color};}}"
                 )
-                count_lbl.setText(str(count))
-                count_lbl.setStyleSheet(
-                    f"font-size:14px;font-weight:800;color:{text_primary};"
-                    "background:transparent;"
+            if hasattr(self, "_dash_severity_title_lbl"):
+                self._dash_severity_title_lbl.setStyleSheet(
+                    f"color:{text_secondary};font-size:10px;font-weight:800;"
+                    "letter-spacing:1.0px;background:transparent;"
                 )
+
+            severity_counts = {level: 0 for level in getattr(self, "_severity_order", [])}
+            for _, _, result, _ in rows:
+                level = self._normalize_severity_label(result)
+                if level in severity_counts:
+                    severity_counts[level] += 1
+
+            if hasattr(self, "severity_bars"):
+                total_sev = sum(severity_counts.values()) or 1
+                for level in self._severity_order:
+                    bar, count_lbl = self.severity_bars[level]
+                    count = severity_counts.get(level, 0)
+                    color = severity_colors[level]
+                    bar.setMaximum(max(1, total_sev))
+                    bar.setValue(count)
+                    bar.setStyleSheet(
+                        f"QProgressBar{{background:{'#1e293b' if dark else '#f1f5f9'};"
+                        f"border:none;border-radius:5px;}}"
+                        f"QProgressBar::chunk{{background:{color};border-radius:5px;}}"
+                    )
+                    count_lbl.setText(str(count))
+                    count_lbl.setStyleSheet(
+                        f"font-size:14px;font-weight:800;color:{text_primary};"
+                        "background:transparent;"
+                    )
 
         # Availability card
         av_card = self.findChild(QWidget, "availabilityCard")
-        if av_card:
+        if role_l not in {"frontdesk"} and av_card:
             av_card.setStyleSheet(
                 f"QWidget#availabilityCard{{background:{card_bg};border-radius:16px;"
                 f"border:1px solid {border_color};}}"
             )
-        if hasattr(self, "_dash_availability_title_lbl"):
-            self._dash_availability_title_lbl.setStyleSheet(
-                f"color:{text_secondary};font-size:10px;font-weight:800;"
-                "letter-spacing:1.0px;background:transparent;"
-            )
-        day_text, time_text, updated_text = self._get_dashboard_availability_text()
-        for attr, text, style in (
-            ("availability_days_label",    f"Days: {day_text}",
-             f"font-size:12px;font-weight:700;color:{text_primary};background:transparent;"),
-            ("availability_time_label",    f"Hours: {time_text}",
-             f"font-size:12px;font-weight:700;color:{text_primary};background:transparent;"),
-            ("availability_updated_label", updated_text,
-             f"font-size:11px;color:{text_muted};font-weight:600;background:transparent;"),
-        ):
-            w = getattr(self, attr, None)
-            if w:
-                w.setText(text)
-                w.setStyleSheet(style)
+            if hasattr(self, "_dash_availability_title_lbl"):
+                self._dash_availability_title_lbl.setStyleSheet(
+                    f"color:{text_secondary};font-size:10px;font-weight:800;"
+                    "letter-spacing:1.0px;background:transparent;"
+                )
+            day_text, time_text, updated_text = self._get_dashboard_availability_text()
+            for attr, text, style in (
+                ("availability_days_label",    f"Days: {day_text}",
+                 f"font-size:12px;font-weight:700;color:{text_primary};background:transparent;"),
+                ("availability_time_label",    f"Hours: {time_text}",
+                 f"font-size:12px;font-weight:700;color:{text_primary};background:transparent;"),
+                ("availability_updated_label", updated_text,
+                 f"font-size:11px;color:{text_muted};font-weight:600;background:transparent;"),
+            ):
+                w = getattr(self, attr, None)
+                if w:
+                    w.setText(text)
+                    w.setStyleSheet(style)
 
         # Recent card
         rec_card = self.findChild(QWidget, "recentCard")

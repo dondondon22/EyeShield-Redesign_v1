@@ -1390,42 +1390,27 @@ class ScreeningPage(QWidget):
         dm_duration = float(self.diabetes_duration.value()) if self.diabetes_duration.value() > 0 else None
         hba1c_val = float(self.hba1c.value()) if self.hba1c.value() > 0 else None
 
-        patient_id = int(self._emr_patient_pk) if self._emr_patient_pk else None
-        if patient_id is None:
-            duplicate_patient = emr.find_duplicate_patient(first_name, last_name, dob_str)
-            if duplicate_patient:
-                patient_id = int(duplicate_patient.get("patient_id") or 0) or None
-                self._emr_patient_pk = patient_id
-                existing_code = str(duplicate_patient.get("patient_code") or "").strip()
-                if existing_code:
-                    self.p_id.setText(existing_code)
-        if patient_id is not None:
-            patient_fields = {
-                "last_name": last_name,
-                "first_name": first_name,
-                "date_of_birth": dob_str,
-                "age": int(self.p_age.value()) if self.p_age.value() > 0 else None,
-                "sex": sex or None,
-                "contact_number": contact or None,
-            }
-            ok = emr.update_patient_fields(patient_id, patient_fields, uid, action="UPDATE_PATIENT")
-            if not ok:
-                QMessageBox.warning(self, "Save Failed", "Could not update patient information.")
-                return
-        else:
-            try:
-                patient_id = emr.create_patient(
-                    uid,
-                    last_name=last_name,
-                    first_name=first_name,
-                    date_of_birth=dob_str,
-                    sex=sex,
-                    contact_number=contact,
-                )
-            except Exception as exc:
-                QMessageBox.warning(self, "Save Failed", f"Could not save patient information.\n\n{exc}")
-                return
-            self._emr_patient_pk = int(patient_id)
+        # Patient identity key: name + DOB (project decision).
+        # Upsert so frontdesk doesn't create duplicates.
+        try:
+            patient_id, _created_new = emr.upsert_patient_by_name_dob(
+                int(uid),
+                last_name=last_name,
+                first_name=first_name,
+                date_of_birth=dob_str,
+                sex=sex,
+                contact_number=contact,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Save Failed", f"Could not save patient information.\n\n{exc}")
+            return
+        self._emr_patient_pk = int(patient_id)
+        # Keep patient code visible for downstream workflows.
+        with contextlib.suppress(Exception):
+            p = emr.get_patient(int(patient_id)) or {}
+            code = str(p.get("patient_code") or "").strip()
+            if code:
+                self.p_id.setText(code)
 
         can_queue, reason = emr.can_create_visit_for_patient(int(patient_id))
         if not can_queue:

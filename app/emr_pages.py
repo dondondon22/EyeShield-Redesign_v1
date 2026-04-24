@@ -1675,23 +1675,6 @@ class EmrVisitsPage(QWidget):
             show_warning(self, "Register", "Invalid date of birth.")
             return
         dob_s = d.toString("yyyy-MM-dd")
-        dup = emr.find_duplicate_patient(first, last, dob_s)
-        if dup:
-            m = QMessageBox(self)
-            m.setWindowTitle("Possible duplicate")
-            m.setIcon(QMessageBox.Icon.Warning)
-            m.setText(
-                f"A patient named {dup.get('first_name','')} {dup.get('last_name','')} "
-                f"with this date of birth already exists (code {dup.get('patient_code')}).\n\n"
-                "If this is the same person, use Search → Edit → New Visit instead.\n"
-                "Otherwise, you can register a new record."
-            )
-            b_save = m.addButton("Register new anyway", QMessageBox.ButtonRole.DestructiveRole)
-            b_cancel = m.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-            m.setDefaultButton(b_cancel)
-            m.exec()
-            if m.clickedButton() != b_save:
-                return
         last_eye_exam_raw = self.in_last_eye_exam.text().strip()
         if last_eye_exam_raw:
             parsed = QDate.fromString(last_eye_exam_raw, "yyyy-MM-dd")
@@ -1699,8 +1682,8 @@ class EmrVisitsPage(QWidget):
                 show_warning(self, "Register", "Last eye exam date must be YYYY-MM-DD or left blank.")
                 return
         try:
-            pid = emr.create_patient(
-                uid,
+            pid, created_new = emr.upsert_patient_by_name_dob(
+                int(uid),
                 last_name=last,
                 first_name=first,
                 middle_name=self.in_middle.text().strip(),
@@ -1734,11 +1717,13 @@ class EmrVisitsPage(QWidget):
         qnum = qe.get("queue_number", "")
         if hasattr(self, "_toast") and self._toast:
             self._toast.show_text(f"Queue {qnum} assigned to {pnm} ({code}).", 5000)
-        show_success(
-            self,
-            "Patient registered",
-            f"{pnm} ({code}) has been registered and added to today's queue as {qnum}.",
-        )
+        if created_new:
+            title = "Patient registered"
+            detail = f"{pnm} ({code}) has been registered and added to today's queue as {qnum}."
+        else:
+            title = "Patient queued"
+            detail = f"{pnm} ({code}) already exists and was added to today's queue as {qnum}."
+        show_success(self, title, detail)
         self.in_last.clear()
         self.in_first.clear()
         self.in_middle.clear()
@@ -1838,7 +1823,8 @@ class EmrVisitsPage(QWidget):
 
     def _select_queue_row(self, queue_id: int) -> None:
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 3)
+            # Queue id is stored in the hidden column (index 5).
+            item = self.table.item(row, 5)
             if not item:
                 continue
             try:
