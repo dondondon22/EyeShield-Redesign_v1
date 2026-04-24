@@ -18,7 +18,11 @@ UPLOADS_DIR = APP_DIR / "uploads"
 
 BACKUPS_DIR = DATA_DIR / "backups"
 USERS_DB_PATH = DATA_DIR / "users.db"
-PATIENT_RECORDS_DB_PATH = DATA_DIR / "patient_records.db"
+# Patient records DB location:
+# Prefer a repo-root `patient_records.db` when present (common when users copy/restore
+# a DB file manually), otherwise default to `data/patient_records.db`.
+_ROOT_PATIENT_DB = PROJECT_ROOT / "patient_records.db"
+PATIENT_RECORDS_DB_PATH = _ROOT_PATIENT_DB if _ROOT_PATIENT_DB.exists() else (DATA_DIR / "patient_records.db")
 LEGACY_DB_PATH = DATA_DIR / "eyeshield.db"
 USERS_BACKUP_DB_GLOB = "users.backup_*.db"
 

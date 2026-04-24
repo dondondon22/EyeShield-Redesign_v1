@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap, QIcon
+from PySide6.QtGui import QPixmap, QIcon, QColor
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy,
@@ -322,13 +322,16 @@ class PatientTimelineDialog(QWidget):
         title.setStyleSheet("font-size:13px;font-weight:700;color:#111827;")
         v.addWidget(title)
 
-        table = QTableWidget(0, 4)
+        table = QTableWidget(0, 5)
         table.setObjectName("screeningHistoryTable")
-        table.setHorizontalHeaderLabels(["Name", "Screening date", "Screened by", "Preview"])
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        table.setHorizontalHeaderLabels(["Name", "Screening date", "Risk level", "Screened by", "Preview"])
+        # Evenly spread columns; keep Preview usable.
+        header = table.horizontalHeader()
+        header.setDefaultAlignment(Qt.AlignCenter)
+        for c in range(0, 4):
+            header.setSectionResizeMode(c, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        table.setColumnWidth(4, 84)
         table.verticalHeader().setVisible(False)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -363,10 +366,25 @@ class PatientTimelineDialog(QWidget):
             dt = str(rec.get("screened_at") or "").strip()
             dt_label = f"{_fmt_short(dt)}  {_fmt_time(dt)}" if dt else "-"
             scr_by = str(rec.get("original_screener_name") or "").strip() or str(rec.get("original_screener_username") or "").strip() or "-"
+            severity = _display_severity(rec)
+            risk_text, risk_color = _risk_for(severity)
 
-            table.setItem(i, 0, QTableWidgetItem(name))
-            table.setItem(i, 1, QTableWidgetItem(dt_label))
-            table.setItem(i, 2, QTableWidgetItem(scr_by))
+            it_name = QTableWidgetItem(name)
+            it_name.setTextAlignment(Qt.AlignCenter)
+            table.setItem(i, 0, it_name)
+
+            it_dt = QTableWidgetItem(dt_label)
+            it_dt.setTextAlignment(Qt.AlignCenter)
+            table.setItem(i, 1, it_dt)
+
+            it_risk = QTableWidgetItem(risk_text)
+            it_risk.setTextAlignment(Qt.AlignCenter)
+            it_risk.setForeground(QColor(risk_color))
+            table.setItem(i, 2, it_risk)
+
+            it_by = QTableWidgetItem(scr_by)
+            it_by.setTextAlignment(Qt.AlignCenter)
+            table.setItem(i, 3, it_by)
 
             btn = QPushButton("")
             btn.setCursor(Qt.PointingHandCursor)
@@ -378,7 +396,7 @@ class PatientTimelineDialog(QWidget):
                 "QPushButton:hover{background:#e2e8f0;}"
             )
             btn.clicked.connect(lambda _=False, r=rec: self._open_screening_preview(r))
-            table.setCellWidget(i, 3, btn)
+            table.setCellWidget(i, 4, btn)
 
         for r in range(table.rowCount()):
             table.setRowHeight(r, 36)

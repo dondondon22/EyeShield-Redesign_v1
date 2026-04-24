@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -115,12 +116,131 @@ def ensure_patient_records_db() -> tuple[bool, str]:
         return False, f"Cannot open patient_records.db: {err}"
     try:
         ensure_patient_records_db_schema(conn)
+        _seed_mock_patient_records_if_empty(conn)
         return True, ""
     except sqlite3.Error as err:
         return False, f"patient_records.db schema migration failed: {err}"
     finally:
         with contextlib.suppress(Exception):
             conn.close()
+
+
+def _seed_mock_patient_records_if_empty(conn: sqlite3.Connection) -> None:
+    """Seed a few rows for demo/testing when the records DB is empty."""
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(1) FROM patient_records WHERE archived_at IS NULL")
+    n = int(cur.fetchone()[0] or 0)
+    if n > 0:
+        return
+
+    now = datetime.now()
+    samples = [
+        {
+            "patient_id": "ES-0001",
+            "name": "Juan Dela Cruz",
+            "birthdate": "1978-02-14",
+            "age": "48",
+            "sex": "Male",
+            "contact": "09171234567",
+            "eyes": "Right Eye",
+            "diabetes_type": "Type 2",
+            "duration": "12",
+            "hba1c": "8.4%",
+            "prev_treatment": "No",
+            "notes": "Seed record (mock).",
+            "result": "Moderate DR",
+            "confidence": "0.86",
+            "screened_at": (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            "screening_type": "initial",
+            "follow_up": "",
+            "followup_label": "",
+            "followup_date": "",
+        },
+        {
+            "patient_id": "ES-0002",
+            "name": "Maria Santos",
+            "birthdate": "1969-09-03",
+            "age": "56",
+            "sex": "Female",
+            "contact": "09981234567",
+            "eyes": "Left Eye",
+            "diabetes_type": "Type 2",
+            "duration": "18",
+            "hba1c": "9.1%",
+            "prev_treatment": "Yes",
+            "notes": "Seed record (mock).",
+            "result": "Severe DR",
+            "confidence": "0.79",
+            "screened_at": (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+            "screening_type": "follow_up",
+            "follow_up": "Yes",
+            "followup_label": "Follow-up screening",
+            "followup_date": (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+        },
+        {
+            "patient_id": "ES-0003",
+            "name": "Test Patient",
+            "birthdate": "1990-01-01",
+            "age": "36",
+            "sex": "Other",
+            "contact": "09000000000",
+            "eyes": "",
+            "diabetes_type": "",
+            "duration": "",
+            "hba1c": "",
+            "prev_treatment": "No",
+            "notes": "Queued placeholder (mock).",
+            "result": "Queued",
+            "confidence": "",
+            "screened_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "screening_type": "initial",
+            "follow_up": "",
+            "followup_label": "",
+            "followup_date": "",
+        },
+    ]
+
+    for s in samples:
+        cur.execute(
+            """
+            INSERT INTO patient_records (
+                patient_id, name, birthdate, age, sex, contact, eyes,
+                diabetes_type, duration, hba1c, prev_treatment, notes,
+                result, confidence, screened_at,
+                screening_type, follow_up, followup_label, followup_date,
+                decision_mode
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?
+            )
+            """,
+            (
+                s["patient_id"],
+                s["name"],
+                s["birthdate"],
+                s["age"],
+                s["sex"],
+                s["contact"],
+                s["eyes"],
+                s["diabetes_type"],
+                s["duration"],
+                s["hba1c"],
+                s["prev_treatment"],
+                s["notes"],
+                s["result"],
+                s["confidence"],
+                s["screened_at"],
+                s["screening_type"],
+                s["follow_up"],
+                s["followup_label"],
+                s["followup_date"],
+                "pending",
+            ),
+        )
+    conn.commit()
 
 
 def records_db_path() -> Path:

@@ -1059,6 +1059,18 @@ class ScreeningPage(QWidget):
         self.p_email = QLineEdit()
         self.p_email.setPlaceholderText("Email")
 
+        # Constraints
+        # - Phone: digits only (optional)
+        # - Email: must look like an email (optional)
+        self.p_phone.setValidator(QRegularExpressionValidator(QRegularExpression(r"^[0-9]{0,15}$"), self.p_phone))
+        self.p_phone.setMaxLength(15)
+        self.p_email.setValidator(
+            QRegularExpressionValidator(
+                QRegularExpression(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"),
+                self.p_email,
+            )
+        )
+
         # Backward-compat field used throughout legacy code paths.
         # Keep it in sync so we don't have to refactor the entire module at once.
         self.p_contact = QLineEdit()
@@ -1414,6 +1426,21 @@ class ScreeningPage(QWidget):
             self.role = role
         self._apply_role_permissions()
 
+    def set_frontdesk_purpose(self, purpose: str, *, locked: bool = False) -> None:
+        """
+        Frontdesk helper: set purpose dropdown and optionally lock it.
+
+        purpose: "new" | "follow_up"
+        """
+        if not hasattr(self, "fd_purpose_combo"):
+            return
+        p = str(purpose or "").strip().lower()
+        target = "Follow-up patient" if ("follow" in p) else "New patient"
+        idx = self.fd_purpose_combo.findText(target)
+        if idx >= 0:
+            self.fd_purpose_combo.setCurrentIndex(idx)
+        self.fd_purpose_combo.setEnabled(not locked)
+
     def _guard_upload_permission(self) -> bool:
         if self._is_upload_restricted():
             QMessageBox.information(
@@ -1470,12 +1497,9 @@ class ScreeningPage(QWidget):
         phone = self.p_phone.text().strip() if hasattr(self, "p_phone") else ""
         email = self.p_email.text().strip() if hasattr(self, "p_email") else ""
         contact = self.p_contact.text().strip()
-        if not (phone or email or contact):
-            QMessageBox.warning(self, "Missing Information", "Please enter a phone number or email.")
+        if not contact:
+            QMessageBox.warning(self, "Missing Information", "Please enter a contact number.")
             return
-        # Keep legacy contact summary populated for downstream flows.
-        if hasattr(self, "p_contact") and not self.p_contact.text().strip():
-            self.p_contact.setText(phone or email)
 
         # Visit-scoped details (do NOT write into emr_patients; these vary per date/visit).
         height_cm = float(self.height.value()) if self.height.value() > 0 else None
@@ -1486,39 +1510,9 @@ class ScreeningPage(QWidget):
         dm_duration = float(self.diabetes_duration.value()) if self.diabetes_duration.value() > 0 else None
         hba1c_val = float(self.hba1c.value()) if self.hba1c.value() > 0 else None
 
-        # Patient identity key: name + DOB (project decision).
-        # Upsert so frontdesk doesn't create duplicates.
-        try:
-            patient_id, _created_new = emr.upsert_patient_by_name_dob(
-                int(uid),
-                last_name=last_name,
-                first_name=first_name,
-                date_of_birth=dob_str,
-                sex=sex,
-                contact_number=phone or contact,
-                email=email,
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "Save Failed", f"Could not save patient information.\n\n{exc}")
-            return
-        self._emr_patient_pk = int(patient_id)
-        # Keep patient code visible for downstream workflows.
-        with contextlib.suppress(Exception):
-            p = emr.get_patient(int(patient_id)) or {}
-            code = str(p.get("patient_code") or "").strip()
-            if code:
-                self.p_id.setText(code)
-
-        can_queue, reason = emr.can_create_visit_for_patient(int(patient_id))
-        if not can_queue:
-            QMessageBox.warning(self, "Already Queued", reason)
-            return
-
         purpose_ui = str(getattr(self, "fd_purpose_combo", None).currentText() if hasattr(self, "fd_purpose_combo") else "")
         purpose = "follow_up" if "follow" in purpose_ui.lower() else "new"
-        queue_id = emr.assign_queue_entry(int(patient_id), uid, screening_purpose=purpose)
-        self._emr_queue_entry_id = int(queue_id)
-        # Persist visit-scoped vitals/history for this queue entry.
+        # Visit-scoped vitals/history for this queue entry.
         visit_details = {
             "visual_acuity_left": self.va_left.text().strip() if hasattr(self, "va_left") else "",
             "visual_acuity_right": self.va_right.text().strip() if hasattr(self, "va_right") else "",
@@ -1542,15 +1536,38 @@ class ScreeningPage(QWidget):
             "weight_kg": weight_kg,
             "notes": self.notes.toPlainText().strip() if hasattr(self, "notes") else "",
         }
-        with contextlib.suppress(Exception):
-            emr.upsert_visit_details(
-                queue_id=int(queue_id),
-                patient_id=int(patient_id),
-                captured_by=int(uid),
-                details=visit_details,
+
+        # Fast-path: single transaction for patient + queue + visit details.
+        try:
+            saved = emr.frontdesk_save_and_queue(
+                acting_user_id=int(uid),
+                last_name=last_name,
+                first_name=first_name,
+                date_of_birth=dob_str,
+                sex=sex,
+                contact_number=phone or contact,
+                email=email,
+                screening_purpose=purpose,
+                visit_details=visit_details,
             )
-        queue_entry = emr.get_queue_entry(int(queue_id)) or {}
-        queue_number = str(queue_entry.get("queue_number") or "")
+        except Exception as exc:
+            QMessageBox.warning(self, "Save Failed", f"Could not save & queue patient.\n\n{exc}")
+            return
+
+        patient_id = int(saved.get("patient_id") or 0)
+        queue_id = int(saved.get("queue_id") or 0)
+        queue_number = str(saved.get("queue_number") or "")
+        patient_code = str(saved.get("patient_code") or "").strip()
+        if patient_id:
+            self._emr_patient_pk = patient_id
+        if queue_id:
+            self._emr_queue_entry_id = queue_id
+        if patient_code:
+            self.p_id.setText(patient_code)
+
+        # Patient Records placeholder is created by EMR via
+        # `ensure_legacy_patient_record_stub(screening_group_id='queue-{queue_id}')`.
+        # Do NOT insert a second placeholder row here; it causes duplicate timeline cards.
 
         main = self.window()
         if main is not self:
@@ -2464,6 +2481,9 @@ class ScreeningPage(QWidget):
             idx = self.fd_purpose_combo.findText("New patient")
             if idx >= 0:
                 self.fd_purpose_combo.setCurrentIndex(idx)
+            # Frontdesk new intake should default to "New patient" and be locked.
+            # Follow-up flow explicitly unlocks/sets this via dashboard shortcut.
+            self.fd_purpose_combo.setEnabled(not self._is_upload_restricted())
 
         self.generate_patient_id()
         self.p_name.clear()
@@ -3660,7 +3680,14 @@ class ScreeningPage(QWidget):
         # - clinician decision into emr_screening_eyes/emr_screenings
         # - mark the visit completed when allowed
         # and must NOT touch legacy patient_records for clinical correctness.
-        if bool(getattr(self, "_doctor_queue_mode", False)) and getattr(self, "_emr_screening_id", None):
+        # Doctor Queue Mode: ensure EMR screening session exists before saving so we
+        # never fall back to legacy patient_records inserts (which create duplicate cards).
+        if bool(getattr(self, "_doctor_queue_mode", False)) and (
+            getattr(self, "_emr_queue_entry_id", None) and getattr(self, "_emr_patient_pk", None)
+        ):
+            if not getattr(self, "_emr_screening_id", None):
+                if not self._ensure_emr_screening_session(str(getattr(self, "current_image", "") or "")):
+                    return {"status": "error", "error": "Could not start EMR screening session for this visit."}
             username = str(getattr(self, "username", "") or os.environ.get("EYESHIELD_CURRENT_USER", "")).strip()
             uid = emr.get_user_id(username)
             if not uid:
@@ -3684,6 +3711,7 @@ class ScreeningPage(QWidget):
             override_justification = str(decision_payload.get("override_justification") or "").strip()
             final_diagnosis_icdr = str(decision_payload.get("final_diagnosis_icdr") or doctor_classification or "").strip()
             doctor_findings = str(decision_payload.get("doctor_findings") or "").strip()
+            decision_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             label_to_grade = {
                 "No DR": 0,
@@ -3752,6 +3780,46 @@ class ScreeningPage(QWidget):
             emr.update_screening_doctor_notes(int(sid), int(uid), doctor_findings)
             if not ok:
                 return {"status": "error", "error": "Could not save clinician decision to EMR."}
+
+            # Also update legacy Patient Records timeline for this queue visit so the saved
+            # fundus/heatmap/results appear under the same screening date.
+            try:
+                patient_code = str(self.p_id.text() or "").strip()
+                sc_after = emr.get_screening(int(sid)) or sc or {}
+                eye_after = next(
+                    (e for e in (sc_after.get("eyes") or []) if str(e.get("eye_side") or "") == eye_side),
+                    eye_row,
+                )
+                fundus_path = str(eye_after.get("fundus_image_path") or "").strip()
+                grad_path = str(eye_after.get("gradcam_image_path") or "").strip()
+                conf_val = eye_after.get("ai_confidence")
+                conf_text = ""
+                try:
+                    if conf_val is not None and str(conf_val).strip() != "":
+                        conf_text = f"{float(conf_val):.3f}"
+                except (TypeError, ValueError):
+                    conf_text = str(conf_val or "").strip()
+
+                screened_at = decision_at
+                emr.upsert_legacy_patient_record_for_queue_eye(
+                    queue_id=int(qid),
+                    patient_id=int(pid_pk),
+                    captured_by=int(uid),
+                    eye_label=("Left Eye" if eye_side == "Left" else "Right Eye"),
+                    screening_type=str(sc_after.get("screening_type") or "").strip() or ("follow_up" if "follow" in str(sc_after.get("screening_type") or "").lower() else "initial"),
+                    screened_at=screened_at,
+                    source_image_path=fundus_path,
+                    heatmap_image_path=grad_path,
+                    ai_classification=ai_classification,
+                    doctor_classification=doctor_classification,
+                    decision_mode=decision_mode,
+                    override_justification=override_justification,
+                    final_diagnosis_icdr=final_diagnosis_icdr,
+                    doctor_findings=doctor_findings,
+                    confidence=conf_text,
+                )
+            except Exception:
+                pass
 
             # Mark the visit completed when allowed.
             can_done, reason = emr.can_complete_visit(int(qid))
@@ -4096,62 +4164,25 @@ class ScreeningPage(QWidget):
         else:
             eye_label = eye or "eye"
             next_action = ""
+
             # Store first eye result with image/heatmap paths for dual-eye reports
             self._first_eye_result = {
                 "eye": eye_label,
                 "result": self.last_result_class,
                 "confidence": self.last_result_conf,
-                "image_path": getattr(self, 'current_image', '') or '',
-                "heatmap_path": getattr(self.results_page, '_current_heatmap_path', '') or '',
+                "image_path": getattr(self, "current_image", "") or "",
+                "heatmap_path": getattr(self.results_page, "_current_heatmap_path", "") or "",
             }
-            self.results_page.mark_saved(self.p_name.text().strip(), eye_label, self.last_result_class)
+            if hasattr(self, "results_page"):
+                self.results_page.mark_saved(self.p_name.text().strip(), eye_label, self.last_result_class)
 
-            # Auto-prompt to compare if follow-up
-            if screening_type == "follow_up" and previous_screening_id:
-                box = QMessageBox(self._modal_parent_widget())
-                box.setWindowTitle("Follow-up Completed")
-                box.setIcon(QMessageBox.Icon.Information)
-                box.setText(
-                    f"<b>{eye_label}</b> follow-up screening saved successfully.\n\n"
-                    f"Would you like to compare this result with the previous screening?"
-                )
-                compare_btn = box.addButton("Compare Results", QMessageBox.ButtonRole.AcceptRole)
-                box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
-                box.exec()
-                if box.clickedButton() == compare_btn:
-                    # Logic to trigger comparison view (if available in current scope)
-                    if hasattr(self, "parent_dashboard") and hasattr(self.parent_dashboard, "reports_page"):
-                        # We can navigate to reports and trigger comparison there
-                        self.parent_dashboard.reports_page.open_comparison_dialog(
-                            int(previous_screening_id), 
-                            int(self._last_saved_record_id) if hasattr(self, "_last_saved_record_id") else 0
-                        )
+            # Important: post-save workflow decisions (finish vs other eye) are handled
+            # by the Results window, not here, to keep saving deterministic.
 
-            # Auto-prompt to screen the other eye (only if first eye, not second)
-            if not self._first_eye_result.get('_is_second_eye'):
-                opposite_eye = "Left Eye" if eye_label == "Right Eye" else "Right Eye"
-                # Check if opposite eye already has a saved record
-                opposite_eye_exists = self._find_existing_eye_record(pid, opposite_eye) is not None
-
-                # Only prompt if opposite eye hasn't been saved yet
-                if not opposite_eye_exists:
-                    box = QMessageBox(self._modal_parent_widget())
-                    box.setWindowTitle("Screen Other Eye")
-                    box.setIcon(QMessageBox.Icon.Question)
-                    box.setText(
-                        f"<b>{eye_label}</b> screening {'updated' if replace_record_id is not None else 'saved'} successfully.\n\n"
-                        f"Would you like to screen the <b>{opposite_eye}</b> now?"
-                    )
-                    continue_btn = box.addButton("Screen Other Eye", QMessageBox.ButtonRole.AcceptRole)
-                    box.addButton("Just This Eye", QMessageBox.ButtonRole.RejectRole)
-                    box.exec()
-                    if box.clickedButton() == continue_btn:
-                        next_action = "screen_other_eye"
-                        self.screen_other_eye()
             if bool(getattr(self, "_doctor_queue_mode", False)):
                 self._reparent_results_into_stack(set_index_0=True)
-                if next_action != "screen_other_eye":
-                    next_action = "screening_history"
+                next_action = "screening_history"
+
             return {
                 "status": "replaced" if replace_record_id is not None else "saved",
                 "path": self._last_saved_source_path,
@@ -4170,29 +4201,13 @@ class ScreeningPage(QWidget):
         left_record = self._find_existing_eye_record(patient_id, "Left Eye")
         right_record = self._find_existing_eye_record(patient_id, "Right Eye")
 
+        # Per updated workflow: "Screen Other Eye" is a UI/workflow action only.
+        # Do not prompt to replace previously-saved eye records here.
         if self._current_eye_saved and left_record and right_record:
-            box = QMessageBox(self)
-            box.setWindowTitle("Both Eyes Screened")
-            box.setIcon(QMessageBox.Icon.Information)
-            box.setText("Both eyes are already screened for this patient.")
-            box.setInformativeText("Choose an eye to replace, or continue reviewing current results.")
-            replace_left_btn = box.addButton("Replace Left Eye", QMessageBox.ButtonRole.AcceptRole)
-            replace_right_btn = box.addButton("Replace Right Eye", QMessageBox.ButtonRole.ActionRole)
-            continue_btn = box.addButton("Continue", QMessageBox.ButtonRole.RejectRole)
-            box.setDefaultButton(continue_btn)
-            box.exec()
-
-            chosen = box.clickedButton()
-            if chosen == replace_left_btn:
-                if self.load_patient_for_rescreen(int(left_record["id"]), replace_mode=True):
-                    self.p_eye.setCurrentText("Left Eye")
-                    self.stacked_widget.setCurrentIndex(0)
-                return
-            if chosen == replace_right_btn:
-                if self.load_patient_for_rescreen(int(right_record["id"]), replace_mode=True):
-                    self.p_eye.setCurrentText("Right Eye")
-                    self.stacked_widget.setCurrentIndex(0)
-                return
+            current_eye = self.p_eye.currentText().strip()
+            opposite_eye = "Left Eye" if current_eye == "Right Eye" else "Right Eye"
+            self._set_eye_selection(opposite_eye)
+            self.stacked_widget.setCurrentIndex(0)
             return
 
         current_eye = self.p_eye.currentText().strip()

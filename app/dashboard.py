@@ -42,6 +42,8 @@ try:
     from .camera import CameraPage
     from .auth import UserManager
     from .app_paths import PATIENT_RECORDS_DB_PATH
+    from .patient_timeline_dialog import PatientTimelineDialog
+    from .patient_record_groups import group_patient_record_rows
 except Exception:  # pragma: no cover
     from screening import ScreeningPage
     from reports import ReportsPage
@@ -52,6 +54,8 @@ except Exception:  # pragma: no cover
     from camera import CameraPage
     from auth import UserManager
     from app_paths import PATIENT_RECORDS_DB_PATH
+    from patient_timeline_dialog import PatientTimelineDialog
+    from patient_record_groups import group_patient_record_rows
 try:
     from db import get_records_conn, ensure_patient_records_db_schema
 except Exception:
@@ -78,7 +82,11 @@ class EyeShieldApp(QMainWindow):
     ROLE_PAGE_ACCESS = {
         "admin": {2, 4, 5, 7},
         "clinician": {0, 3, 5, 6, 10},
-        "frontdesk": {0, 1, 3, 5, 6, 10},
+        # Back-compat: older datasets still store role as "doctor".
+        "doctor": {0, 3, 5, 6, 10},
+        # Frontdesk no longer has a dedicated "Patient Queue" page/tab.
+        # The queue is rendered directly inside the Dashboard.
+        "frontdesk": {0, 1, 3, 5, 6},
     }
 
     # ── Sidebar design tokens ────────────────────────────────────────────────
@@ -254,16 +262,15 @@ class EyeShieldApp(QMainWindow):
                 "group": "MAIN",
             },
             {
-                "icon": self._resolve_existing_path(os.path.join(icons_dir, "screening.svg")),
-                "label": "Assessment",
-                "page_index": 1,
+                "icon": self._resolve_existing_path(os.path.join(icons_dir, "inbox.svg")),
+                "label": "Patient Queue",
+                "page_index": 10,
                 "group": None,
             },
             {
-                "icon": self._resolve_existing_path(os.path.join(icons_dir, "users.svg")),
-                "label": "Patient Queue",
-                "page_index": 10,
-                "nav_key": "emr_visits",
+                "icon": self._resolve_existing_path(os.path.join(icons_dir, "screening.svg")),
+                "label": "Assessment",
+                "page_index": 1,
                 "group": None,
             },
             {
@@ -438,6 +445,9 @@ class EyeShieldApp(QMainWindow):
         self.screening_page.username = self.username
         self.screening_page.display_name = self.display_name
         self.screening_page.role = self.role
+        # Finish-session hook for the unified Results save prompt.
+        # Called via ScreeningPage.open_saved_patient_screening_history().
+        self.screening_page._post_save_history_handler = self._open_saved_patient_screening_history_from_screening
         if hasattr(self.screening_page, "configure_role_permissions"):
             self.screening_page.configure_role_permissions(self.role)
         self.reports_page = ReportsPage(
@@ -499,6 +509,141 @@ class EyeShieldApp(QMainWindow):
 
         self._setup_inactivity_timeout()
         self._setup_dashboard_clock()
+
+    def _fetch_patient_timeline_records(self, patient_id: str) -> list[dict]:
+        patient_id = str(patient_id or "").strip()
+        if not patient_id:
+            return []
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, patient_id, name, birthdate, age, sex, contact, eyes,
+                       diabetes_type, duration, hba1c, prev_treatment, notes,
+                       result, confidence, screened_at, archived_at, archived_by,
+                       archive_reason, original_screener_username, original_screener_name,
+                       ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
+                       height, weight, bmi, visual_acuity_left, visual_acuity_right,
+                       blood_pressure_systolic, blood_pressure_diastolic,
+                       fasting_blood_sugar, random_blood_sugar,
+                       diabetes_diagnosis_date, treatment_regimen, prev_dr_stage,
+                       symptom_blurred_vision, symptom_floaters, symptom_flashes, symptom_vision_loss,
+                       source_image_path, heatmap_image_path,
+                       follow_up, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id
+                FROM patient_records
+                WHERE patient_id = ? AND archived_at IS NULL
+                ORDER BY screened_at ASC, id ASC
+                """,
+                (patient_id,),
+            )
+            rows = cur.fetchall()
+            conn.close()
+        except Exception:
+            return []
+
+        timeline = []
+        for row in rows:
+            timeline.append(
+                {
+                    "id": row[0],
+                    "patient_id": row[1],
+                    "name": row[2],
+                    "birthdate": row[3],
+                    "age": row[4],
+                    "sex": row[5],
+                    "contact": row[6],
+                    "eyes": row[7],
+                    "diabetes_type": row[8],
+                    "duration": row[9],
+                    "hba1c": row[10],
+                    "prev_treatment": row[11],
+                    "notes": row[12],
+                    "result": row[13],
+                    "confidence": row[14],
+                    "screened_at": row[15],
+                    "archived_at": row[16],
+                    "archived_by": row[17],
+                    "archive_reason": row[18],
+                    "original_screener_username": row[19],
+                    "original_screener_name": row[20],
+                    "ai_classification": row[21],
+                    "doctor_classification": row[22],
+                    "decision_mode": row[23],
+                    "override_justification": row[24],
+                    "final_diagnosis_icdr": row[25],
+                    "doctor_findings": row[26],
+                    "height": row[27],
+                    "weight": row[28],
+                    "bmi": row[29],
+                    "visual_acuity_left": row[30],
+                    "visual_acuity_right": row[31],
+                    "blood_pressure_systolic": row[32],
+                    "blood_pressure_diastolic": row[33],
+                    "fasting_blood_sugar": row[34],
+                    "random_blood_sugar": row[35],
+                    "diabetes_diagnosis_date": row[36],
+                    "treatment_regimen": row[37],
+                    "prev_dr_stage": row[38],
+                    "symptom_blurred_vision": row[39],
+                    "symptom_floaters": row[40],
+                    "symptom_flashes": row[41],
+                    "symptom_vision_loss": row[42],
+                    "source_image_path": row[43],
+                    "heatmap_image_path": row[44],
+                    "follow_up": row[45],
+                    "followup_date": row[46],
+                    "followup_label": row[47],
+                    "screening_type": row[48],
+                    "previous_screening_id": row[49],
+                    "screening_group_id": row[50],
+                }
+            )
+        return group_patient_record_rows(timeline)
+
+    def _open_saved_patient_screening_history_from_screening(self) -> None:
+        """Finish-session handler for the main screening page (non-EMR flow)."""
+        sp = getattr(self, "screening_page", None)
+        if sp is None or not hasattr(sp, "p_id"):
+            return
+        pid = str(sp.p_id.text() or "").strip()
+        if not pid:
+            return
+        timeline_records = self._fetch_patient_timeline_records(pid)
+        if not timeline_records:
+            QMessageBox.information(self, "Patient Timeline", "No screening history found for this patient.")
+            return
+
+        latest_record = timeline_records[-1]
+        panel = PatientTimelineDialog(
+            latest_record,
+            timeline_records,
+            parent=self,
+            on_follow_up=None,
+            on_view_report=None,
+            on_compare=None,
+            on_export=None,
+            show_actions=True,
+            show_history_tab=True,
+        )
+        shell = QDialog(self)
+        shell.setWindowTitle("Patient Overview")
+        shell.setModal(True)
+        avail = QGuiApplication.primaryScreen().availableGeometry()
+        shell.resize(min(860, int(avail.width() * 0.88)), min(760, int(avail.height() * 0.86)))
+        shell.move(
+            avail.left() + (avail.width() - shell.width()) // 2,
+            avail.top() + (avail.height() - shell.height()) // 2,
+        )
+        lay = QVBoxLayout(shell)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(panel)
+        panel.back_requested.connect(shell.accept)
+        shell.exec()
+
+        # Refresh pages that show aggregate counts / tables.
+        if hasattr(self, "refresh_dashboard"):
+            self.refresh_dashboard()
 
     # ── Sidebar helpers ───────────────────────────────────────────────────────
 
@@ -1450,48 +1595,181 @@ class EyeShieldApp(QMainWindow):
 
         outer.addWidget(hero)
 
-        # ── Frontdesk quick patient search (top) ──────────────────────────────
-        # Keep workflow: uses the same follow-up queue logic via _open_frontdesk_rescreen_search.
         role_l = str(getattr(self, "role", "") or "").strip().lower()
         if role_l in {"frontdesk"}:
-            fd_bar = QWidget()
-            fd_bar.setObjectName("frontdeskSearchBar")
-            fd_l = QHBoxLayout(fd_bar)
-            fd_l.setContentsMargins(18, 14, 18, 14)
-            fd_l.setSpacing(10)
+            # ── Frontdesk dashboard format ────────────────────────────────────
+            # Welcome back, <Name>!
+            #
+            # Quick Actions                                  Patient Queue Table
+            # + New Patient    View Patient Record
+            #
+            # Patient Record Search and Table
+            # Search: [ ... ] [Search]
+            # Name | Date of Diagnosis | Screened by
 
-            lbl = QLabel("Patient search")
-            lbl.setStyleSheet("color:#64748b;font-size:12px;font-weight:800;background:transparent;")
+            # Quick actions (left)
+            qa_card = QWidget()
+            qa_card.setObjectName("quickActionsCard")
+            qa_card.setStyleSheet(
+                "QWidget#quickActionsCard{background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;}"
+            )
+            qa_v = QVBoxLayout(qa_card)
+            qa_v.setContentsMargins(16, 14, 16, 16)
+            qa_v.setSpacing(10)
 
-            self._dash_fd_search = QLineEdit()
-            self._dash_fd_search.setPlaceholderText("Search patient (name / patient code) to rescreen or follow-up…")
-            self._dash_fd_search.setMinimumHeight(40)
-            self._dash_fd_search.setClearButtonEnabled(True)
-            self._dash_fd_search.setStyleSheet(
+            qa_title = QLabel("QUICK ACTIONS")
+            qa_title.setStyleSheet(
+                "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+            )
+            qa_v.addWidget(qa_title)
+
+            def _primary_btn(text, slot):
+                b = QPushButton(text)
+                b.setMinimumHeight(42)
+                b.setCursor(Qt.PointingHandCursor)
+                b.setStyleSheet(
+                    "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                    "stop:0 #2563eb,stop:1 #3b82f6);"
+                    "color:#fff;border:none;border-radius:10px;"
+                    "padding:0 14px;text-align:left;font-weight:700;font-size:13px;}"
+                    "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                    "stop:0 #1d4ed8,stop:1 #2563eb);}"
+                    "QPushButton:pressed{background:#1e40af;}"
+                )
+                b.clicked.connect(slot)
+                return b
+
+            def _ghost_btn(text, slot):
+                b = QPushButton(text)
+                b.setMinimumHeight(40)
+                b.setCursor(Qt.PointingHandCursor)
+                b.setStyleSheet(
+                    "QPushButton{background:#f8fafc;color:#334155;border:1px solid #e2e8f0;"
+                    "border-radius:10px;padding:0 14px;text-align:left;font-weight:600;font-size:13px;}"
+                    "QPushButton:hover{background:#f1f5f9;border-color:#cbd5e1;}"
+                    "QPushButton:pressed{background:#e2e8f0;}"
+                )
+                b.clicked.connect(slot)
+                return b
+
+            qa_v.addWidget(_primary_btn("➕  New Patient", lambda: self._navigate_to(1, nav_key="Screening")))
+            qa_v.addWidget(_ghost_btn("📁  View Patient Records", lambda: self._navigate_to(3, nav_key="Reports")))
+            qa_v.addStretch(1)
+            qa_card.setMinimumHeight(150)
+
+            # Patient queue (right) - table only, no buttons
+            queue_card = QWidget()
+            queue_card.setObjectName("frontdeskQueueCard")
+            queue_card.setStyleSheet(
+                "QWidget#frontdeskQueueCard{background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;}"
+                "QTableWidget{background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;}"
+                "QHeaderView::section{background:#f8fbff;color:#334155;border:none;border-bottom:1px solid #e2e8f0;"
+                "padding:10px 8px;font-size:12px;font-weight:800;}"
+            )
+            queue_v = QVBoxLayout(queue_card)
+            queue_v.setContentsMargins(16, 14, 16, 16)
+            queue_v.setSpacing(10)
+
+            queue_title = QLabel("PATIENT QUEUE TABLE")
+            queue_title.setStyleSheet(
+                "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+            )
+            queue_v.addWidget(queue_title)
+
+            self._dash_queue_table = QTableWidget(0, 4)
+            self._dash_queue_table.setHorizontalHeaderLabels(["Queue #", "Patient", "Purpose", "Status"])
+            self._dash_queue_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self._dash_queue_table.setSelectionMode(QAbstractItemView.SingleSelection)
+            self._dash_queue_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self._dash_queue_table.verticalHeader().setVisible(False)
+            self._dash_queue_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            # Tall right panel like the mockup.
+            self._dash_queue_table.setMinimumHeight(520)
+            queue_v.addWidget(self._dash_queue_table, 1)
+
+            # Patient record search + table
+            pr_card = QWidget()
+            pr_card.setObjectName("frontdeskPatientRecordsCard")
+            pr_card.setStyleSheet(
+                "QWidget#frontdeskPatientRecordsCard{background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;}"
+                "QTableWidget{background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;}"
+                "QHeaderView::section{background:#f8fbff;color:#334155;border:none;border-bottom:1px solid #e2e8f0;"
+                "padding:10px 8px;font-size:12px;font-weight:800;}"
+            )
+            pr_v = QVBoxLayout(pr_card)
+            pr_v.setContentsMargins(16, 14, 16, 16)
+            pr_v.setSpacing(10)
+
+            pr_title = QLabel("PATIENT RECORD SEARCH AND TABLE")
+            pr_title.setStyleSheet(
+                "color:#94a3b8;font-size:10px;font-weight:800;letter-spacing:1.0px;background:transparent;"
+            )
+            pr_v.addWidget(pr_title)
+
+            pr_top = QHBoxLayout()
+            pr_top.setSpacing(10)
+            pr_lbl = QLabel("Search")
+            pr_lbl.setStyleSheet("color:#64748b;font-size:12px;font-weight:800;background:transparent;")
+            self._dash_pr_search = QLineEdit()
+            self._dash_pr_search.setPlaceholderText("Search patient (name / patient code)…")
+            self._dash_pr_search.setMinimumHeight(40)
+            self._dash_pr_search.setClearButtonEnabled(True)
+            self._dash_pr_search.setStyleSheet(
                 "QLineEdit{background:#ffffff;color:#0f172a;border:1px solid #e2e8f0;"
                 "border-radius:12px;padding:0 12px;font-size:13px;font-weight:600;}"
                 "QLineEdit:focus{border-color:#93c5fd;}"
             )
-            self._dash_fd_search.returnPressed.connect(self._open_frontdesk_rescreen_search)
 
-            btn = QPushButton("Search")
-            btn.setMinimumHeight(40)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet(
+            self._dash_pr_search_btn = QPushButton("Search")
+            self._dash_pr_search_btn.setMinimumHeight(40)
+            self._dash_pr_search_btn.setCursor(Qt.PointingHandCursor)
+            self._dash_pr_search_btn.setStyleSheet(
                 "QPushButton{background:#2563eb;color:#fff;border:none;border-radius:12px;"
                 "padding:0 16px;font-weight:800;font-size:13px;}"
                 "QPushButton:hover{background:#1d4ed8;}"
                 "QPushButton:pressed{background:#1e40af;}"
             )
-            btn.clicked.connect(self._open_frontdesk_rescreen_search)
+            pr_top.addWidget(pr_lbl, 0, Qt.AlignVCenter)
+            pr_top.addWidget(self._dash_pr_search, 1)
+            pr_top.addWidget(self._dash_pr_search_btn, 0)
+            pr_v.addLayout(pr_top)
 
-            fd_bar.setStyleSheet(
-                "QWidget#frontdeskSearchBar{background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;}"
-            )
-            fd_l.addWidget(lbl, 0, Qt.AlignVCenter)
-            fd_l.addWidget(self._dash_fd_search, 1)
-            fd_l.addWidget(btn, 0)
-            outer.addWidget(fd_bar)
+            self._dash_pr_table = QTableWidget(0, 3)
+            self._dash_pr_table.setHorizontalHeaderLabels(["Name", "Date of Diagnosis", "Screened by"])
+            self._dash_pr_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self._dash_pr_table.setSelectionMode(QAbstractItemView.SingleSelection)
+            self._dash_pr_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self._dash_pr_table.verticalHeader().setVisible(False)
+            self._dash_pr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            self._dash_pr_table.setMinimumHeight(340)
+            pr_v.addWidget(self._dash_pr_table, 1)
+            self._dash_pr_table.cellDoubleClicked.connect(self._on_frontdesk_patient_record_action)
+
+            def _do_pr_search() -> None:
+                q = str(self._dash_pr_search.text() or "").strip()
+                self._dash_load_frontdesk_patient_records(q)
+
+            self._dash_pr_search.returnPressed.connect(_do_pr_search)
+            self._dash_pr_search_btn.clicked.connect(_do_pr_search)
+
+            # Layout like the mockup:
+            # Left column: Quick Actions (small) + Patient Record Search/Table (large)
+            # Right column: Patient Queue Table (tall)
+            body = QHBoxLayout()
+            body.setSpacing(16)
+
+            left_col = QWidget()
+            left_col.setObjectName("frontdeskLeftCol")
+            left_l = QVBoxLayout(left_col)
+            left_l.setContentsMargins(0, 0, 0, 0)
+            left_l.setSpacing(16)
+            left_l.addWidget(qa_card, 0)
+            left_l.addWidget(pr_card, 1)
+
+            body.addWidget(left_col, 7)
+            body.addWidget(queue_card, 5)
+            outer.addLayout(body, 1)
+            return page
 
         # DB health banner (hidden unless DB errors)
         self._dash_db_error_banner = QLabel("")
@@ -1835,6 +2113,162 @@ class EyeShieldApp(QMainWindow):
 
         return page
 
+    def _dash_load_frontdesk_patient_records(self, query: str) -> None:
+        """Frontdesk Dashboard: populate patient record search table."""
+        if not hasattr(self, "_dash_pr_table"):
+            return
+        q = str(query or "").strip()
+        rows = emr.search_patients(q) if q else []
+
+        # Build (Name, Diagnosis date, Screened by) rows.
+        out: list[tuple[int, str, str, str, str]] = []
+        for p in rows:
+            pid = int(p.get("patient_id") or 0)
+            pcode = str(p.get("patient_code") or "").strip()
+            name = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            diagnosis_date = ""
+            screened_by = ""
+            try:
+                screenings = emr.list_screenings_for_patient(pid) if pid else []
+            except Exception:
+                screenings = []
+            if screenings:
+                last = screenings[0] or {}
+                screened_by = str(last.get("performed_by_username") or "")
+                qid = last.get("queue_entry_id")
+                try:
+                    visit = emr.get_visit_details(int(qid)) if qid else None
+                except Exception:
+                    visit = None
+                diagnosis_date = str((visit or {}).get("diabetes_diagnosis_date") or "")
+            else:
+                # If no screenings exist yet (frontdesk queue-only), still show the
+                # diagnosis date from the most recent non-empty visit details if available.
+                try:
+                    diagnosis_date = emr.get_latest_diabetes_diagnosis_date(int(pid)) if pid else ""
+                except Exception:
+                    diagnosis_date = ""
+            out.append((pid, pcode, name, diagnosis_date, screened_by))
+
+        self._dash_pr_table.setRowCount(len(out))
+        for i, (pid, pcode, name, diag_date, screened_by) in enumerate(out):
+            it_name = QTableWidgetItem(str(name))
+            it_name.setData(int(Qt.ItemDataRole.UserRole), int(pid))
+            it_name.setData(int(Qt.ItemDataRole.UserRole) + 1, str(pcode))
+            self._dash_pr_table.setItem(i, 0, it_name)
+            self._dash_pr_table.setItem(i, 1, QTableWidgetItem(str(diag_date)))
+            self._dash_pr_table.setItem(i, 2, QTableWidgetItem(str(screened_by)))
+
+    def _on_frontdesk_patient_record_action(self, row: int, _col: int) -> None:
+        """Frontdesk Dashboard: choose action for a patient from the search table."""
+        if not hasattr(self, "_dash_pr_table"):
+            return
+        it = self._dash_pr_table.item(row, 0)
+        if not it:
+            return
+        try:
+            pid = int(it.data(int(Qt.ItemDataRole.UserRole)) or 0)
+        except Exception:
+            pid = 0
+        pcode = str(it.data(int(Qt.ItemDataRole.UserRole) + 1) or "").strip()
+        pname = str(it.text() or "").strip()
+        if not pid:
+            return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Patient action")
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setText(f"Select an action for:\n\n{pname}")
+        btn_view = msg.addButton("View details", QMessageBox.ButtonRole.AcceptRole)
+        btn_follow = msg.addButton("Follow-up Screening", QMessageBox.ButtonRole.ActionRole)
+        msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked == btn_view:
+            self._navigate_to(3, nav_key="Reports")
+            rp = getattr(self, "reports_page", None)
+            # Prefill Reports search so the record is immediately visible.
+            if rp is not None and hasattr(rp, "search_input"):
+                try:
+                    rp.search_input.setText(pcode or pname)
+                except Exception:
+                    pass
+            return
+
+        if clicked == btn_follow:
+            if QMessageBox.question(
+                self,
+                "Confirm follow-up screening",
+                (
+                    "Patient will go to a follow-up screening and will add a new entry to the screening history.\n\n"
+                    "Please confirm."
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            # Jump to Assessment with follow-up purpose locked.
+            self._navigate_to(1, nav_key="Screening")
+            sp = getattr(self, "screening_page", None)
+            if sp is None:
+                return
+            # Start from a clean state but keep the purpose lock.
+            if hasattr(sp, "reset_screening"):
+                try:
+                    sp.reset_screening(confirm_unsaved=False)
+                except TypeError:
+                    sp.reset_screening()
+            # Load patient into Assessment.
+            try:
+                emr_patient = emr.get_patient(int(pid)) or {}
+            except Exception:
+                emr_patient = {}
+            if emr_patient and hasattr(sp, "apply_emr_context"):
+                try:
+                    sp.apply_emr_context(emr_patient)
+                except Exception:
+                    pass
+            # Ensure follow-up purpose is selected and cannot be changed.
+            if hasattr(sp, "set_frontdesk_purpose"):
+                try:
+                    sp.set_frontdesk_purpose("follow_up", locked=True)
+                except Exception:
+                    pass
+            else:
+                with contextlib.suppress(Exception):
+                    if hasattr(sp, "fd_purpose_combo"):
+                        idx = sp.fd_purpose_combo.findText("Follow-up patient")
+                        if idx >= 0:
+                            sp.fd_purpose_combo.setCurrentIndex(idx)
+                        sp.fd_purpose_combo.setEnabled(False)
+            # Flag internal follow-up mode for downstream save/history logic.
+            with contextlib.suppress(Exception):
+                sp._current_screening_type = "follow_up"
+                sp._current_follow_up_flag = "Yes"
+            return
+
+    def _dash_refresh_frontdesk_queue(self) -> None:
+        """Frontdesk Dashboard: populate the embedded patient queue table."""
+        if not hasattr(self, "_dash_queue_table"):
+            return
+        try:
+            rows = emr.list_queue_rows()
+        except Exception:
+            rows = []
+
+        self._dash_queue_table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            qno = str(r.get("queue_number") or "")
+            patient = f"{r.get('first_name','')} {r.get('last_name','')}".strip()
+            purpose_raw = str(r.get("screening_purpose") or "new")
+            purpose = "follow-up" if purpose_raw == "follow_up" else purpose_raw.replace("_", "-")
+            status = str(r.get("status") or "")
+            self._dash_queue_table.setItem(i, 0, QTableWidgetItem(qno))
+            self._dash_queue_table.setItem(i, 1, QTableWidgetItem(patient))
+            self._dash_queue_table.setItem(i, 2, QTableWidgetItem(purpose))
+            self._dash_queue_table.setItem(i, 3, QTableWidgetItem(status))
+
     def _open_frontdesk_rescreen_search(self) -> None:
         """Dashboard shortcut for frontdesk: search existing patient and queue follow-up."""
         if str(getattr(self, "role", "") or "").strip().lower() != "frontdesk":
@@ -2069,6 +2503,10 @@ class EyeShieldApp(QMainWindow):
                 self._dash_db_error_banner.setVisible(True)
             else:
                 self._dash_db_error_banner.setVisible(False)
+
+        # Frontdesk: refresh embedded queue table (dashboard-only).
+        if role_l in {"frontdesk"}:
+            self._dash_refresh_frontdesk_queue()
 
         # Counts
         no_dr_count = abnormal_count = high_risk_count = 0

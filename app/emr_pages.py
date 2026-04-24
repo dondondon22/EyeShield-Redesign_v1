@@ -1007,7 +1007,6 @@ class EmrVisitsPage(QWidget):
         self._username = getattr(parent_app, "username", "") or ""
         self._role = str(getattr(parent_app, "role", "") or "").lower()
         self._selected_search_patient_id: int | None = None
-        self._clinical_queue_filter: str = "active"
         self._last_refresh_epoch: float = time.time()
         self._build()
         self._toast = EmrToast(self)
@@ -1028,12 +1027,6 @@ class EmrVisitsPage(QWidget):
 
     def _is_clinical(self) -> bool:
         return self._role in ("admin", "doctor", "clinician")
-
-    def _on_clinic_filter_changed(self) -> None:
-        if not self._is_clinical() or not hasattr(self, "_clinic_filter"):
-            return
-        self._clinical_queue_filter = "active" if self._clinic_filter.currentIndex() == 0 else "all"
-        self.refresh()
 
     @staticmethod
     def _compute_age(dob_iso: str) -> str:
@@ -1141,15 +1134,6 @@ class EmrVisitsPage(QWidget):
                 color:#111827;
             }
             QLineEdit#queueSearch:focus{border-color:#93c5fd;}
-            QComboBox#queueFilter{
-                background:#ffffff;
-                border:1px solid #e2e8f0;
-                border-radius:10px;
-                padding:6px 10px;
-                font-size:12px;
-                color:#111827;
-                min-height:34px;
-            }
             QPushButton#queueBtnPrimary{
                 background:#dbeafe;
                 color:#111827;
@@ -1195,31 +1179,13 @@ class EmrVisitsPage(QWidget):
         qp_layout.setContentsMargins(0, 0, 0, 0)
         qp_layout.setSpacing(0)
 
-        # Centered content column with breathing room (wide, but not edge-to-edge).
-        # This avoids wasted whitespace on ultra-wide displays while still allowing
-        # a spacious table on typical desktop resolutions.
-        _QUEUE_GUTTER_PX = 40
-        _QUEUE_MAX_W = 2240
-        center_wrap = QWidget()
-        center_wrap.setStyleSheet("background: transparent;")
-        center_row = QHBoxLayout(center_wrap)
-        # Match the "wide, near-full" look (small gutters).
-        center_row.setContentsMargins(_QUEUE_GUTTER_PX, 0, _QUEUE_GUTTER_PX, 0)
-        center_row.setSpacing(0)
-        center_row.addStretch(1)
-
         content = QWidget()
         content.setStyleSheet("background: transparent;")
         content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        # Let the queue breathe on 1080p/1440p without going edge-to-edge.
-        content.setMaximumWidth(_QUEUE_MAX_W)
         content_l = QVBoxLayout(content)
         content_l.setContentsMargins(0, 0, 0, 0)
         content_l.setSpacing(10)
-
-        center_row.addWidget(content, 1)
-        center_row.addStretch(1)
-        qp_layout.addWidget(center_wrap, 1)
+        qp_layout.addWidget(content, 1)
 
         # ── Header card (match PatientTimeline aesthetic) ────────────────────
         header_card = QFrame()
@@ -1232,8 +1198,7 @@ class EmrVisitsPage(QWidget):
         title_row.setSpacing(10)
         title_col = QVBoxLayout()
         title_col.setSpacing(1)
-        # Debuggable title: confirms which layout settings are live.
-        title = QLabel(f"Patient Queue  (gutter {_QUEUE_GUTTER_PX}px, max {_QUEUE_MAX_W}px)")
+        title = QLabel("Patient Queue")
         title.setObjectName("queueTitle")
         title_col.addWidget(title)
         title_row.addLayout(title_col, 1)
@@ -1248,14 +1213,6 @@ class EmrVisitsPage(QWidget):
         self.queue_search.setMinimumHeight(36)
         self.queue_search.textChanged.connect(self.refresh)
         controls_row.addWidget(self.queue_search, 1)
-
-        # Clinical filter: active vs all
-        self._clinic_filter = QComboBox()
-        self._clinic_filter.setObjectName("queueFilter")
-        self._clinic_filter.addItems(["Active visits", "All visits (today)"])
-        self._clinic_filter.setVisible(self._is_clinical())
-        self._clinic_filter.currentIndexChanged.connect(self._on_clinic_filter_changed)
-        controls_row.addWidget(self._clinic_filter, 0)
 
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setObjectName("queueBtnSecondary")
@@ -1315,15 +1272,15 @@ class EmrVisitsPage(QWidget):
 
         # Column sizing (aesthetic + scannable)
         hh = self.table.horizontalHeader()
-        hh.setStretchLastSection(False)
-        hh.setSectionResizeMode(0, QHeaderView.Stretch)          # Name
-        hh.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Age
-        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Sex
-        hh.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Purpose
-        hh.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Arrived
-        hh.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Status
+        hh.setStretchLastSection(True)
+        # Prevent "Start diagnosis" from being squeezed/clipped on narrow windows.
+        hh.setMinimumSectionSize(120)
+        # Even columns across the visible table (queue_id is hidden).
+        for col in (0, 1, 2, 3, 4, 5):
+            hh.setSectionResizeMode(col, QHeaderView.Stretch)
         if self._is_clinical():
-            hh.setSectionResizeMode(7, QHeaderView.ResizeToContents) # Actions
+            hh.setSectionResizeMode(7, QHeaderView.Stretch)  # Actions
+            self.table.setColumnWidth(7, 190)
         results_layout.addWidget(self.table)
 
         self._queue_stack = QStackedWidget()
@@ -1382,10 +1339,7 @@ class EmrVisitsPage(QWidget):
         active_rows = [
             r for r in all_rows if str(r.get("status") or "").strip().lower() in {"waiting", "in_progress"}
         ]
-        if self._is_clinical():
-            rows = active_rows if self._clinical_queue_filter == "active" else list(all_rows)
-        else:
-            rows = active_rows
+        rows = active_rows
         search_term = str(getattr(self, "queue_search", QLineEdit()).text() if hasattr(self, "queue_search") else "").strip().lower()
         if search_term:
             rows = [
@@ -1410,13 +1364,25 @@ class EmrVisitsPage(QWidget):
             purpose = "Follow-up" if purpose_raw == "follow_up" else "New"
             qlabel = _fmt_queue_time(r.get("created_at"))
             status = str(r.get("status") or "").strip().lower() or "-"
-            self.table.setItem(i, 0, QTableWidgetItem(name))
-            self.table.setItem(i, 1, QTableWidgetItem(age))
-            self.table.setItem(i, 2, QTableWidgetItem(sex))
-            self.table.setItem(i, 3, QTableWidgetItem(purpose))
-            self.table.setItem(i, 4, QTableWidgetItem(qlabel))
+            it0 = QTableWidgetItem(name)
+            it0.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 0, it0)
+            it1 = QTableWidgetItem(age)
+            it1.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 1, it1)
+            it2 = QTableWidgetItem(sex)
+            it2.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 2, it2)
+            it3 = QTableWidgetItem(purpose)
+            it3.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 3, it3)
+            it4 = QTableWidgetItem(qlabel)
+            it4.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 4, it4)
             self.table.setItem(i, 5, _status_item(status))
-            self.table.setItem(i, 6, QTableWidgetItem(str(r.get("queue_id", ""))))
+            it6 = QTableWidgetItem(str(r.get("queue_id", "")))
+            it6.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 6, it6)
             if self._is_clinical() and self.table.columnCount() > 7:
                 qid = r.get("queue_id")
                 pid = r.get("patient_id")
@@ -1424,10 +1390,17 @@ class EmrVisitsPage(QWidget):
                 btn.setObjectName("queueBtnPrimary")
                 btn.setCursor(Qt.PointingHandCursor)
                 btn.setFixedHeight(34)
+                btn.setMinimumWidth(160)
                 btn.clicked.connect(
                     lambda checked=False, q=qid, p=pid: self._on_start_diagnosis_clicked(q, p)
                 )
-                self.table.setCellWidget(i, 7, btn)
+                wrap = QWidget()
+                wl = QHBoxLayout(wrap)
+                wl.setContentsMargins(0, 0, 0, 0)
+                wl.addStretch(1)
+                wl.addWidget(btn)
+                wl.addStretch(1)
+                self.table.setCellWidget(i, 7, wrap)
         for row in range(self.table.rowCount()):
             self.table.setRowHeight(row, 42)
 
@@ -1627,6 +1600,21 @@ class EmrVisitsPage(QWidget):
             show_history_tab=True,
         )
         panel.back_requested.connect(lambda: self._show_review_list())
+        # Follow-up UX: keep Start Diagnosis inside the screening history view.
+        action_row = QWidget()
+        action_row.setStyleSheet("background:transparent;")
+        ar = QHBoxLayout(action_row)
+        ar.setContentsMargins(0, 0, 0, 0)
+        ar.setSpacing(10)
+        ar.addStretch(1)
+        btn = QPushButton("Start diagnosis")
+        btn.setStyleSheet(
+            "QPushButton{background:#059669;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-weight:800;}"
+            "QPushButton:hover{background:#047857;}"
+        )
+        btn.clicked.connect(self._start_diagnosis_from_review)
+        ar.addWidget(btn)
+        self._review_host_layout.addWidget(action_row, 0)
         self._review_host_layout.addWidget(panel, 1)
         self._review_ctx = {"qid": int(qid), "pid": int(pid)}
         self._queue_stack.setCurrentIndex(1)

@@ -1589,6 +1589,36 @@ class ResultsWindow(QWidget):
             saved_path = str(result.get("path") or "")
             details = f"Saved ✓ {saved_path}" if saved_path else "Saved ✓"
             self._set_save_state("success", details)
+            # Post-save flow: prompt Finish vs Screen Other Eye when the opposite eye
+            # has not yet been captured for this patient.
+            try:
+                pp = self.parent_page
+                pid = pp.p_id.text().strip() if hasattr(pp, "p_id") else ""
+                current_eye = pp.p_eye.currentText().strip() if hasattr(pp, "p_eye") else ""
+                opposite_eye = "Left Eye" if current_eye == "Right Eye" else "Right Eye"
+                opposite_exists = bool(pid) and hasattr(pp, "_find_existing_eye_record") and (
+                    pp._find_existing_eye_record(pid, opposite_eye) is not None
+                )
+            except Exception:
+                pid = ""
+                opposite_exists = True
+
+            if not opposite_exists:
+                box = QMessageBox(self)
+                box.setWindowTitle("Next Step")
+                box.setIcon(QMessageBox.Icon.Question)
+                box.setText("Screening saved. What would you like to do next?")
+                screen_btn = box.addButton("Screen Another Eye", QMessageBox.ButtonRole.AcceptRole)
+                finish_btn = box.addButton("Finish Session", QMessageBox.ButtonRole.ActionRole)
+                box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+                box.exec()
+                chosen = box.clickedButton()
+                if chosen == screen_btn and hasattr(pp, "screen_other_eye"):
+                    pp.screen_other_eye()
+                elif chosen == finish_btn and hasattr(pp, "open_saved_patient_screening_history"):
+                    QTimer.singleShot(0, pp.open_saved_patient_screening_history)
+                return
+
             if result.get("next_action") == "screening_history" and hasattr(self.parent_page, "open_saved_patient_screening_history"):
                 QTimer.singleShot(0, self.parent_page.open_saved_patient_screening_history)
             return

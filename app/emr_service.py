@@ -439,6 +439,238 @@ def ensure_legacy_patient_record_stub(
         with contextlib.suppress(Exception):
             if conn is not None:
                 conn.close()
+
+
+def _normalize_records_asset_path(path_value: str) -> str:
+    raw = str(path_value or "").strip()
+    if not raw:
+        return ""
+    raw = os.path.normpath(raw)
+    if not os.path.isabs(raw):
+        return raw.replace("\\", "/")
+    try:
+        app_root = Path(__file__).resolve().parent
+        rel = os.path.relpath(raw, str(app_root))
+        if not rel.startswith(".."):
+            return rel.replace("\\", "/")
+    except Exception:
+        pass
+    return raw.replace("\\", "/")
+
+
+def upsert_legacy_patient_record_for_queue_eye(
+    *,
+    queue_id: int,
+    patient_id: int,
+    captured_by: Optional[int],
+    eye_label: str,
+    screening_type: str,
+    screened_at: str,
+    source_image_path: str,
+    heatmap_image_path: str,
+    ai_classification: str,
+    doctor_classification: str,
+    decision_mode: str,
+    override_justification: str,
+    final_diagnosis_icdr: str,
+    doctor_findings: str,
+    confidence: str = "",
+) -> bool:
+    """
+    Update (or insert) the legacy `patient_records` row(s) for an EMR queue visit so
+    Patient Records/Reports show the saved fundus image + heatmap + results under the
+    same visit group (`screening_group_id = queue-{queue_id}`).
+
+    - First eye save: reuse the existing stub row when possible (eyes is blank).
+    - Second eye save: insert a second row under the same group id.
+    """
+    qid = int(queue_id)
+    pid = int(patient_id)
+    group_id = f"queue-{qid}"
+    eye = str(eye_label or "").strip() or ""
+    stype = "follow_up" if str(screening_type or "").strip().lower() == "follow_up" else "initial"
+
+    # Import lazily to avoid hard coupling / circular imports at module load.
+    try:
+        from db import get_records_conn, ensure_patient_records_db_schema
+    except Exception:  # pragma: no cover
+        from .db import get_records_conn, ensure_patient_records_db_schema
+
+    patient = get_patient(pid) or {}
+    if not patient:
+        return False
+    name = f"{patient.get('first_name', '')} {patient.get('last_name', '')}".strip()
+    patient_code = str(patient.get("patient_code") or "").strip()
+    birthdate = str(patient.get("date_of_birth") or "").strip()[:10]
+    age = str(patient.get("age") or "").strip()
+    sex = str(patient.get("sex") or "").strip()
+    contact = str(patient.get("contact_number") or "").strip()
+    diabetes_type = str(patient.get("diabetes_type") or "").strip()
+    duration = str(patient.get("dm_duration_years") or "").strip()
+    hba1c = str(patient.get("hba1c") or "").strip()
+
+    src_path = _normalize_records_asset_path(source_image_path)
+    hm_path = _normalize_records_asset_path(heatmap_image_path)
+    ts = str(screened_at or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    follow_up_flag = "Yes" if stype == "follow_up" else ""
+    followup_date = ts if stype == "follow_up" else ""
+    followup_label = "Follow-up screening" if stype == "follow_up" else ""
+
+    conn = None
+    try:
+        conn = get_records_conn()
+        ensure_patient_records_db_schema(conn)
+        cur = conn.cursor()
+
+        # If an eye-specific row already exists under this queue group, update it.
+        cur.execute(
+            """
+            SELECT id, eyes
+            FROM patient_records
+            WHERE archived_at IS NULL
+              AND screening_group_id = ?
+              AND lower(eyes) = lower(?)
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (group_id, eye),
+        )
+        row = cur.fetchone()
+        target_id = int(row[0]) if row else 0
+
+        # Otherwise, reuse the stub row (eyes blank) if it exists.
+        if not target_id:
+            cur.execute(
+                """
+                SELECT id
+                FROM patient_records
+                WHERE archived_at IS NULL
+                  AND screening_group_id = ?
+                  AND (eyes IS NULL OR trim(eyes) = '')
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (group_id,),
+            )
+            stub = cur.fetchone()
+            target_id = int(stub[0]) if stub else 0
+
+        if target_id:
+            cur.execute(
+                """
+                UPDATE patient_records SET
+                    patient_id = ?, name = ?, birthdate = ?, age = ?, sex = ?, contact = ?, eyes = ?,
+                    diabetes_type = ?, duration = ?, hba1c = ?,
+                    result = ?, confidence = ?, screened_at = ?,
+                    ai_classification = ?, doctor_classification = ?, decision_mode = ?, override_justification = ?,
+                    final_diagnosis_icdr = ?, doctor_findings = ?, decision_by_username = ?, decision_at = ?,
+                    source_image_path = ?, heatmap_image_path = ?,
+                    follow_up = ?, followup_date = ?, followup_label = ?, screening_type = ?,
+                    screening_group_id = ?,
+                    original_screener_username = COALESCE(NULLIF(original_screener_username, ''), ?),
+                    original_screener_name = COALESCE(NULLIF(original_screener_name, ''), ?)
+                WHERE id = ?
+                """,
+                (
+                    patient_code,
+                    name,
+                    birthdate,
+                    age,
+                    sex,
+                    contact,
+                    eye,
+                    diabetes_type,
+                    duration,
+                    hba1c,
+                    final_diagnosis_icdr or doctor_classification or ai_classification,
+                    confidence,
+                    ts,
+                    ai_classification,
+                    doctor_classification,
+                    decision_mode,
+                    override_justification,
+                    final_diagnosis_icdr,
+                    doctor_findings,
+                    "emr",
+                    ts,
+                    src_path,
+                    hm_path,
+                    follow_up_flag,
+                    followup_date,
+                    followup_label,
+                    stype,
+                    group_id,
+                    "emr",
+                    "EMR",
+                    int(target_id),
+                ),
+            )
+            conn.commit()
+            return True
+
+        # No stub exists (unexpected): insert a fresh row under the queue group.
+        cur.execute(
+            """
+            INSERT INTO patient_records (
+                patient_id, name, birthdate, age, sex, contact, eyes,
+                diabetes_type, duration, hba1c, prev_treatment, notes,
+                result, confidence, screened_at,
+                ai_classification, doctor_classification, decision_mode, override_justification,
+                final_diagnosis_icdr, doctor_findings, decision_by_username, decision_at,
+                source_image_path, heatmap_image_path,
+                follow_up, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?,
+                ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                patient_code,
+                name,
+                birthdate,
+                age,
+                sex,
+                contact,
+                eye,
+                diabetes_type,
+                duration,
+                hba1c,
+                "",
+                "",
+                final_diagnosis_icdr or doctor_classification or ai_classification,
+                confidence,
+                ts,
+                ai_classification,
+                doctor_classification,
+                decision_mode,
+                override_justification,
+                final_diagnosis_icdr,
+                doctor_findings,
+                "emr",
+                ts,
+                src_path,
+                hm_path,
+                follow_up_flag,
+                followup_date,
+                followup_label,
+                stype,
+                None,
+                group_id,
+            ),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            if conn is not None:
+                conn.close()
 def get_today_active_queue_for_patient(patient_id: int) -> Optional[dict[str, Any]]:
     """Active = visit_date today and status in (waiting, in_progress)."""
     vd = date.today().isoformat()
@@ -460,6 +692,55 @@ def get_today_active_queue_for_patient(patient_id: int) -> Optional[dict[str, An
             return None
         cols = ["queue_id", "patient_id", "queue_number", "visit_date", "status", "assigned_by", "screening_purpose", "notes"]
         return dict(zip(cols, row))
+    finally:
+        conn.close()
+
+
+def get_latest_queue_for_patient(patient_id: int) -> Optional[dict[str, Any]]:
+    """Return most recent queue row for patient (any date/status)."""
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT queue_id, patient_id, queue_number, visit_date, status, assigned_by, screening_purpose, notes
+            FROM emr_queue_entries
+            WHERE patient_id = ?
+            ORDER BY queue_id DESC
+            LIMIT 1
+            """,
+            (int(patient_id),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = ["queue_id", "patient_id", "queue_number", "visit_date", "status", "assigned_by", "screening_purpose", "notes"]
+        return dict(zip(cols, row))
+    finally:
+        conn.close()
+
+
+def get_latest_diabetes_diagnosis_date(patient_id: int) -> str:
+    """Return the most recent non-empty diabetes diagnosis date for a patient (from visit details)."""
+    pid = int(patient_id)
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT d.diabetes_diagnosis_date
+            FROM emr_visit_details d
+            JOIN emr_queue_entries q ON q.queue_id = d.queue_id
+            WHERE q.patient_id = ?
+              AND d.diabetes_diagnosis_date IS NOT NULL
+              AND trim(d.diabetes_diagnosis_date) != ''
+            ORDER BY d.visit_detail_id DESC
+            LIMIT 1
+            """,
+            (pid,),
+        )
+        row = cur.fetchone()
+        return str(row[0] or "").strip() if row else ""
     finally:
         conn.close()
 
@@ -808,6 +1089,207 @@ def upsert_visit_details(
     finally:
         conn.close()
 
+
+def frontdesk_save_and_queue(
+    *,
+    acting_user_id: int,
+    last_name: str,
+    first_name: str,
+    date_of_birth: str,
+    sex: str = "",
+    contact_number: str = "",
+    email: str = "",
+    screening_purpose: str = "new",
+    visit_details: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """
+    Fast-path for frontdesk "Save & Queue Patient".
+
+    Collapses multiple open/commit cycles into a single SQLite transaction to reduce UI latency.
+    Returns: {"patient_id","patient_code","queue_id","queue_number"}.
+    """
+    uid = int(acting_user_id)
+    fn = (first_name or "").strip()
+    ln = (last_name or "").strip()
+    dob = (date_of_birth or "").strip()[:10]
+    if not fn or not ln or not dob:
+        raise ValueError("first_name, last_name, date_of_birth required")
+    purpose = "follow_up" if str(screening_purpose or "").strip().lower() == "follow_up" else "new"
+    vd = date.today().isoformat()
+
+    # Visit details whitelist mirrors upsert_visit_details.
+    allowed_details = {
+        "visual_acuity_left",
+        "visual_acuity_right",
+        "blood_pressure_systolic",
+        "blood_pressure_diastolic",
+        "fasting_blood_sugar",
+        "random_blood_sugar",
+        "diabetes_type",
+        "dm_duration_years",
+        "hba1c",
+        "diabetes_diagnosis_date",
+        "treatment_regimen",
+        "prev_dr_stage",
+        "prev_treatment",
+        "symptom_blurred_vision",
+        "symptom_floaters",
+        "symptom_flashes",
+        "symptom_vision_loss",
+        "symptom_other",
+        "height_cm",
+        "weight_kg",
+        "notes",
+    }
+    payload: dict[str, Any] = {}
+    for k, v in (visit_details or {}).items():
+        if k in allowed_details:
+            payload[k] = v
+
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        # Patient upsert (identity = first,last,dob).
+        cur.execute(
+            """
+            SELECT patient_id, patient_code
+            FROM emr_patients
+            WHERE lower(trim(first_name)) = lower(trim(?))
+              AND lower(trim(last_name)) = lower(trim(?))
+              AND date_of_birth = ?
+            ORDER BY patient_id ASC
+            LIMIT 1
+            """,
+            (fn, ln, dob),
+        )
+        prow = cur.fetchone()
+        if not prow:
+            year = date.today().year
+            prefix = f"EYS-{year}-"
+            cur.execute("SELECT COUNT(*) FROM emr_patients WHERE patient_code LIKE ?", (f"{prefix}%",))
+            n = int((cur.fetchone() or [0])[0] or 0) + 1
+            code = f"{prefix}{n:05d}"
+            cur.execute(
+                """
+                INSERT INTO emr_patients (
+                    patient_code, last_name, first_name, date_of_birth, sex,
+                    contact_number, email, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    code,
+                    ln,
+                    fn,
+                    dob,
+                    (sex or "").strip() or None,
+                    (contact_number or "").strip() or None,
+                    (email or "").strip() or None,
+                    uid,
+                ),
+            )
+            patient_id = int(cur.lastrowid)
+            patient_code = code
+        else:
+            patient_id = int(prow[0])
+            patient_code = str(prow[1] or "").strip()
+            cur.execute(
+                """
+                UPDATE emr_patients
+                SET last_name = ?, first_name = ?, date_of_birth = ?,
+                    sex = ?, contact_number = ?, email = ?
+                WHERE patient_id = ?
+                """,
+                (
+                    ln,
+                    fn,
+                    dob,
+                    (sex or "").strip() or None,
+                    (contact_number or "").strip() or None,
+                    (email or "").strip() or None,
+                    patient_id,
+                ),
+            )
+
+        # If frontdesk didn't re-enter diagnosis date, keep the last known one.
+        dd = str(payload.get("diabetes_diagnosis_date") or "").strip()
+        if not dd:
+            with contextlib.suppress(Exception):
+                last_dd = get_latest_diabetes_diagnosis_date(int(patient_id))
+                if last_dd:
+                    payload["diabetes_diagnosis_date"] = last_dd
+
+        # Guard: no second active queue entry today.
+        cur.execute(
+            """
+            SELECT queue_number, status
+            FROM emr_queue_entries
+            WHERE patient_id = ? AND visit_date = ? AND status IN ('waiting','in_progress')
+            ORDER BY queue_id DESC
+            LIMIT 1
+            """,
+            (patient_id, vd),
+        )
+        ex = cur.fetchone()
+        if ex:
+            qn = str(ex[0] or "")
+            st = str(ex[1] or "unknown")
+            raise ValueError(f"Patient already has an active visit today: {qn} (status: {st}).")
+
+        # Assign queue number for today.
+        cur.execute("SELECT COUNT(*) FROM emr_queue_entries WHERE visit_date = ?", (vd,))
+        qseq = int((cur.fetchone() or [0])[0] or 0) + 1
+        queue_number = f"Q-{qseq:03d}"
+        cur.execute(
+            """
+            INSERT INTO emr_queue_entries (patient_id, queue_number, visit_date, status, assigned_by, screening_purpose, notes)
+            VALUES (?, ?, ?, 'waiting', ?, ?, '')
+            """,
+            (patient_id, queue_number, vd, uid, purpose),
+        )
+        queue_id = int(cur.lastrowid)
+
+        # Upsert visit details for this queue entry (if provided).
+        if payload:
+            cur.execute("SELECT visit_detail_id FROM emr_visit_details WHERE queue_id = ? LIMIT 1", (queue_id,))
+            existing = cur.fetchone()
+            if not existing:
+                cols = ["queue_id", "patient_id", "captured_by"] + list(payload.keys())
+                vals = [queue_id, patient_id, uid] + [payload[c] for c in payload.keys()]
+                placeholders = ", ".join(["?"] * len(cols))
+                cur.execute(
+                    f"INSERT INTO emr_visit_details ({', '.join(cols)}) VALUES ({placeholders})",
+                    vals,
+                )
+            else:
+                sets = ", ".join([f"{k} = ?" for k in payload.keys()] + ["captured_by = ?", "captured_at = datetime('now')", "updated_at = datetime('now')"])
+                vals2 = [payload[k] for k in payload.keys()] + [uid, queue_id]
+                cur.execute(f"UPDATE emr_visit_details SET {sets} WHERE queue_id = ?", vals2)
+
+        conn.commit()
+        # Also create a Patient Records row (legacy patient_records.db) so the visit is visible
+        # under Patient Records immediately, even without a fundus image. This MUST run after
+        # commit so `get_patient()` can see the newly inserted EMR patient row.
+        with contextlib.suppress(Exception):
+            ensure_legacy_patient_record_stub(
+                queue_id=int(queue_id),
+                patient_id=int(patient_id),
+                captured_by=int(uid) if uid is not None else None,
+                screening_purpose=purpose,
+            )
+        return {
+            "patient_id": patient_id,
+            "patient_code": patient_code,
+            "queue_id": queue_id,
+            "queue_number": queue_number,
+        }
+    except Exception:
+        with contextlib.suppress(Exception):
+            conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def list_emr_timeline_records(patient_id: int) -> list[dict[str, Any]]:
     """
