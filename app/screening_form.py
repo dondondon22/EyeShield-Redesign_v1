@@ -629,6 +629,7 @@ class ScreeningPage(QWidget):
         self._emr_patient_pk = None
         self._emr_screening_id = None
         self._emr_queue_entry_id = None
+        self._followup_restricted_mode = False
         self._flow_guard = ScreeningFlowGuard(self)
         self._duplicate_detector = DuplicateDetector()
         self._doctor_results_dialog = None
@@ -1010,8 +1011,21 @@ class ScreeningPage(QWidget):
         pid_row.addWidget(self.p_id, 1)
         c1.addLayout(pid_row)
 
+        self.p_first_name = QLineEdit()
+        self.p_first_name.setPlaceholderText("First name")
+        self.p_middle_name = QLineEdit()
+        self.p_middle_name.setPlaceholderText("Middle name")
+        self.p_last_name = QLineEdit()
+        self.p_last_name.setPlaceholderText("Last name")
+
+        # Legacy compatibility: keep a single full-name field used by existing logic paths.
         self.p_name = QLineEdit()
         self.p_name.setPlaceholderText("Full name")
+        self.p_name.hide()
+
+        self.p_first_name.textChanged.connect(lambda *_: self._sync_full_name_from_parts())
+        self.p_middle_name.textChanged.connect(lambda *_: self._sync_full_name_from_parts())
+        self.p_last_name.textChanged.connect(lambda *_: self._sync_full_name_from_parts())
         dob_arrow_icon = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "icons",
@@ -1027,9 +1041,10 @@ class ScreeningPage(QWidget):
             cal.activated.connect(self._on_dob_calendar_selected)
         self._apply_dob_theme_style()
         c1.addLayout(
-            row2(
-                field("Full Name", self.p_name, "scr_label_name"),
-                field("Date of Birth", self.p_dob, "scr_label_dob"),
+            row3(
+                field("First Name", self.p_first_name, "scr_label_name"),
+                field("Middle Name", self.p_middle_name),
+                field("Last Name", self.p_last_name),
             )
         )
 
@@ -1050,7 +1065,13 @@ class ScreeningPage(QWidget):
         self._apply_visible_dropdown_style(self.p_eye)
         self.p_eye.currentTextChanged.connect(self._on_eye_selection_changed)
         # Eye selection is handled at diagnosis time (doctor flow), not during assessment intake.
-        c1.addLayout(row2(field("Age", self.p_age, "scr_label_age"), field("Sex", self.p_sex, "scr_label_sex")))
+        c1.addLayout(
+            row3(
+                field("Date of Birth", self.p_dob, "scr_label_dob"),
+                field("Age", self.p_age, "scr_label_age"),
+                field("Sex", self.p_sex, "scr_label_sex"),
+            )
+        )
         self.p_eye.hide()
 
         # Contact fields (split per request)
@@ -1058,6 +1079,10 @@ class ScreeningPage(QWidget):
         self.p_phone.setPlaceholderText("Phone number")
         self.p_email = QLineEdit()
         self.p_email.setPlaceholderText("Email")
+        self.p_address = QLineEdit()
+        self.p_address.setPlaceholderText("Address")
+        self.p_address = QLineEdit()
+        self.p_address.setPlaceholderText("Address")
 
         # Constraints
         # - Phone: digits only (optional)
@@ -1118,7 +1143,15 @@ class ScreeningPage(QWidget):
         )
         c1.addWidget(self.bmi_classification_label)
 
-        c1.addLayout(row2(field("Phone Number", self.p_phone, "scr_label_contact"), field("Email", self.p_email)))
+        # Keep Phone/Email narrower so Address can take more space.
+        self.p_phone.setMaximumWidth(190)
+        self.p_email.setMaximumWidth(240)
+        contact_row = QHBoxLayout()
+        contact_row.setSpacing(14)
+        contact_row.addLayout(field("Phone", self.p_phone, "scr_label_phone"), 1)
+        contact_row.addLayout(field("Email", self.p_email, "scr_label_email"), 1)
+        contact_row.addLayout(field("Address", self.p_address, "scr_label_address"), 2)
+        c1.addLayout(contact_row)
 
         # Vitals widgets (rendered in a separate card below top row).
         self.va_left = QLineEdit()
@@ -1204,38 +1237,20 @@ class ScreeningPage(QWidget):
         self.diabetes_duration.setStyleSheet(
             "QSpinBox{background:#f6f8fb;color:#475569;border:1.5px solid #d3dae3;border-radius:6px;padding:6px 10px;}"
         )
-        self.hba1c = QDoubleSpinBox()
-        self.hba1c.setRange(0.0, 20.0)
-        self.hba1c.setDecimals(1)
-        self.hba1c.setSuffix(" %")
-        self.hba1c.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
-        self.hba1c.setSpecialValueText(" ")
-        self.hba1c.setValue(0.0)
-        self.hba1c.valueChanged.connect(self._on_hba1c_changed)
-        c2.addLayout(row2(field("Duration", self.diabetes_duration, "scr_label_duration"), field("HbA1c (%)", self.hba1c, "scr_label_hba1c")))
-        self.hba1c_warn_label = QLabel("")
-        self.hba1c_warn_label.setStyleSheet("color:#b45309;background:transparent;font-size:12px;font-weight:600;")
-        self.hba1c_warn_label.hide()
-        c2.addWidget(self.hba1c_warn_label)
-
-        # Treatment regimen dropdown
-        self.treatment_regimen = QComboBox()
-        self.treatment_regimen.setObjectName("treatmentRegimenDropdown")
-        self.treatment_regimen.addItems(["Select", "Insulin only", "Oral medications only", "Insulin + Oral medications", "Diet control only", "None/Unknown"])
-        self._apply_visible_dropdown_style(self.treatment_regimen)
-        # Keep related dropdowns on the same row for readability.
-        # (Treatment regimen + previous DR stage are commonly reviewed together.)
-        # They were previously stacked; keep them paired to reduce vertical scrolling.
 
         # Previous DR stage dropdown
         self.prev_dr_stage = QComboBox()
         self.prev_dr_stage.setObjectName("prevDRStageDropdown")
         self.prev_dr_stage.addItems(["Select", "No previous DR", "Mild NPDR", "Moderate NPDR", "Severe NPDR", "PDR (Proliferative)", "Unknown"])
         self._apply_visible_dropdown_style(self.prev_dr_stage)
-        c2.addLayout(row2(field("Treatment Regimen", self.treatment_regimen, "scr_label_treatment"), field("Previous DR Stage", self.prev_dr_stage, "scr_label_prev_dr")))
+        c2.addLayout(row2(field("Duration", self.diabetes_duration, "scr_label_duration"), field("Previous DR Stage", self.prev_dr_stage, "scr_label_prev_dr")))
 
-        self.prev_treatment = QCheckBox("Previous DR Treatment (Laser/Injection)")
-        c2.addWidget(self.prev_treatment)
+        # Treatment regimen dropdown
+        self.treatment_regimen = QComboBox()
+        self.treatment_regimen.setObjectName("treatmentRegimenDropdown")
+        self.treatment_regimen.addItems(["Select", "Insulin only", "Oral medications only", "Insulin + Oral medications", "Diet control only", "None/Unknown"])
+        self._apply_visible_dropdown_style(self.treatment_regimen)
+        c2.addLayout(field("Treatment Regimen", self.treatment_regimen, "scr_label_treatment"))
         self.notes = QTextEdit()
         self.notes.setPlaceholderText("Enter clinical notes…")
         self.notes.setMinimumHeight(72)
@@ -1298,7 +1313,7 @@ class ScreeningPage(QWidget):
         btn_row = QHBoxLayout()
         # Align button with dropdown left edge (after the "Purpose:" label).
         btn_row.addSpacing(72 + 8)
-        self.btn_fd_save_queue = QPushButton("Save & Queue Patient")
+        self.btn_fd_save_queue = QPushButton("Save and Queue Patient")
         self.btn_fd_save_queue.setObjectName("btnPrimary")
         self.btn_fd_save_queue.setMinimumHeight(40)
         self.btn_fd_save_queue.setMinimumWidth(220)
@@ -1441,6 +1456,13 @@ class ScreeningPage(QWidget):
             self.fd_purpose_combo.setCurrentIndex(idx)
         self.fd_purpose_combo.setEnabled(not locked)
 
+    def sync_frontdesk_purpose_lock(self) -> None:
+        """Keep Purpose pinned to current workflow on Assessment entry."""
+        if not hasattr(self, "fd_purpose_combo"):
+            return
+        purpose = "follow_up" if self._is_followup_mode() else "new"
+        self.set_frontdesk_purpose(purpose, locked=True)
+
     def _guard_upload_permission(self) -> bool:
         if self._is_upload_restricted():
             QMessageBox.information(
@@ -1496,6 +1518,7 @@ class ScreeningPage(QWidget):
         sex = self.p_sex.currentText().strip()
         phone = self.p_phone.text().strip() if hasattr(self, "p_phone") else ""
         email = self.p_email.text().strip() if hasattr(self, "p_email") else ""
+        address = self.p_address.text().strip() if hasattr(self, "p_address") else ""
         contact = self.p_contact.text().strip()
         if not contact:
             QMessageBox.warning(self, "Missing Information", "Please enter a contact number.")
@@ -1508,7 +1531,7 @@ class ScreeningPage(QWidget):
         if dm_type == "Select":
             dm_type = ""
         dm_duration = float(self.diabetes_duration.value()) if self.diabetes_duration.value() > 0 else None
-        hba1c_val = float(self.hba1c.value()) if self.hba1c.value() > 0 else None
+        hba1c_val = None  # Removed for frontdesk
 
         purpose_ui = str(getattr(self, "fd_purpose_combo", None).currentText() if hasattr(self, "fd_purpose_combo") else "")
         purpose = "follow_up" if "follow" in purpose_ui.lower() else "new"
@@ -1547,6 +1570,7 @@ class ScreeningPage(QWidget):
                 sex=sex,
                 contact_number=phone or contact,
                 email=email,
+                address=address,
                 screening_purpose=purpose,
                 visit_details=visit_details,
             )
@@ -1630,8 +1654,43 @@ class ScreeningPage(QWidget):
             if item and item.widget():
                 item.widget().setStyleSheet(self._form_label_stylesheet())
 
+    def _compose_full_name(self) -> str:
+        first = self.p_first_name.text().strip() if hasattr(self, "p_first_name") else ""
+        middle = self.p_middle_name.text().strip() if hasattr(self, "p_middle_name") else ""
+        last = self.p_last_name.text().strip() if hasattr(self, "p_last_name") else ""
+        return " ".join(part for part in (first, middle, last) if part)
+
+    def _sync_full_name_from_parts(self) -> None:
+        if hasattr(self, "p_name"):
+            self.p_name.setText(self._compose_full_name())
+
+    def _set_name_parts_from_full_name(self, full_name: str) -> None:
+        text = str(full_name or "").strip()
+        if not all(hasattr(self, f) for f in ("p_first_name", "p_middle_name", "p_last_name")):
+            if hasattr(self, "p_name"):
+                self.p_name.setText(text)
+            return
+
+        tokens = [tok for tok in text.split() if tok]
+        first = tokens[0] if tokens else ""
+        last = tokens[-1] if len(tokens) > 1 else ""
+        middle = " ".join(tokens[1:-1]) if len(tokens) > 2 else ""
+
+        for widget, value in (
+            (self.p_first_name, first),
+            (self.p_middle_name, middle),
+            (self.p_last_name, last),
+        ):
+            prev = widget.blockSignals(True)
+            widget.setText(value)
+            widget.blockSignals(prev)
+
+        self._sync_full_name_from_parts()
+
     def _set_tab_order_unified(self):
-        self.setTabOrder(self.p_name, self.p_dob)
+        self.setTabOrder(self.p_first_name, self.p_middle_name)
+        self.setTabOrder(self.p_middle_name, self.p_last_name)
+        self.setTabOrder(self.p_last_name, self.p_dob)
         self.setTabOrder(self.p_dob, self.p_sex)
         # Tab order: sex -> phone -> email -> eye (hidden)
         if hasattr(self, "p_phone") and hasattr(self, "p_email"):
@@ -1644,9 +1703,9 @@ class ScreeningPage(QWidget):
         self.setTabOrder(self.p_eye, self.diabetes_type)
         self.setTabOrder(self.diabetes_type, self.diabetes_diagnosis_date)
         self.setTabOrder(self.diabetes_diagnosis_date, self.diabetes_duration)
-        self.setTabOrder(self.diabetes_duration, self.hba1c)
-        self.setTabOrder(self.hba1c, self.prev_treatment)
-        self.setTabOrder(self.prev_treatment, self.va_left)
+        self.setTabOrder(self.diabetes_duration, self.prev_dr_stage)
+        self.setTabOrder(self.prev_dr_stage, self.treatment_regimen)
+        self.setTabOrder(self.treatment_regimen, self.va_left)
         self.setTabOrder(self.va_left, self.va_right)
         self.setTabOrder(self.va_right, self.bp_systolic)
         self.setTabOrder(self.bp_systolic, self.bp_diastolic)
@@ -1662,7 +1721,13 @@ class ScreeningPage(QWidget):
 
     def _setup_validators(self):
         self.name_regex = QRegularExpression(r"^[A-Za-z][A-Za-z\s\-']*$")
-        self.p_name.setValidator(QRegularExpressionValidator(self.name_regex, self))
+        name_part_regex = QRegularExpression(r"^[A-Za-z][A-Za-z\-']*$")
+        if hasattr(self, "p_first_name"):
+            self.p_first_name.setValidator(QRegularExpressionValidator(name_part_regex, self))
+        if hasattr(self, "p_middle_name"):
+            self.p_middle_name.setValidator(QRegularExpressionValidator(name_part_regex, self))
+        if hasattr(self, "p_last_name"):
+            self.p_last_name.setValidator(QRegularExpressionValidator(name_part_regex, self))
 
         # Keep visual acuity fields free-text for clinician entry.
 
@@ -1695,7 +1760,11 @@ class ScreeningPage(QWidget):
         return text, True
 
     def _validate_patient_basics(self):
+        follow_up_mode = self._is_followup_mode()
+        self._sync_full_name_from_parts()
         name = self.p_name.text().strip()
+        first_name = self.p_first_name.text().strip() if hasattr(self, "p_first_name") else ""
+        last_name = self.p_last_name.text().strip() if hasattr(self, "p_last_name") else ""
         dob_date = self._get_dob_date()
         sex = self.p_sex.currentText().strip()
         contact = self.p_contact.text().strip()
@@ -1704,13 +1773,17 @@ class ScreeningPage(QWidget):
         weight_val = self.weight.value() if hasattr(self, "weight") else 0.0
 
         missing_fields = []
+        if not first_name:
+            missing_fields.append("First Name")
+        if not last_name:
+            missing_fields.append("Last Name")
         if not name:
             missing_fields.append("Name")
-        if not dob_date.isValid():
+        if not follow_up_mode and not dob_date.isValid():
             missing_fields.append("Date of Birth")
-        if not sex:
+        if not follow_up_mode and not sex:
             missing_fields.append("Sex")
-        if not contact:
+        if not follow_up_mode and not contact:
             missing_fields.append("Contact")
         if height_val <= 0:
             missing_fields.append("Height (cm)")
@@ -1725,7 +1798,7 @@ class ScreeningPage(QWidget):
             )
             return False
 
-        if isinstance(self.p_dob, QDateEdit) and not self._dob_user_selected:
+        if (not follow_up_mode) and isinstance(self.p_dob, QDateEdit) and not self._dob_user_selected:
             QMessageBox.warning(self, "Missing Information", "Please select the patient's actual date of birth.")
             return False
 
@@ -1733,9 +1806,20 @@ class ScreeningPage(QWidget):
             QMessageBox.warning(self, "Error", "Name can only include letters, spaces, hyphens, and apostrophes")
             return False
 
-        if age_val < 1 or age_val > 120:
+        if (not follow_up_mode) and (age_val < 1 or age_val > 120):
             QMessageBox.warning(self, "Invalid Age", "Age must be between 1 and 120.")
             return False
+
+        # Validate clinical history for new patients
+        if not follow_up_mode:
+            diabetes_type = self.diabetes_type.currentText().strip() if hasattr(self, "diabetes_type") else ""
+            if diabetes_type == "" or diabetes_type == "Select":
+                QMessageBox.warning(
+                    self,
+                    "Missing Clinical History",
+                    "Please select a Diabetes Type for new patients.",
+                )
+                return False
 
         va_left_text, _ = self._normalize_visual_acuity(self.va_left.text()) if hasattr(self, "va_left") else ("", True)
         va_right_text, _ = self._normalize_visual_acuity(self.va_right.text()) if hasattr(self, "va_right") else ("", True)
@@ -2062,6 +2146,7 @@ class ScreeningPage(QWidget):
         self.p_email.textChanged.connect(lambda *_: self.p_contact.setText(self.p_phone.text().strip() or self.p_email.text().strip()))
         patient_form.addRow("Phone Number:", self.p_phone)
         patient_form.addRow("Email:", self.p_email)
+        patient_form.addRow("Address:", self.p_address)
 
         self.p_eye = QComboBox()
         self.p_eye.addItems(["", "Both Eyes", "Left Eye", "Right Eye"])
@@ -2082,18 +2167,10 @@ class ScreeningPage(QWidget):
         self.diabetes_duration.setRange(0, 80)
         clinical_form.addRow("Duration:", self.diabetes_duration)
 
-        self.hba1c = QDoubleSpinBox()
-        self.hba1c.setRange(0.0, 20.0)
-        self.hba1c.setDecimals(1)
-        self.hba1c.setSuffix(" %")
-        self.hba1c.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
-        self.hba1c.setSpecialValueText(" ")
-        self.hba1c.setValue(0.0)
-        clinical_form.addRow("HbA1c:", self.hba1c)
-
-        self.prev_treatment = QCheckBox("Previous DR Treatment")
-        self.prev_treatment.setStyleSheet(CHECKBOX_STYLE)
-        clinical_form.addRow("", self.prev_treatment)
+        self.clinical_prev_dr_stage = QComboBox()
+        self.clinical_prev_dr_stage.addItems(["Select", "No previous DR", "Mild NPDR", "Moderate NPDR", "Severe NPDR", "PDR (Proliferative)", "Unknown"])
+        self._apply_visible_dropdown_style(self.clinical_prev_dr_stage)
+        clinical_form.addRow("Previous DR Stage:", self.clinical_prev_dr_stage)
 
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(80)
@@ -2209,7 +2286,7 @@ class ScreeningPage(QWidget):
             self.p_id.setText(code)
         fn = str(emr_patient.get("first_name") or "").strip()
         ln = str(emr_patient.get("last_name") or "").strip()
-        self.p_name.setText(f"{fn} {ln}".strip() or (ln or fn))
+        self._set_name_parts_from_full_name(f"{fn} {ln}".strip() or (ln or fn))
 
         dob_s = str(emr_patient.get("date_of_birth") or "")[:10]
         if dob_s and hasattr(self, "p_dob"):
@@ -2228,7 +2305,12 @@ class ScreeningPage(QWidget):
             idx = self.p_sex.findText(sex)
             if idx >= 0:
                 self.p_sex.setCurrentIndex(idx)
-        self.p_contact.setText(str(emr_patient.get("contact_number") or ""))
+        contact_number = str(emr_patient.get("contact_number") or "")
+        self.p_contact.setText(contact_number)
+        if hasattr(self, "p_phone"):
+            self.p_phone.setText(contact_number)
+        if hasattr(self, "p_address"):
+            self.p_address.setText(str(emr_patient.get("address") or ""))
 
         h = emr_patient.get("height_cm")
         w = emr_patient.get("weight_kg")
@@ -2430,22 +2512,79 @@ class ScreeningPage(QWidget):
             self.clear_image()
             self.stacked_widget.setCurrentIndex(0)
 
+    def _is_followup_mode(self) -> bool:
+        screening_type = str(getattr(self, "_current_screening_type", "") or "").strip().lower()
+        return screening_type == "follow_up" or bool(getattr(self, "_current_previous_screening_id", None))
+
     def _set_patient_context_locked(self, locked: bool):
-        """Lock demographics fields during follow-up to prevent patient switching."""
-        # For clinicians, lock demographics to prevent accidental patient switching mid-diagnosis.
-        # For front desk follow-ups, keep fields editable so they can update details before queueing.
-        allow_edit = self._is_upload_restricted()
-        if hasattr(self, "p_name"):
-            self.p_name.setReadOnly(locked and not allow_edit)
-        if hasattr(self, "p_contact"):
-            self.p_contact.setReadOnly(locked and not allow_edit)
+        """Two modes: full edit for new patient, strict edit limits for follow-up."""
+
+        def _set_ro(widget_name: str, read_only: bool):
+            if hasattr(self, widget_name):
+                getattr(self, widget_name).setReadOnly(read_only)
+
+        def _set_enabled(widget_name: str, enabled: bool):
+            if hasattr(self, widget_name):
+                getattr(self, widget_name).setEnabled(enabled)
+
+        is_follow_up_locked = bool(locked)
+        self._followup_restricted_mode = is_follow_up_locked
+
+        # Editable in follow-up mode: height and weight only.
+        _set_ro("height", False)
+        _set_ro("weight", False)
+        _set_enabled("prev_dr_stage", not is_follow_up_locked)
+
+        # Identity and demographics
+        _set_ro("p_first_name", is_follow_up_locked)
+        _set_ro("p_middle_name", is_follow_up_locked)
+        _set_ro("p_last_name", is_follow_up_locked)
+        _set_ro("p_name", is_follow_up_locked)
+        _set_ro("p_contact", is_follow_up_locked)
+        _set_ro("p_phone", is_follow_up_locked)
+        _set_ro("p_email", is_follow_up_locked)
+        _set_ro("p_address", is_follow_up_locked)
+        _set_enabled("p_sex", not is_follow_up_locked)
+        _set_enabled("p_eye", not is_follow_up_locked)
+
         if hasattr(self, "p_dob"):
             if isinstance(self.p_dob, QDateEdit):
-                self.p_dob.setReadOnly(locked and not allow_edit)
+                self.p_dob.setReadOnly(is_follow_up_locked)
+                self.p_dob.setEnabled(not is_follow_up_locked)
             else:
-                self.p_dob.setReadOnly(locked and not allow_edit)
-        if hasattr(self, "p_sex"):
-            self.p_sex.setEnabled((not locked) or allow_edit)
+                self.p_dob.setReadOnly(is_follow_up_locked)
+
+        # Clinical history
+        _set_enabled("diabetes_type", not is_follow_up_locked)
+        _set_ro("diabetes_diagnosis_date", is_follow_up_locked)
+        if hasattr(self, "hba1c"):
+            self.hba1c.setReadOnly(is_follow_up_locked)
+            self.hba1c.setEnabled(not is_follow_up_locked)
+        _set_enabled("treatment_regimen", not is_follow_up_locked)
+        if hasattr(self, "prev_treatment"):
+            self.prev_treatment.setEnabled(not is_follow_up_locked)
+
+        # Vitals, symptoms, notes
+        _set_ro("va_left", is_follow_up_locked)
+        _set_ro("va_right", is_follow_up_locked)
+        _set_ro("symptom_other", is_follow_up_locked)
+        if hasattr(self, "notes"):
+            self.notes.setReadOnly(is_follow_up_locked)
+
+        for spin_name in ("bp_systolic", "bp_diastolic", "fbs", "rbs"):
+            if hasattr(self, spin_name):
+                spin = getattr(self, spin_name)
+                spin.setReadOnly(is_follow_up_locked)
+                spin.setEnabled(True)
+
+        for tag_name in ("symptom_blurred", "symptom_floaters", "symptom_flashes", "symptom_vision_loss"):
+            _set_enabled(tag_name, not is_follow_up_locked)
+
+        # Hard-lock non-allowed fields during follow-up.
+        if is_follow_up_locked:
+            _set_enabled("diabetes_duration", False)
+        else:
+            _set_enabled("diabetes_duration", True)
 
     def reset_screening(self, confirm_unsaved: bool = True):
         if self._guard_busy_action("starting a new screening"):
@@ -2474,20 +2613,25 @@ class ScreeningPage(QWidget):
         self._current_followup_date = ""
         self._current_followup_label = ""
         self._current_screening_group_id = ""
+        self._followup_restricted_mode = False
         self._emr_patient_pk = None
         self._emr_screening_id = None
         self._emr_queue_entry_id = None
-        if hasattr(self, "fd_purpose_combo"):
-            idx = self.fd_purpose_combo.findText("New patient")
-            if idx >= 0:
-                self.fd_purpose_combo.setCurrentIndex(idx)
-            # Frontdesk new intake should default to "New patient" and be locked.
-            # Follow-up flow explicitly unlocks/sets this via dashboard shortcut.
-            self.fd_purpose_combo.setEnabled(not self._is_upload_restricted())
+        self.sync_frontdesk_purpose_lock()
 
         self.generate_patient_id()
         self.p_name.clear()
+        if hasattr(self, "p_first_name"):
+            self.p_first_name.clear()
+        if hasattr(self, "p_middle_name"):
+            self.p_middle_name.clear()
+        if hasattr(self, "p_last_name"):
+            self.p_last_name.clear()
         self.p_contact.clear()
+        if hasattr(self, "p_phone"):
+            self.p_phone.clear()
+        if hasattr(self, "p_address"):
+            self.p_address.clear()
         if isinstance(self.p_dob, QDateEdit):
             self._set_dob_date(self.default_dob_date, user_selected=False)
         else:
@@ -2603,7 +2747,7 @@ class ScreeningPage(QWidget):
 
             # Use exact same query as generate_report's _fetch_full_record
             cur.execute("""
-                SELECT id, patient_id, name, birthdate, age, sex, contact, eyes,
+                SELECT id, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
                        diabetes_type, duration, hba1c, prev_treatment, notes,
                        result, confidence, screened_at,
                        ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
@@ -2626,7 +2770,7 @@ class ScreeningPage(QWidget):
                 return False
 
             # Map row tuple to values by position (matching query order)
-            (id_val, patient_id, name, birthdate, age, sex, contact, eyes,
+            (id_val, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
              diabetes_type, duration, hba1c, prev_treatment, notes,
              result, confidence, screened_at,
              ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
@@ -2642,7 +2786,7 @@ class ScreeningPage(QWidget):
 
             # Load data from record with safe type conversion
             self.p_id.setText(str(patient_id or ""))
-            self.p_name.setText(str(name or ""))
+            self._set_name_parts_from_full_name(str(name or ""))
 
             # DOB widget can be a QDateEdit (current UI) or text field (legacy UI)
             dob_text = str(birthdate or "").strip()
@@ -2682,6 +2826,16 @@ class ScreeningPage(QWidget):
                 self.p_sex.setCurrentIndex(0)
 
             self.p_contact.setText(str(contact or ""))
+            if hasattr(self, "p_phone") and hasattr(self, "p_email"):
+                contact_str = str(phone or contact or "").strip()
+                if "@" in contact_str and "." in contact_str:
+                    self.p_email.setText(contact_str)
+                    self.p_phone.setText("")
+                else:
+                    self.p_phone.setText(contact_str)
+                    self.p_email.setText("")
+            if hasattr(self, "p_address"):
+                self.p_address.setText(str(address or ""))
 
             # Safe diabetes type setting
             diabetes_str = str(diabetes_type or "").strip()
@@ -2841,13 +2995,8 @@ class ScreeningPage(QWidget):
             self._current_followup_label = str(followup_label or "").strip()
             self._current_screening_group_id = str(screening_group_id or "").strip() if replace_mode else ""
 
-            # Front desk UI: auto-detect purpose for rescreens/follow-ups.
-            if hasattr(self, "fd_purpose_combo"):
-                purpose = str(self._current_screening_type or "").strip().lower()
-                target = "Follow-up patient" if "follow" in purpose else "New patient"
-                idx = self.fd_purpose_combo.findText(target)
-                if idx >= 0:
-                    self.fd_purpose_combo.setCurrentIndex(idx)
+            # Front desk UI: pin Purpose to current mode while on assessment.
+            self.sync_frontdesk_purpose_lock()
 
             # Bridge legacy patient_records.db patient_id (code) to EMR patient_code so front desk
             # follow-ups save/queue the same patient instead of creating duplicates.
@@ -2904,11 +3053,8 @@ class ScreeningPage(QWidget):
         self._current_followup_label = "Follow-up screening"
         self._current_screening_group_id = ""
 
-        # Front desk UI: follow-up loads should default to follow-up purpose.
-        if hasattr(self, "fd_purpose_combo"):
-            idx = self.fd_purpose_combo.findText("Follow-up patient")
-            if idx >= 0:
-                self.fd_purpose_combo.setCurrentIndex(idx)
+        # Front desk UI: follow-up loads should pin Purpose to Follow-up.
+        self.sync_frontdesk_purpose_lock()
         
         # Show follow-up header
         if hasattr(self, "followup_header"):
@@ -3334,6 +3480,8 @@ class ScreeningPage(QWidget):
             "age": self.p_age.value(),
             "sex": self.p_sex.currentText(),
             "contact": self.p_contact.text().strip(),
+            "phone": self.p_phone.text().strip() if hasattr(self, "p_phone") else "",
+            "address": self.p_address.text().strip() if hasattr(self, "p_address") else "",
             "eye": self.p_eye.currentText(),
             "diabetes_type": self.diabetes_type.currentText(),
             "diagnosis_date": self.diabetes_diagnosis_date.text().strip() if hasattr(self, "diabetes_diagnosis_date") else "",
@@ -3416,11 +3564,15 @@ class ScreeningPage(QWidget):
                 return False
 
         self.p_id.setText(str(data.get("patient_id") or self.generate_patient_id()))
-        self.p_name.setText(str(data.get("name") or ""))
+        self._set_name_parts_from_full_name(str(data.get("name") or ""))
         self.p_dob.setText(str(data.get("dob") or ""))
         self.p_age.setValue(int(data.get("age") or 0))
         self.p_sex.setCurrentText(str(data.get("sex") or ""))
         self.p_contact.setText(str(data.get("contact") or ""))
+        if hasattr(self, "p_phone"):
+            self.p_phone.setText(str(data.get("phone") or ""))
+        if hasattr(self, "p_address"):
+            self.p_address.setText(str(data.get("address") or ""))
         self.p_eye.setCurrentText(str(data.get("eye") or ""))
         self.diabetes_type.setCurrentText(str(data.get("diabetes_type") or "Select"))
         if hasattr(self, "diabetes_diagnosis_date"):
@@ -3625,7 +3777,7 @@ class ScreeningPage(QWidget):
             cur.execute(
                 """
                 UPDATE patient_records SET
-                    patient_id = ?, name = ?, birthdate = ?, age = ?, sex = ?, contact = ?, eyes = ?,
+                    patient_id = ?, name = ?, birthdate = ?, age = ?, sex = ?, contact = ?, phone = ?, address = ?, eyes = ?,
                     diabetes_type = ?, duration = ?, hba1c = ?, prev_treatment = ?, notes = ?,
                     result = ?, confidence = ?, screened_at = ?,
                     ai_classification = ?, doctor_classification = ?, decision_mode = ?, override_justification = ?,
@@ -3738,8 +3890,8 @@ class ScreeningPage(QWidget):
                 "hba1c": float(self.hba1c.value()) if hasattr(self, "hba1c") and self.hba1c.value() > 0 else None,
                 "diabetes_diagnosis_date": (self.diabetes_diagnosis_date.text().strip() if hasattr(self, "diabetes_diagnosis_date") else "") or None,
                 "treatment_regimen": (self.treatment_regimen.currentText().strip() if hasattr(self, "treatment_regimen") else "") or None,
-                "prev_dr_stage": (self.prev_dr_stage.currentText().strip() if hasattr(self, "prev_dr_stage") else "") or None,
-                "prev_treatment": "Yes" if self.prev_treatment.isChecked() else "No",
+            "prev_dr_stage": (self.clinical_prev_dr_stage.currentText().strip() if hasattr(self, "clinical_prev_dr_stage") else "") or None,
+
                 "symptom_blurred_vision": 1 if getattr(self, "symptom_blurred", None) and self.symptom_blurred.isChecked() else 0,
                 "symptom_floaters": 1 if getattr(self, "symptom_floaters", None) and self.symptom_floaters.isChecked() else 0,
                 "symptom_flashes": 1 if getattr(self, "symptom_flashes", None) and self.symptom_flashes.isChecked() else 0,
@@ -3850,6 +4002,8 @@ class ScreeningPage(QWidget):
         age = self.p_age.value()
         sex = self.p_sex.currentText()
         contact = self.p_contact.text().strip()
+        phone = self.p_phone.text().strip() if hasattr(self, "p_phone") else ""
+        address = self.p_address.text().strip() if hasattr(self, "p_address") else ""
         eye = self.p_eye.currentText()
         diabetes_type = self.diabetes_type.currentText()
         duration = self.diabetes_duration.value()
@@ -3922,6 +4076,8 @@ class ScreeningPage(QWidget):
             "age": age,
             "sex": sex,
             "contact": contact,
+            "phone": phone,
+            "address": address,
             "eye": eye,
             "diabetes_type": diabetes_type,
             "diag_date": diag_date_str,
@@ -3986,6 +4142,8 @@ class ScreeningPage(QWidget):
             "age": age,
             "sex": sex,
             "contact": contact,
+            "phone": phone,
+            "address": address,
             "eye": eye,
             "diabetes_type": diabetes_type,
             "diag_date": diag_date_str,
@@ -4060,6 +4218,8 @@ class ScreeningPage(QWidget):
             age if age > 0 else "",
             sex,
             contact,
+            phone,
+            address,
             eye,
             diabetes_type if diabetes_type != "Select" else "",
             duration,
@@ -4290,7 +4450,7 @@ class ScreeningPage(QWidget):
         self.p_id.setText(saved_pid)
 
         # Restore demographics for the same patient
-        self.p_name.setText(name)
+        self._set_name_parts_from_full_name(name)
         if isinstance(self.p_dob, QDateEdit):
             if dob_date.isValid():
                 self._set_dob_date(dob_date, user_selected=True)
@@ -4348,7 +4508,7 @@ class ScreeningPage(QWidget):
             cur.execute(
                 """
                 INSERT INTO patient_records (
-                    patient_id, name, birthdate, age, sex, contact, eyes,
+                    patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
                     diabetes_type, duration, hba1c, prev_treatment, notes,
                     result, confidence, screened_at,
                     ai_classification, doctor_classification, decision_mode, override_justification,
@@ -4365,7 +4525,7 @@ class ScreeningPage(QWidget):
                     follow_up, followup_date, followup_label, screening_type, previous_screening_id,
                     screening_group_id,
                     original_screener_username, original_screener_name
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [*patient_data, screener_username, screener_name],
             )

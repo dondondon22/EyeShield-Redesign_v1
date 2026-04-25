@@ -543,6 +543,8 @@ class PatientTimelineDialog(QWidget):
             ("age",        "Age"),
             ("sex",        "Sex"),
             ("contact",    "Contact"),
+            ("phone",      "Phone Number"),
+            ("address",    "Address"),
             ("eyes",       "Eye Screened"),
             ("height",     "Height"),
             ("weight",     "Weight"),
@@ -887,6 +889,8 @@ class PatientTimelineDialog(QWidget):
         self._si("age",        f"{age} years" if age != "-" else "-")
         self._si("sex",        sex)
         self._si("contact",    _opt(record.get("contact") or ps.get("contact")))
+        self._si("phone",      _opt(record.get("phone") or ps.get("phone") or record.get("contact") or ps.get("contact")))
+        self._si("address",    _opt(record.get("address") or ps.get("address")))
         self._si("eyes",       eye_summary_text)
         h = record.get("height") or ps.get("height")
         w2 = record.get("weight") or ps.get("weight")

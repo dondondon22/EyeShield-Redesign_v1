@@ -372,6 +372,8 @@ def ensure_legacy_patient_record_stub(
     age = str(patient.get("age") or "").strip()
     sex = str(patient.get("sex") or "").strip()
     contact = str(patient.get("contact_number") or "").strip()
+    phone = str(patient.get("contact_number") or "").strip()
+    address = str(patient.get("address") or "").strip()
     diabetes_type = str(patient.get("diabetes_type") or "").strip()
     duration = str(patient.get("dm_duration_years") or "").strip()
     hba1c = str(patient.get("hba1c") or "").strip()
@@ -397,12 +399,12 @@ def ensure_legacy_patient_record_stub(
         cur.execute(
             """
             INSERT INTO patient_records (
-                patient_id, name, birthdate, age, sex, contact, eyes,
+                patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
                 diabetes_type, duration, hba1c, prev_treatment, notes,
                 result, confidence, screened_at,
                 follow_up, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id,
                 decision_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 patient_code,
@@ -411,6 +413,8 @@ def ensure_legacy_patient_record_stub(
                 age,
                 sex,
                 contact,
+                phone,
+                address,
                 "",  # eyes unknown at intake
                 diabetes_type,
                 duration,
@@ -505,6 +509,8 @@ def upsert_legacy_patient_record_for_queue_eye(
     age = str(patient.get("age") or "").strip()
     sex = str(patient.get("sex") or "").strip()
     contact = str(patient.get("contact_number") or "").strip()
+    phone = str(patient.get("contact_number") or "").strip()
+    address = str(patient.get("address") or "").strip()
     diabetes_type = str(patient.get("diabetes_type") or "").strip()
     duration = str(patient.get("dm_duration_years") or "").strip()
     hba1c = str(patient.get("hba1c") or "").strip()
@@ -559,7 +565,7 @@ def upsert_legacy_patient_record_for_queue_eye(
             cur.execute(
                 """
                 UPDATE patient_records SET
-                    patient_id = ?, name = ?, birthdate = ?, age = ?, sex = ?, contact = ?, eyes = ?,
+                    patient_id = ?, name = ?, birthdate = ?, age = ?, sex = ?, contact = ?, phone = ?, address = ?, eyes = ?,
                     diabetes_type = ?, duration = ?, hba1c = ?,
                     result = ?, confidence = ?, screened_at = ?,
                     ai_classification = ?, doctor_classification = ?, decision_mode = ?, override_justification = ?,
@@ -578,6 +584,8 @@ def upsert_legacy_patient_record_for_queue_eye(
                     age,
                     sex,
                     contact,
+                    phone,
+                    address,
                     eye,
                     diabetes_type,
                     duration,
@@ -612,7 +620,7 @@ def upsert_legacy_patient_record_for_queue_eye(
         cur.execute(
             """
             INSERT INTO patient_records (
-                patient_id, name, birthdate, age, sex, contact, eyes,
+                patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
                 diabetes_type, duration, hba1c, prev_treatment, notes,
                 result, confidence, screened_at,
                 ai_classification, doctor_classification, decision_mode, override_justification,
@@ -620,7 +628,7 @@ def upsert_legacy_patient_record_for_queue_eye(
                 source_image_path, heatmap_image_path,
                 follow_up, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?, ?,
@@ -636,6 +644,8 @@ def upsert_legacy_patient_record_for_queue_eye(
                 age,
                 sex,
                 contact,
+                phone,
+                address,
                 eye,
                 diabetes_type,
                 duration,
@@ -760,7 +770,7 @@ def _next_queue_seq(visit_date: str) -> int:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT COUNT(*) FROM emr_queue_entries WHERE visit_date = ?",
+            "SELECT COUNT(*) FROM emr_queue_entries WHERE visit_date = ? AND status IN ('waiting', 'in_progress')",
             (visit_date,),
         )
         row = cur.fetchone()
@@ -1099,6 +1109,7 @@ def frontdesk_save_and_queue(
     sex: str = "",
     contact_number: str = "",
     email: str = "",
+    address: str = "",
     screening_purpose: str = "new",
     visit_details: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
@@ -1175,8 +1186,8 @@ def frontdesk_save_and_queue(
                 """
                 INSERT INTO emr_patients (
                     patient_code, last_name, first_name, date_of_birth, sex,
-                    contact_number, email, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    contact_number, email, address, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     code,
@@ -1186,6 +1197,7 @@ def frontdesk_save_and_queue(
                     (sex or "").strip() or None,
                     (contact_number or "").strip() or None,
                     (email or "").strip() or None,
+                    (address or "").strip() or None,
                     uid,
                 ),
             )
@@ -1198,7 +1210,7 @@ def frontdesk_save_and_queue(
                 """
                 UPDATE emr_patients
                 SET last_name = ?, first_name = ?, date_of_birth = ?,
-                    sex = ?, contact_number = ?, email = ?
+                    sex = ?, contact_number = ?, email = ?, address = ?
                 WHERE patient_id = ?
                 """,
                 (
@@ -1208,6 +1220,7 @@ def frontdesk_save_and_queue(
                     (sex or "").strip() or None,
                     (contact_number or "").strip() or None,
                     (email or "").strip() or None,
+                    (address or "").strip() or None,
                     patient_id,
                 ),
             )
@@ -1531,14 +1544,12 @@ def list_queue_rows(visit_date: Optional[str] = None) -> list[dict[str, Any]]:
                 p.patient_code, p.last_name, p.first_name, p.date_of_birth, p.sex, q.created_at
             FROM emr_queue_entries q
             JOIN emr_patients p ON p.patient_id = q.patient_id
-            WHERE q.visit_date = ?
+            WHERE q.visit_date = ? AND q.status IN ('waiting', 'in_progress')
             ORDER BY
                 CASE q.status
                     WHEN 'in_progress' THEN 0
                     WHEN 'waiting' THEN 1
-                    WHEN 'completed' THEN 2
-                    WHEN 'cancelled' THEN 3
-                    ELSE 4
+                    ELSE 2
                 END,
                 CAST(SUBSTR(q.queue_number, 3) AS INTEGER) ASC, q.queue_id ASC
             """,

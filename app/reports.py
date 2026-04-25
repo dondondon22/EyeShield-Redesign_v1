@@ -2018,11 +2018,12 @@ class ReportsPage(QWidget):
         self.search_input.setMinimumHeight(40)
         self.search_input.textChanged.connect(self.apply_filters)
         cl.addWidget(self.search_input, 1)
-        self.result_filter = QComboBox()
-        self.result_filter.addItems(["All","No DR","Mild DR","Moderate DR","Severe DR","Proliferative DR"])
-        self.result_filter.setMinimumHeight(40)
-        self.result_filter.currentTextChanged.connect(self.apply_filters)
-        cl.addWidget(self.result_filter)
+        if not getattr(self, "is_frontdesk", False):
+            self.result_filter = QComboBox()
+            self.result_filter.addItems(["All","No DR","Mild DR","Moderate DR","Severe DR","Proliferative DR"])
+            self.result_filter.setMinimumHeight(40)
+            self.result_filter.currentTextChanged.connect(self.apply_filters)
+            cl.addWidget(self.result_filter)
         cl.addStretch(1)
         if self.archive_btn is not None:
             cl.addWidget(self.archive_btn)
@@ -2126,8 +2127,11 @@ class ReportsPage(QWidget):
         else:
             self.setTabOrder(self.report_btn, self.referral_btn)
             self.setTabOrder(self.referral_btn, self.search_input)
-        self.setTabOrder(self.search_input, self.result_filter)
-        self.setTabOrder(self.result_filter, self.results_table)
+        if hasattr(self, "result_filter"):
+            self.setTabOrder(self.search_input, self.result_filter)
+            self.setTabOrder(self.result_filter, self.results_table)
+        else:
+            self.setTabOrder(self.search_input, self.results_table)
         self._setup_action_buttons_ui()
         self.refresh_report()
 
@@ -2435,6 +2439,9 @@ class ReportsPage(QWidget):
         return self._is_record_owner(record)
 
     def _can_archive_record(self, record: dict | None) -> bool:
+        # Doctors can archive any record, others only their own
+        if str(self.role or "").lower() == "doctor":
+            return bool(record)
         return self._is_record_owner(record)
 
     def _can_internal_referral_record(self, record: dict) -> bool:
@@ -2649,7 +2656,7 @@ class ReportsPage(QWidget):
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT id, patient_id, name, birthdate, age, sex, contact, eyes,
+                SELECT id, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
                        diabetes_type, duration, hba1c, prev_treatment, notes,
                        result, confidence, screened_at, archived_at, archived_by,
                        archive_reason, original_screener_username, original_screener_name,
@@ -2684,50 +2691,52 @@ class ReportsPage(QWidget):
                     "age": row[4],
                     "sex": row[5],
                     "contact": row[6],
-                    "eyes": row[7],
-                    "diabetes_type": row[8],
-                    "duration": row[9],
-                    "hba1c": row[10],
-                    "prev_treatment": row[11],
-                    "notes": row[12],
-                    "result": row[13],
-                    "confidence": row[14],
-                    "screened_at": row[15],
-                    "archived_at": row[16],
-                    "archived_by": row[17],
-                    "archive_reason": row[18],
-                    "original_screener_username": row[19],
-                    "original_screener_name": row[20],
-                    "ai_classification": row[21],
-                    "doctor_classification": row[22],
-                    "decision_mode": row[23],
-                    "override_justification": row[24],
-                    "final_diagnosis_icdr": row[25],
-                    "doctor_findings": row[26],
-                    "height": row[27],
-                    "weight": row[28],
-                    "bmi": row[29],
-                    "visual_acuity_left": row[30],
-                    "visual_acuity_right": row[31],
-                    "blood_pressure_systolic": row[32],
-                    "blood_pressure_diastolic": row[33],
-                    "fasting_blood_sugar": row[34],
-                    "random_blood_sugar": row[35],
-                    "diabetes_diagnosis_date": row[36],
-                    "treatment_regimen": row[37],
-                    "prev_dr_stage": row[38],
-                    "symptom_blurred_vision": row[39],
-                    "symptom_floaters": row[40],
-                    "symptom_flashes": row[41],
-                    "symptom_vision_loss": row[42],
-                    "source_image_path": row[43],
-                    "heatmap_image_path": row[44],
-                    "follow_up": row[45],
-                    "followup_date": row[46],
-                    "followup_label": row[47],
-                    "screening_type": row[48],
-                    "previous_screening_id": row[49],
-                    "screening_group_id": row[50],
+                    "phone": row[7],
+                    "address": row[8],
+                    "eyes": row[9],
+                    "diabetes_type": row[10],
+                    "duration": row[11],
+                    "hba1c": row[12],
+                    "prev_treatment": row[13],
+                    "notes": row[14],
+                    "result": row[15],
+                    "confidence": row[16],
+                    "screened_at": row[17],
+                    "archived_at": row[18],
+                    "archived_by": row[19],
+                    "archive_reason": row[20],
+                    "original_screener_username": row[21],
+                    "original_screener_name": row[22],
+                    "ai_classification": row[23],
+                    "doctor_classification": row[24],
+                    "decision_mode": row[25],
+                    "override_justification": row[26],
+                    "final_diagnosis_icdr": row[27],
+                    "doctor_findings": row[28],
+                    "height": row[29],
+                    "weight": row[30],
+                    "bmi": row[31],
+                    "visual_acuity_left": row[32],
+                    "visual_acuity_right": row[33],
+                    "blood_pressure_systolic": row[34],
+                    "blood_pressure_diastolic": row[35],
+                    "fasting_blood_sugar": row[36],
+                    "random_blood_sugar": row[37],
+                    "diabetes_diagnosis_date": row[38],
+                    "treatment_regimen": row[39],
+                    "prev_dr_stage": row[40],
+                    "symptom_blurred_vision": row[41],
+                    "symptom_floaters": row[42],
+                    "symptom_flashes": row[43],
+                    "symptom_vision_loss": row[44],
+                    "source_image_path": row[45],
+                    "heatmap_image_path": row[46],
+                    "follow_up": row[47],
+                    "followup_date": row[48],
+                    "followup_label": row[49],
+                    "screening_type": row[50],
+                    "previous_screening_id": row[51],
+                    "screening_group_id": row[52],
                 }
             )
         return group_patient_record_rows(timeline)
@@ -2838,7 +2847,7 @@ class ReportsPage(QWidget):
             conn = sqlite3.connect(DB_FILE)
             cur = conn.cursor()
             cur.execute("""
-                SELECT id, patient_id, name, birthdate, age, sex, contact, eyes, 
+                SELECT id, patient_id, name, birthdate, age, sex, contact, phone, address, eyes, 
                        diabetes_type, duration, hba1c, prev_treatment, notes, 
                        result, confidence, screened_at, archived_at, archived_by, 
                        archive_reason, original_screener_username, original_screener_name,
@@ -2866,42 +2875,44 @@ class ReportsPage(QWidget):
                 "age": row[4],
                 "sex": row[5],
                 "contact": row[6],
-                "eyes": row[7],
-                "diabetes_type": row[8],
-                "duration": row[9],
-                "hba1c": row[10],
-                "prev_treatment": row[11],
-                "notes": row[12],
-                "result": row[13],
-                "confidence": row[14],
-                "screened_at": row[15],
-                "archived_at": row[16],
-                "archived_by": row[17],
-                "archive_reason": row[18],
-                "original_screener_username": row[19],
-                "original_screener_name": row[20],
-                "ai_classification": row[21],
-                "doctor_classification": row[22],
-                "decision_mode": row[23],
-                "override_justification": row[24],
-                "final_diagnosis_icdr": row[25],
-                "doctor_findings": row[26],
-                "height": row[27],
-                "weight": row[28],
-                "bmi": row[29],
-                "visual_acuity_left": row[30],
-                "visual_acuity_right": row[31],
-                "blood_pressure_systolic": row[32],
-                "blood_pressure_diastolic": row[33],
-                "fasting_blood_sugar": row[34],
-                "random_blood_sugar": row[35],
-                "diabetes_diagnosis_date": row[36],
-                "treatment_regimen": row[37],
-                "prev_dr_stage": row[38],
-                "symptom_blurred_vision": row[39],
-                "symptom_floaters": row[40],
-                "symptom_flashes": row[41],
-                "symptom_vision_loss": row[42],
+                "phone": row[7],
+                "address": row[8],
+                "eyes": row[9],
+                "diabetes_type": row[10],
+                "duration": row[11],
+                "hba1c": row[12],
+                "prev_treatment": row[13],
+                "notes": row[14],
+                "result": row[15],
+                "confidence": row[16],
+                "screened_at": row[17],
+                "archived_at": row[18],
+                "archived_by": row[19],
+                "archive_reason": row[20],
+                "original_screener_username": row[21],
+                "original_screener_name": row[22],
+                "ai_classification": row[23],
+                "doctor_classification": row[24],
+                "decision_mode": row[25],
+                "override_justification": row[26],
+                "final_diagnosis_icdr": row[27],
+                "doctor_findings": row[28],
+                "height": row[29],
+                "weight": row[30],
+                "bmi": row[31],
+                "visual_acuity_left": row[32],
+                "visual_acuity_right": row[33],
+                "blood_pressure_systolic": row[34],
+                "blood_pressure_diastolic": row[35],
+                "fasting_blood_sugar": row[36],
+                "random_blood_sugar": row[37],
+                "diabetes_diagnosis_date": row[38],
+                "treatment_regimen": row[39],
+                "prev_dr_stage": row[40],
+                "symptom_blurred_vision": row[41],
+                "symptom_floaters": row[42],
+                "symptom_flashes": row[43],
+                "symptom_vision_loss": row[44],
             }
         except Exception as err:
             print(f"Error fetching patient record: {err}")
@@ -3169,7 +3180,7 @@ class ReportsPage(QWidget):
             conn = sqlite3.connect(DB_FILE)
             cur = conn.cursor()
             cur.execute("""
-                SELECT id, patient_id, name, birthdate, age, sex, contact, eyes,
+                SELECT id, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
                       diabetes_type, duration, hba1c, prev_treatment, notes,
                       result, confidence, screened_at,
                       ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
@@ -3189,20 +3200,20 @@ class ReportsPage(QWidget):
                 return None
             return {
                 "id":row[0],"patient_id":row[1],"name":row[2],"birthdate":row[3],
-                "age":row[4],"sex":row[5],"contact":row[6],"eyes":row[7],
-                "diabetes_type":row[8],"duration":row[9],"hba1c":row[10],
-                "prev_treatment":row[11],"notes":row[12],"result":row[13],"confidence":row[14],"screened_at":row[15],
-                "ai_classification":row[16],"doctor_classification":row[17],"decision_mode":row[18],
-                "override_justification":row[19],"final_diagnosis_icdr":row[20],"doctor_findings":row[21],
-                "va_left":row[22],"va_right":row[23],
-                "bp_systolic":row[24],"bp_diastolic":row[25],
-                "fbs":row[26],"rbs":row[27],
-                "symptom_blurred":row[28],"symptom_floaters":row[29],
-                "symptom_flashes":row[30],"symptom_vision_loss":row[31],
-                "source_image_path":row[32],"heatmap_image_path":row[33],
-                "image_sha256":row[34],"image_saved_at":row[35],
-                "original_screener_username":row[36],"original_screener_name":row[37],
-                "screening_group_id":row[38],
+                "age":row[4],"sex":row[5],"contact":row[6],"phone":row[7],"address":row[8],"eyes":row[9],
+                "diabetes_type":row[10],"duration":row[11],"hba1c":row[12],
+                "prev_treatment":row[13],"notes":row[14],"result":row[15],"confidence":row[16],"screened_at":row[17],
+                "ai_classification":row[18],"doctor_classification":row[19],"decision_mode":row[20],
+                "override_justification":row[21],"final_diagnosis_icdr":row[22],"doctor_findings":row[23],
+                "va_left":row[24],"va_right":row[25],
+                "bp_systolic":row[26],"bp_diastolic":row[27],
+                "fbs":row[28],"rbs":row[29],
+                "symptom_blurred":row[30],"symptom_floaters":row[31],
+                "symptom_flashes":row[32],"symptom_vision_loss":row[33],
+                "source_image_path":row[34],"heatmap_image_path":row[35],
+                "image_sha256":row[36],"image_saved_at":row[37],
+                "original_screener_username":row[38],"original_screener_name":row[39],
+                "screening_group_id":row[40],
             }
         except Exception:
             return None

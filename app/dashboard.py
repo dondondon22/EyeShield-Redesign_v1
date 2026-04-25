@@ -519,7 +519,7 @@ class EyeShieldApp(QMainWindow):
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT id, patient_id, name, birthdate, age, sex, contact, eyes,
+                SELECT id, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
                        diabetes_type, duration, hba1c, prev_treatment, notes,
                        result, confidence, screened_at, archived_at, archived_by,
                        archive_reason, original_screener_username, original_screener_name,
@@ -553,50 +553,52 @@ class EyeShieldApp(QMainWindow):
                     "age": row[4],
                     "sex": row[5],
                     "contact": row[6],
-                    "eyes": row[7],
-                    "diabetes_type": row[8],
-                    "duration": row[9],
-                    "hba1c": row[10],
-                    "prev_treatment": row[11],
-                    "notes": row[12],
-                    "result": row[13],
-                    "confidence": row[14],
-                    "screened_at": row[15],
-                    "archived_at": row[16],
-                    "archived_by": row[17],
-                    "archive_reason": row[18],
-                    "original_screener_username": row[19],
-                    "original_screener_name": row[20],
-                    "ai_classification": row[21],
-                    "doctor_classification": row[22],
-                    "decision_mode": row[23],
-                    "override_justification": row[24],
-                    "final_diagnosis_icdr": row[25],
-                    "doctor_findings": row[26],
-                    "height": row[27],
-                    "weight": row[28],
-                    "bmi": row[29],
-                    "visual_acuity_left": row[30],
-                    "visual_acuity_right": row[31],
-                    "blood_pressure_systolic": row[32],
-                    "blood_pressure_diastolic": row[33],
-                    "fasting_blood_sugar": row[34],
-                    "random_blood_sugar": row[35],
-                    "diabetes_diagnosis_date": row[36],
-                    "treatment_regimen": row[37],
-                    "prev_dr_stage": row[38],
-                    "symptom_blurred_vision": row[39],
-                    "symptom_floaters": row[40],
-                    "symptom_flashes": row[41],
-                    "symptom_vision_loss": row[42],
-                    "source_image_path": row[43],
-                    "heatmap_image_path": row[44],
-                    "follow_up": row[45],
-                    "followup_date": row[46],
-                    "followup_label": row[47],
-                    "screening_type": row[48],
-                    "previous_screening_id": row[49],
-                    "screening_group_id": row[50],
+                    "phone": row[7],
+                    "address": row[8],
+                    "eyes": row[9],
+                    "diabetes_type": row[10],
+                    "duration": row[11],
+                    "hba1c": row[12],
+                    "prev_treatment": row[13],
+                    "notes": row[14],
+                    "result": row[15],
+                    "confidence": row[16],
+                    "screened_at": row[17],
+                    "archived_at": row[18],
+                    "archived_by": row[19],
+                    "archive_reason": row[20],
+                    "original_screener_username": row[21],
+                    "original_screener_name": row[22],
+                    "ai_classification": row[23],
+                    "doctor_classification": row[24],
+                    "decision_mode": row[25],
+                    "override_justification": row[26],
+                    "final_diagnosis_icdr": row[27],
+                    "doctor_findings": row[28],
+                    "height": row[29],
+                    "weight": row[30],
+                    "bmi": row[31],
+                    "visual_acuity_left": row[32],
+                    "visual_acuity_right": row[33],
+                    "blood_pressure_systolic": row[34],
+                    "blood_pressure_diastolic": row[35],
+                    "fasting_blood_sugar": row[36],
+                    "random_blood_sugar": row[37],
+                    "diabetes_diagnosis_date": row[38],
+                    "treatment_regimen": row[39],
+                    "prev_dr_stage": row[40],
+                    "symptom_blurred_vision": row[41],
+                    "symptom_floaters": row[42],
+                    "symptom_flashes": row[43],
+                    "symptom_vision_loss": row[44],
+                    "source_image_path": row[45],
+                    "heatmap_image_path": row[46],
+                    "follow_up": row[47],
+                    "followup_date": row[48],
+                    "followup_label": row[49],
+                    "screening_type": row[50],
+                    "previous_screening_id": row[51],
+                    "screening_group_id": row[52],
                 }
             )
         return group_patient_record_rows(timeline)
@@ -1040,6 +1042,9 @@ class EyeShieldApp(QMainWindow):
             self.emr_page.release_screening_to_main_stack_if_embedded()
         self._active_nav_key = str(nav_key or self._default_nav_key_for_page(index) or "")
         self.pages.setCurrentIndex(index)
+        if index == 1 and hasattr(self, "screening_page") and hasattr(self.screening_page, "sync_frontdesk_purpose_lock"):
+            with contextlib.suppress(Exception):
+                self.screening_page.sync_frontdesk_purpose_lock()
         self._set_active_nav(self.pages.currentIndex())
         # If user clicks the active page again, currentChanged will not fire.
         # Force-refresh key data pages so the click always produces visible content.
@@ -1735,7 +1740,7 @@ class EyeShieldApp(QMainWindow):
             pr_v.addLayout(pr_top)
 
             self._dash_pr_table = QTableWidget(0, 3)
-            self._dash_pr_table.setHorizontalHeaderLabels(["Name", "Date of Diagnosis", "Screened by"])
+            self._dash_pr_table.setHorizontalHeaderLabels(["Name", "Screening Date", "Screened by"])
             self._dash_pr_table.setSelectionBehavior(QAbstractItemView.SelectRows)
             self._dash_pr_table.setSelectionMode(QAbstractItemView.SingleSelection)
             self._dash_pr_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -2120,14 +2125,15 @@ class EyeShieldApp(QMainWindow):
         q = str(query or "").strip()
         rows = emr.search_patients(q) if q else []
 
-        # Build (Name, Diagnosis date, Screened by) rows.
-        out: list[tuple[int, str, str, str, str]] = []
+        # Build (Name, Screening date, Screened by) rows.
+        out: list[tuple[int, str, str, str, str, str]] = []
         for p in rows:
             pid = int(p.get("patient_id") or 0)
             pcode = str(p.get("patient_code") or "").strip()
             name = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
-            diagnosis_date = ""
+            screening_date = ""
             screened_by = ""
+            sort_date = ""
             try:
                 screenings = emr.list_screenings_for_patient(pid) if pid else []
             except Exception:
@@ -2135,28 +2141,20 @@ class EyeShieldApp(QMainWindow):
             if screenings:
                 last = screenings[0] or {}
                 screened_by = str(last.get("performed_by_username") or "")
-                qid = last.get("queue_entry_id")
-                try:
-                    visit = emr.get_visit_details(int(qid)) if qid else None
-                except Exception:
-                    visit = None
-                diagnosis_date = str((visit or {}).get("diabetes_diagnosis_date") or "")
-            else:
-                # If no screenings exist yet (frontdesk queue-only), still show the
-                # diagnosis date from the most recent non-empty visit details if available.
-                try:
-                    diagnosis_date = emr.get_latest_diabetes_diagnosis_date(int(pid)) if pid else ""
-                except Exception:
-                    diagnosis_date = ""
-            out.append((pid, pcode, name, diagnosis_date, screened_by))
+                screening_date = str(last.get("created_at") or "")
+                sort_date = last.get("created_at") or ""
+            out.append((pid, pcode, name, screening_date, screened_by, sort_date))
+
+        # Sort by screening date descending (newest first)
+        out.sort(key=lambda x: x[5] or "", reverse=True)
 
         self._dash_pr_table.setRowCount(len(out))
-        for i, (pid, pcode, name, diag_date, screened_by) in enumerate(out):
+        for i, (pid, pcode, name, screening_date, screened_by, _) in enumerate(out):
             it_name = QTableWidgetItem(str(name))
             it_name.setData(int(Qt.ItemDataRole.UserRole), int(pid))
             it_name.setData(int(Qt.ItemDataRole.UserRole) + 1, str(pcode))
             self._dash_pr_table.setItem(i, 0, it_name)
-            self._dash_pr_table.setItem(i, 1, QTableWidgetItem(str(diag_date)))
+            self._dash_pr_table.setItem(i, 1, QTableWidgetItem(str(screening_date)))
             self._dash_pr_table.setItem(i, 2, QTableWidgetItem(str(screened_by)))
 
     def _on_frontdesk_patient_record_action(self, row: int, _col: int) -> None:
