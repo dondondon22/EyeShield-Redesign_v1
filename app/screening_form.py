@@ -127,7 +127,7 @@ class DurationSpinBox(QSpinBox):
     def textFromValue(self, value: int) -> str:
         y = value // 12
         m = value % 12
-        return f"{y} years {m} months"
+        return f"{y} years and {m} months"
         
     def valueFromText(self, text: str) -> int:
         try:

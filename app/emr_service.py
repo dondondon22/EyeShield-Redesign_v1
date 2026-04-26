@@ -845,11 +845,19 @@ def _next_queue_seq(visit_date: str) -> int:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT COUNT(*) FROM emr_queue_entries WHERE visit_date = ? AND status IN ('waiting', 'in_progress')",
+            "SELECT queue_number FROM emr_queue_entries WHERE visit_date = ?",
             (visit_date,),
         )
-        row = cur.fetchone()
-        return int(row[0] or 0) + 1
+        max_q = 0
+        for (qstr,) in cur.fetchall():
+            if not qstr: continue
+            try:
+                num = int(qstr.replace("Q-", ""))
+                if num > max_q:
+                    max_q = num
+            except ValueError:
+                pass
+        return max_q + 1
     finally:
         conn.close()
 
@@ -1369,8 +1377,17 @@ def frontdesk_save_and_queue(
             raise ValueError(f"Patient already has an active visit today: {qn} (status: {st}).")
 
         # Assign queue number for today.
-        cur.execute("SELECT COUNT(*) FROM emr_queue_entries WHERE visit_date = ?", (vd,))
-        qseq = int((cur.fetchone() or [0])[0] or 0) + 1
+        cur.execute("SELECT queue_number FROM emr_queue_entries WHERE visit_date = ?", (vd,))
+        max_qseq = 0
+        for (qstr,) in cur.fetchall():
+            if not qstr: continue
+            try:
+                num = int(qstr.replace("Q-", ""))
+                if num > max_qseq:
+                    max_qseq = num
+            except ValueError:
+                pass
+        qseq = max_qseq + 1
         queue_number = f"Q-{qseq:03d}"
         cur.execute(
             """

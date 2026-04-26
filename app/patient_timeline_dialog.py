@@ -1138,14 +1138,24 @@ class PatientTimelineDialog(QWidget):
 
         # Clinical history
         self._sh("diabetes_type",     _opt(record.get("diabetes_type") or ps.get("diabetes_type")))
-        dur = str(
+        dur_raw = str(
             record.get("duration")
             or record.get("dm_duration_years")
             or ps.get("duration")
             or ps.get("dm_duration_years")
             or ""
         ).strip()
-        self._sh("duration", dur or "-")
+        dur_formatted = dur_raw
+        if dur_raw:
+            try:
+                months = int(float(dur_raw))
+                y = months // 12
+                m = months % 12
+                dur_formatted = f"{y} years and {m} months"
+            except ValueError:
+                dur_formatted = dur_raw
+
+        self._sh("duration", dur_formatted or "-")
         self._sh("diagnosed_date", _opt(record.get("diabetes_diagnosis_date") or ps.get("diabetes_diagnosis_date")))
         self._sh(
             "treatment_regimen",
