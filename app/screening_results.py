@@ -1680,7 +1680,38 @@ class ResultsWindow(QWidget):
                 QTimer.singleShot(0, pp.screen_other_eye)
                 return
 
-            # Otherwise, keep the user on results so they can generate referral/report.
+            # If user opted for 'Just This Eye', show completion prompt
+            if not go_screen_other_after_save:
+                box = QMessageBox(self)
+                box.setWindowTitle("Saved")
+                box.setText("Patient was successfully saved.")
+                ok_btn = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+                refer_btn = box.addButton("Create Referral", QMessageBox.ButtonRole.ActionRole)
+                queue_btn = box.addButton("Back to Patient Queue List", QMessageBox.ButtonRole.ActionRole)
+                box.exec()
+                choice = box.clickedButton()
+
+                if choice == refer_btn:
+                    success = self.generate_referral()
+                    if success:
+                        q_box = QMessageBox.question(
+                            self,
+                            "Patient Queue",
+                            "Would you like to go back to patient queue list?",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.Yes,
+                        )
+                        if q_box == QMessageBox.StandardButton.Yes:
+                            main_win = self.window()
+                            if hasattr(main_win, "pages"):
+                                main_win.pages.setCurrentIndex(0)
+                elif choice == queue_btn:
+                    main_win = self.window()
+                    if hasattr(main_win, "pages"):
+                        main_win.pages.setCurrentIndex(0)
+                return
+
+            # Otherwise (screen other eye), logic handled above.
             return
 
         if status == "unchanged":

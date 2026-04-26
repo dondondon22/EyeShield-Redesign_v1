@@ -2678,14 +2678,14 @@ class ReportsPage(QWidget):
                 '''
                 INSERT INTO patient_records (
                     patient_id, name, birthdate, age, sex, contact, phone, email, address, eyes,
-                    diabetes_type, duration, treatment_regimen, prev_dr_stage,
+                    diabetes_type, duration, diabetes_diagnosis_date, treatment_regimen, prev_dr_stage,
                     notes, result, confidence,
                     screened_at, screening_type, follow_up, followup_date, followup_label,
                     original_screener_username, original_screener_name, decision_mode,
                     height, weight, bmi
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?,
@@ -2705,6 +2705,7 @@ class ReportsPage(QWidget):
                     str(record.get("eyes") or record.get("eye_summary") or ""),
                     str(record.get("diabetes_type") or ""),
                     str(record.get("duration") or record.get("dm_duration_years") or ""),
+                    str(record.get("diabetes_diagnosis_date") or ""),
                     str(record.get("treatment_regimen") or record.get("treatment") or record.get("current_medications") or ""),
                     str(record.get("prev_dr_stage") or ""),
                     str(record.get("notes") or record.get("doctor_findings") or ""),
@@ -2841,14 +2842,14 @@ class ReportsPage(QWidget):
                 """
                 INSERT INTO patient_records (
                     patient_id, name, birthdate, age, sex, contact, phone, email, address, eyes,
-                    diabetes_type, duration, treatment_regimen, prev_dr_stage,
+                    diabetes_type, duration, diabetes_diagnosis_date, treatment_regimen, prev_dr_stage,
                     notes, result, confidence,
                     screened_at, screening_type, follow_up, followup_date, followup_label,
                     original_screener_username, original_screener_name, decision_mode,
                     height, weight, bmi
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?,
@@ -2868,6 +2869,7 @@ class ReportsPage(QWidget):
                     str(record.get("eyes") or record.get("eye_summary") or ""),
                     str(record.get("diabetes_type") or ""),
                     str(record.get("duration") or record.get("dm_duration_years") or ""),
+                    str(record.get("diabetes_diagnosis_date") or ""),
                     str(record.get("treatment_regimen") or record.get("treatment") or record.get("current_medications") or ""),
                     str(record.get("prev_dr_stage") or ""),
                     str(record.get("notes") or record.get("doctor_findings") or ""),

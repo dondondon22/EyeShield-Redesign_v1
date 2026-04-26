@@ -118,49 +118,30 @@ class SymptomTag(QPushButton):
 
 
 
-class DurationWidget(QWidget):
+
+class DurationSpinBox(QSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        self.setRange(0, 1200)
         
-        self.years = QSpinBox()
-        self.years.setSuffix(" years")
-        self.years.setRange(0, 100)
+    def textFromValue(self, value: int) -> str:
+        y = value // 12
+        m = value % 12
+        return f"{y} years {m} months"
         
-        self.months = QSpinBox()
-        self.months.setSuffix(" months")
-        self.months.setRange(0, 11)
-        
-        layout.addWidget(self.years)
-        layout.addWidget(self.months)
-        
-    def value(self) -> int:
-        """Returns total duration in months."""
-        return self.years.value() * 12 + self.months.value()
-        
-    def setValue(self, total_months: int):
-        total_months = int(total_months or 0)
-        y = total_months // 12
-        m = total_months % 12
-        self.years.setValue(y)
-        self.months.setValue(m)
-        
-    def setRange(self, min_val, max_val):
-        pass
-        
-    def setReadOnly(self, ro: bool):
-        self.years.setReadOnly(ro)
-        self.months.setReadOnly(ro)
-        
-    def setButtonSymbols(self, sym):
-        self.years.setButtonSymbols(sym)
-        self.months.setButtonSymbols(sym)
-        
-    def setStyleSheet(self, ss: str):
-        self.years.setStyleSheet(ss)
-        self.months.setStyleSheet(ss)
+    def valueFromText(self, text: str) -> int:
+        try:
+            # Basic parsing support for manual typing if needed
+            import re
+            parts = re.findall(r'(\d+)', text)
+            if len(parts) >= 2:
+                return int(parts[0]) * 12 + int(parts[1])
+            elif len(parts) == 1:
+                return int(parts[0]) * 12
+        except Exception:
+            pass
+        return super().valueFromText(text)
+
 
 class DropZoneLabel(QLabel):
     """Dashed image drop zone that emits file path on valid image drop."""
@@ -1328,9 +1309,7 @@ class ScreeningPage(QWidget):
         self.diabetes_diagnosis_date.textChanged.connect(self._on_diagnosis_date_changed)
         c2.addLayout(row2(field("Diabetes Type", self.diabetes_type, "scr_label_diabetes"), field("Diagnosis Date", self.diabetes_diagnosis_date)))
 
-        self.diabetes_duration = DurationWidget()
-#         self.diabetes_duration.setSuffix(" months")
-#         self.diabetes_duration.setRange(0, 1200)
+        self.diabetes_duration = DurationSpinBox()
         self.diabetes_duration.setReadOnly(True)
         self.diabetes_duration.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         self.diabetes_duration.setStyleSheet(
@@ -1586,9 +1565,10 @@ class ScreeningPage(QWidget):
     def _validate_all_fields_for_queue(self) -> bool:
         missing = []
         
-        full_name = self.p_name.text().strip()
-        if len([p for p in full_name.split() if p.strip()]) < 2:
-            missing.append("First and Last Name")
+        if hasattr(self, "p_first_name") and not self.p_first_name.text().strip():
+            missing.append("First Name")
+        if hasattr(self, "p_last_name") and not self.p_last_name.text().strip():
+            missing.append("Last Name")
             
         if not self._get_dob_date().isValid():
             missing.append("Date of Birth")
@@ -1871,7 +1851,7 @@ class ScreeningPage(QWidget):
 
     def _setup_validators(self):
         self.name_regex = QRegularExpression(r"^[A-Za-z][A-Za-z\s\-']*$")
-        name_part_regex = QRegularExpression(r"^[A-Za-z][A-Za-z\-']*$")
+        name_part_regex = QRegularExpression(r"^[A-Za-z][A-Za-z\s\-']*$")
         if hasattr(self, "p_first_name"):
             self.p_first_name.setValidator(QRegularExpressionValidator(name_part_regex, self))
         if hasattr(self, "p_middle_name"):
@@ -2308,9 +2288,7 @@ class ScreeningPage(QWidget):
         self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational"])
         clinical_form.addRow("Diabetes Type:", self.diabetes_type)
 
-        self.diabetes_duration = DurationWidget()
-#         self.diabetes_duration.setSuffix(" months")
-#         self.diabetes_duration.setRange(0, 1200)
+        self.diabetes_duration = DurationSpinBox()
         clinical_form.addRow("Duration:", self.diabetes_duration)
 
         self.clinical_prev_dr_stage = QComboBox()
@@ -2508,6 +2486,26 @@ class ScreeningPage(QWidget):
                 self.diabetes_duration.setValue(int(float(dm)))
             except (TypeError, ValueError):
                 pass
+
+        diag_date = str(emr_patient.get("diabetes_diagnosis_date") or "").strip()
+        if diag_date and hasattr(self, "diabetes_diagnosis_date"):
+            self.diabetes_diagnosis_date.setText(diag_date)
+
+        regimen = str(emr_patient.get("treatment_regimen") or "").strip()
+        if regimen and hasattr(self, "treatment_regimen"):
+            idx = self.treatment_regimen.findText(regimen)
+            if idx >= 0:
+                self.treatment_regimen.setCurrentIndex(idx)
+            else:
+                self.treatment_regimen.setCurrentText(regimen)
+
+        prev_dr = str(emr_patient.get("prev_dr_stage") or "").strip()
+        if prev_dr and hasattr(self, "prev_dr_stage"):
+            idx = self.prev_dr_stage.findText(prev_dr)
+            if idx >= 0:
+                self.prev_dr_stage.setCurrentIndex(idx)
+            else:
+                self.prev_dr_stage.setCurrentText(prev_dr)
         # HbA1c removed from UI; ignore EMR value if present.
 
         es = (eye_screened or "").strip()
@@ -2788,6 +2786,8 @@ class ScreeningPage(QWidget):
             self.p_phone.clear()
         if hasattr(self, "p_address"):
             self.p_address.clear()
+        if hasattr(self, "p_email"):
+            self.p_email.clear()
         if isinstance(self.p_dob, QDateEdit):
             self._set_dob_date(self.default_dob_date, user_selected=False)
         else:

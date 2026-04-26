@@ -1032,6 +1032,9 @@ def update_patient_fields(
         "current_eye_treatment",
         "previous_eye_treatment",
         "last_eye_exam_date",
+        "diabetes_diagnosis_date",
+        "treatment_regimen",
+        "prev_dr_stage",
     }
     sets = []
     values: list[Any] = []
@@ -1278,8 +1281,10 @@ def frontdesk_save_and_queue(
                         """
                         INSERT INTO emr_patients (
                             patient_code, last_name, first_name, date_of_birth, sex,
-                            contact_number, email, address, created_by
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            contact_number, email, address, created_by,
+                            diabetes_type, dm_duration_years, diabetes_diagnosis_date,
+                            treatment_regimen, prev_dr_stage
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             code,
@@ -1291,6 +1296,11 @@ def frontdesk_save_and_queue(
                             (email or "").strip() or None,
                             (address or "").strip() or None,
                             uid,
+                            payload.get("diabetes_type"),
+                            payload.get("dm_duration_years"),
+                            payload.get("diabetes_diagnosis_date"),
+                            payload.get("treatment_regimen"),
+                            payload.get("prev_dr_stage"),
                         ),
                     )
                     patient_id = int(cur.lastrowid)
@@ -1311,19 +1321,25 @@ def frontdesk_save_and_queue(
             cur.execute(
                 """
                 UPDATE emr_patients
-                SET last_name = ?, first_name = ?, date_of_birth = ?,
-                    sex = ?, contact_number = ?, email = ?, address = ?
+                SET last_name = ?, first_name = ?, date_of_birth = ?, sex = ?,
+                    contact_number = ?, email = ?, address = ?,
+                    diabetes_type = ?, dm_duration_years = ?, 
+                    diabetes_diagnosis_date = ?, treatment_regimen = ?, prev_dr_stage = ?,
+                    updated_at = datetime('now')
                 WHERE patient_id = ?
                 """,
                 (
-                    ln,
-                    fn,
-                    dob,
+                    ln, fn, dob,
                     (sex or "").strip() or None,
                     (contact_number or "").strip() or None,
                     (email or "").strip() or None,
                     (address or "").strip() or None,
-                    patient_id,
+                    payload.get("diabetes_type"),
+                    payload.get("dm_duration_years"),
+                    payload.get("diabetes_diagnosis_date"),
+                    payload.get("treatment_regimen"),
+                    payload.get("prev_dr_stage"),
+                    patient_id
                 ),
             )
 
@@ -1591,8 +1607,8 @@ def list_emr_timeline_records(patient_id: int) -> list[dict[str, Any]]:
                     "blood_pressure_diastolic": str((visit_details or {}).get("blood_pressure_diastolic") or ""),
                     "fasting_blood_sugar": str((visit_details or {}).get("fasting_blood_sugar") or ""),
                     "random_blood_sugar": str((visit_details or {}).get("random_blood_sugar") or ""),
-                    "diabetes_diagnosis_date": str((visit_details or {}).get("diabetes_diagnosis_date") or ""),
-                    "treatment_regimen": str((visit_details or {}).get("treatment_regimen") or ""),
+                    "diabetes_diagnosis_date": str((visit_details or {}).get("diabetes_diagnosis_date") or patient.get("diabetes_diagnosis_date") or ""),
+                    "treatment_regimen": str((visit_details or {}).get("treatment_regimen") or patient.get("treatment_regimen") or ""),
                     "prev_dr_stage": str(
                         (visit_details or {}).get("prev_dr_stage")
                         or patient.get("prev_dr_stage")

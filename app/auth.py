@@ -466,6 +466,9 @@ class UserManager:
                 current_eye_treatment   TEXT,
                 previous_eye_treatment  TEXT,
                 last_eye_exam_date      TEXT,
+                diabetes_diagnosis_date TEXT,
+                treatment_regimen       TEXT,
+                prev_dr_stage           TEXT,
                 created_by          INTEGER NOT NULL REFERENCES users(id),
                 created_at          TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
@@ -599,6 +602,17 @@ class UserManager:
                 cur.execute("ALTER TABLE emr_queue_entries ADD COLUMN archived_by INTEGER")
             if "archive_reason" not in cols:
                 cur.execute("ALTER TABLE emr_queue_entries ADD COLUMN archive_reason TEXT")
+        
+        # Lightweight migration: emr_patients diabetic history fields
+        with contextlib.suppress(sqlite3.OperationalError):
+            cur.execute("PRAGMA table_info(emr_patients)")
+            pcols = {row[1] for row in cur.fetchall()}
+            if "diabetes_diagnosis_date" not in pcols:
+                cur.execute("ALTER TABLE emr_patients ADD COLUMN diabetes_diagnosis_date TEXT")
+            if "treatment_regimen" not in pcols:
+                cur.execute("ALTER TABLE emr_patients ADD COLUMN treatment_regimen TEXT")
+            if "prev_dr_stage" not in pcols:
+                cur.execute("ALTER TABLE emr_patients ADD COLUMN prev_dr_stage TEXT")
         with contextlib.suppress(sqlite3.OperationalError):
             cur.execute("PRAGMA table_info(emr_action_logs)")
             _emr_log_cols = {row[1] for row in cur.fetchall()}

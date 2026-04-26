@@ -1597,16 +1597,17 @@ class EmrVisitsPage(QWidget):
         self._launch_screening_from_queue(qid_i, pid_i)
         self.refresh()
 
-    def _launch_screening_from_queue(self, qid: int | None, pid: int) -> None:
-        # Formal confirmation based on patient history
-        n = emr.count_screenings_for_patient(int(pid))
-        if n == 0:
-            msg = "No prior screening records were found for this patient. You will be directed to the diagnosis form for initial entry."
-        else:
-            msg = "Existing screening records were found for this patient. Previous clinical history and results will be presented for your review before starting the new session."
+    def _launch_screening_from_queue(self, qid: int | None, pid: int, skip_confirm: bool = False) -> None:
+        if not skip_confirm:
+            # Formal confirmation based on patient history
+            n = emr.count_screenings_for_patient(int(pid))
+            if n == 0:
+                msg = "No prior screening records were found for this patient. You will be directed to the diagnosis form for initial entry."
+            else:
+                msg = "Existing screening records were found for this patient. Previous clinical history and results will be presented for your review before starting the new session."
 
-        if not confirm(self, "Confirm Diagnosis Action", msg, yes_text="Continue", no_text="Cancel"):
-            return
+            if not confirm(self, "Confirm Diagnosis Action", msg, yes_text="Continue", no_text="Cancel"):
+                return
 
         patient = emr.get_patient(int(pid)) or {}
         if not patient:
@@ -1799,7 +1800,7 @@ class EmrVisitsPage(QWidget):
             return
         # Go to diagnosis flow, then return queue stack to list view.
         self._queue_stack.setCurrentIndex(0)
-        self._launch_screening_from_queue(int(qid), int(pid))
+        self._launch_screening_from_queue(int(qid), int(pid), skip_confirm=True)
 
     def _open_saved_patient_screening_history(self, patient_id: int, queue_id: int) -> None:
         try:
