@@ -290,7 +290,7 @@ class DoctorDiagnosisForm(QWidget):
         v = QVBoxLayout(card)
         v.setContentsMargins(12, 8, 12, 8)
         v.setSpacing(6)
-        self._add_card_header(v, "Clinical History", with_edit=True)
+        self._add_card_header(v, "Diabetic History", with_edit=True)
         v.addWidget(_divider())
 
         self._ch = {}
@@ -707,10 +707,10 @@ class DoctorDiagnosisForm(QWidget):
 
         form.addRow("Height", in_height)
         form.addRow("Weight", in_weight)
-        form.addRow(QLabel("Clinical History"))
+        form.addRow(QLabel("Diabetic History"))
 
         in_dm_type = QComboBox()
-        in_dm_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Other"])
+        in_dm_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational"])
         current_dm_type = str(p.get("diabetes_type") or "")
         if current_dm_type:
             idx = in_dm_type.findText(current_dm_type)

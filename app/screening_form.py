@@ -117,6 +117,51 @@ class SymptomTag(QPushButton):
         self.toggled.connect(lambda on: self.setStyleSheet(self._ON if on else self._OFF))
 
 
+
+class DurationWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        
+        self.years = QSpinBox()
+        self.years.setSuffix(" years")
+        self.years.setRange(0, 100)
+        
+        self.months = QSpinBox()
+        self.months.setSuffix(" months")
+        self.months.setRange(0, 11)
+        
+        layout.addWidget(self.years)
+        layout.addWidget(self.months)
+        
+    def value(self) -> int:
+        """Returns total duration in months."""
+        return self.years.value() * 12 + self.months.value()
+        
+    def setValue(self, total_months: int):
+        total_months = int(total_months or 0)
+        y = total_months // 12
+        m = total_months % 12
+        self.years.setValue(y)
+        self.months.setValue(m)
+        
+    def setRange(self, min_val, max_val):
+        pass
+        
+    def setReadOnly(self, ro: bool):
+        self.years.setReadOnly(ro)
+        self.months.setReadOnly(ro)
+        
+    def setButtonSymbols(self, sym):
+        self.years.setButtonSymbols(sym)
+        self.months.setButtonSymbols(sym)
+        
+    def setStyleSheet(self, ss: str):
+        self.years.setStyleSheet(ss)
+        self.months.setStyleSheet(ss)
+
 class DropZoneLabel(QLabel):
     """Dashed image drop zone that emits file path on valid image drop."""
 
@@ -1272,10 +1317,10 @@ class ScreeningPage(QWidget):
         self.symptom_other.setMaximumWidth(220)
 
         card2, c2 = make_card()
-        section_title(c2, "CLINICAL HISTORY", "scr_clinical_history")
+        section_title(c2, "DIABETIC HISTORY", "scr_clinical_history")
         self.diabetes_type = QComboBox()
         self.diabetes_type.setObjectName("diabetesTypeDropdown")
-        self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Other"])
+        self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational"])
         self._apply_visible_dropdown_style(self.diabetes_type)
         self.diabetes_diagnosis_date = QLineEdit()
         self.diabetes_diagnosis_date.setPlaceholderText("dd/mm/yyyy")
@@ -1283,9 +1328,9 @@ class ScreeningPage(QWidget):
         self.diabetes_diagnosis_date.textChanged.connect(self._on_diagnosis_date_changed)
         c2.addLayout(row2(field("Diabetes Type", self.diabetes_type, "scr_label_diabetes"), field("Diagnosis Date", self.diabetes_diagnosis_date)))
 
-        self.diabetes_duration = QSpinBox()
-        self.diabetes_duration.setSuffix(" years")
-        self.diabetes_duration.setRange(0, 80)
+        self.diabetes_duration = DurationWidget()
+#         self.diabetes_duration.setSuffix(" months")
+#         self.diabetes_duration.setRange(0, 1200)
         self.diabetes_duration.setReadOnly(True)
         self.diabetes_duration.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         self.diabetes_duration.setStyleSheet(
@@ -1537,6 +1582,51 @@ class ScreeningPage(QWidget):
             return True
         return False
 
+
+    def _validate_all_fields_for_queue(self) -> bool:
+        missing = []
+        
+        full_name = self.p_name.text().strip()
+        if len([p for p in full_name.split() if p.strip()]) < 2:
+            missing.append("First and Last Name")
+            
+        if not self._get_dob_date().isValid():
+            missing.append("Date of Birth")
+            
+        if not self.p_sex.currentText().strip():
+            missing.append("Sex")
+            
+        phone = self.p_phone.text().strip() if hasattr(self, "p_phone") else ""
+        contact = self.p_contact.text().strip()
+        if not (phone or contact):
+            missing.append("Phone/Contact Number")
+            
+        if hasattr(self, "p_address") and not self.p_address.text().strip():
+            missing.append("Address")
+            
+        if hasattr(self, "diabetes_type") and self.diabetes_type.currentText().strip() in ("", "Select"):
+            missing.append("Diabetes Type")
+            
+        # Clinical variables
+        if hasattr(self, "diabetes_diagnosis_date") and self.diabetes_diagnosis_date.isEnabled():
+            if not self.diabetes_diagnosis_date.text().strip() and self.diabetes_type.currentText().strip() not in ("", "Select", "None", "No Diabetes"):
+                missing.append("Diabetes Diagnosis Date")
+                
+        if hasattr(self, "treatment_regimen") and self.treatment_regimen.currentText().strip() in ("", "Select"):
+            missing.append("Treatment Regimen")
+            
+        if hasattr(self, "prev_dr_stage") and self.prev_dr_stage.currentText().strip() in ("", "Select"):
+            missing.append("Previous DR Stage")
+            
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Missing Required Fields",
+                "Please fill in all required fields before saving.\n\nMissing:\n- " + "\n- ".join(missing)
+            )
+            return False
+            
+        return True
     def _save_and_queue_patient(self) -> None:
         """Frontdesk action: save intake demographics and assign queue entry."""
         if self._guard_busy_action("saving and queueing this patient"):
@@ -1545,6 +1635,9 @@ class ScreeningPage(QWidget):
             # Clinician flow should continue using the full screening save path.
             self.save_screening()
             return
+        if not self._validate_all_fields_for_queue():
+            return
+
         confirm_save = QMessageBox.question(
             self,
             "Confirm Save",
@@ -1554,16 +1647,9 @@ class ScreeningPage(QWidget):
         )
         if confirm_save != QMessageBox.StandardButton.Yes:
             return
-        if not self._validate_patient_basics():
-            return
-        if not self._validate_blood_pressure() or not self._validate_blood_glucose():
-            return
 
         full_name = self.p_name.text().strip()
         parts = [p for p in full_name.split() if p.strip()]
-        if len(parts) < 2:
-            QMessageBox.warning(self, "Missing Information", "Please enter both first and last name.")
-            return
         first_name = parts[0]
         last_name = " ".join(parts[1:])
 
@@ -1880,7 +1966,7 @@ class ScreeningPage(QWidget):
             if diabetes_type == "" or diabetes_type == "Select":
                 QMessageBox.warning(
                     self,
-                    "Missing Clinical History",
+                    "Missing Diabetic History",
                     "Please select a Diabetes Type for new patients.",
                 )
                 return False
@@ -2104,11 +2190,10 @@ class ScreeningPage(QWidget):
             return
 
         today = QDate.currentDate()
-        years = today.year() - diag_date.year()
-        if (today.month(), today.day()) < (diag_date.month(), diag_date.day()):
-            years -= 1
-
-        self.diabetes_duration.setValue(max(0, years))
+        months = (today.year() - diag_date.year()) * 12 + today.month() - diag_date.month()
+        if today.day() < diag_date.day():
+            months -= 1
+        self.diabetes_duration.setValue(max(0, months))
 
     def _validate_blood_pressure(self):
         """Validate blood pressure ranges - no warnings, just validation."""
@@ -2216,16 +2301,16 @@ class ScreeningPage(QWidget):
         patient_group.setLayout(patient_form)
         layout.addWidget(patient_group)
 
-        clinical_group = QGroupBox("Clinical History")
+        clinical_group = QGroupBox("Diabetic History")
         clinical_form = QFormLayout()
 
         self.diabetes_type = QComboBox()
-        self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Other"])
+        self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational"])
         clinical_form.addRow("Diabetes Type:", self.diabetes_type)
 
-        self.diabetes_duration = QSpinBox()
-        self.diabetes_duration.setSuffix(" years")
-        self.diabetes_duration.setRange(0, 80)
+        self.diabetes_duration = DurationWidget()
+#         self.diabetes_duration.setSuffix(" months")
+#         self.diabetes_duration.setRange(0, 1200)
         clinical_form.addRow("Duration:", self.diabetes_duration)
 
         self.clinical_prev_dr_stage = QComboBox()

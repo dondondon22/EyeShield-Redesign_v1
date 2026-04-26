@@ -75,7 +75,7 @@ TRANSLATIONS = {
         "cam_stop": "Stop Camera",
         # Screening form
         "scr_patient_info": "Patient Information",
-        "scr_clinical_history": "Clinical History",
+        "scr_clinical_history": "Diabetic History",
         "scr_image_upload": "Fundus Image Upload",
         "scr_upload_btn": "Upload Image",
         "scr_take_picture_btn": "Take Picture",
@@ -132,7 +132,7 @@ TRANSLATIONS = {
         "hlp_howto": "How-to Guides",
         "hlp_howto_body": """
             <ul>
-                <li><b>New screening:</b> Fill patient details, clinical history, and eye side, then upload image and analyze.</li>
+                <li><b>New screening:</b> Fill patient details, diabetic history, and eye side, then upload image and analyze.</li>
                 <li><b>Image quality:</b> If image is marked not gradable, capture a clearer, well-lit fundus image and retry.</li>
                 <li><b>Duplicate eye record:</b> If the same patient eye already exists, choose <b>Replace Existing</b> or <b>Save as New Session</b>.</li>
                 <li><b>Generate PDF report:</b> Save first; if only one eye is screened, you can generate single-eye report or screen the other eye first.</li>

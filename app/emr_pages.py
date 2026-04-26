@@ -849,6 +849,17 @@ class PatientVisitDialog(QDialog):
     def _on_start_screening(self) -> None:
         if not self._can_clinical or not self._parent_app:
             return
+
+        # Formal confirmation based on patient history
+        n = emr.count_screenings_for_patient(self._patient_id)
+        if n == 0:
+            msg = "No prior screening records were found for this patient. You will be directed to the diagnosis form for initial entry."
+        else:
+            msg = "Existing screening records were found for this patient. Previous clinical history and results will be presented for your review before starting the new session."
+
+        if not confirm(self, "Confirm Diagnosis Action", msg, yes_text="Continue", no_text="Cancel"):
+            return
+
         uid = emr.get_user_id(self._username)
         if not uid:
             show_error(self, "Diagnosis", "Could not resolve doctor user id. Please sign in again.")
@@ -1587,6 +1598,16 @@ class EmrVisitsPage(QWidget):
         self.refresh()
 
     def _launch_screening_from_queue(self, qid: int | None, pid: int) -> None:
+        # Formal confirmation based on patient history
+        n = emr.count_screenings_for_patient(int(pid))
+        if n == 0:
+            msg = "No prior screening records were found for this patient. You will be directed to the diagnosis form for initial entry."
+        else:
+            msg = "Existing screening records were found for this patient. Previous clinical history and results will be presented for your review before starting the new session."
+
+        if not confirm(self, "Confirm Diagnosis Action", msg, yes_text="Continue", no_text="Cancel"):
+            return
+
         patient = emr.get_patient(int(pid)) or {}
         if not patient:
             # Fallback: build a minimal patient dict from queue listing if the patient row was removed/missing.

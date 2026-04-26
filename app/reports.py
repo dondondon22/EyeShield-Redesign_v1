@@ -671,7 +671,7 @@ class ScreeningComparisonDialog(QDialog):
 
         # ── Clinical History ──
         prev_tx = "Yes" if _is_truthy_flag(pt.get("prev_treatment")) else "No"
-        vl.addWidget(self._section_header("📋  CLINICAL HISTORY"))
+        vl.addWidget(self._section_header("📋  DIABETIC HISTORY"))
         vl.addWidget(self._info_row("Diabetes Type", pt.get("diabetes_type")))
         vl.addWidget(self._info_row("Diagnosed", pt.get("diabetes_diagnosis_date")))
         vl.addWidget(self._info_row("Duration", pt.get("duration")))
@@ -1459,7 +1459,7 @@ class PatientDetailsDialog(QDialog):
         add_field("Reported Symptoms", symptom_text)
         
         # Clinical History Section
-        add_section("Clinical History")
+        add_section("Diabetic History")
         add_field("Diabetes Type", str(patient_record.get("diabetes_type") or "N/A"))
         add_field("Diagnosed Date", str(patient_record.get("diabetes_diagnosis_date") or "N/A"))
         add_field("Duration", str(patient_record.get("duration") or "N/A"))
@@ -1571,7 +1571,7 @@ class ReferralDetailDialog(QDialog):
         bp_dia = patient_record.get("blood_pressure_diastolic") or "-"
         add_field("Blood Pressure", f"{bp_sys}/{bp_dia} mmHg")
 
-        add_section("Clinical History")
+        add_section("Diabetic History")
         add_field("Diabetes Type", str(patient_record.get("diabetes_type") or "N/A"))
         add_field("Duration", str(patient_record.get("duration") or "N/A"))
         add_field("Diagnosed Date", str(patient_record.get("diabetes_diagnosis_date") or "N/A"))
@@ -3889,7 +3889,7 @@ class ReportsPage(QWidget):
   ])}
   </table>
 
-  {sec("Clinical History & Diabetes Management")}
+  {sec("Diabetic History & Diabetes Management")}
   <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d1d5db;margin-bottom:18px;">
   {field_row("Diabetes Type", esc(full.get("diabetes_type")))}
   {field_row("Diagnosis Date", esc(full.get("diabetes_diagnosis_date")))}

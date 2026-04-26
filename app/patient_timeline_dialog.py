@@ -652,7 +652,7 @@ class PatientTimelineDialog(QWidget):
         return card
 
     def _build_history_card(self) -> QWidget:
-        card, v = self._card("Clinical History")
+        card, v = self._card("Diabetic History")
         self.history_rows: dict[str, QLabel] = {}
         for key, label in [
             ("diabetes_type",      "Diabetes Type"),

@@ -2307,8 +2307,8 @@ img {{
 ])}
 </table>
 
-<!-- Clinical History & Diabetes Management -->
-{sec("Clinical History & Diabetes Management")}
+<!-- Diabetic History & Diabetes Management -->
+{sec("Diabetic History & Diabetes Management")}
 <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d1d5db;margin-bottom:18px;">
 {field_row("Diabetes Type", esc(diabetes_type))}
 {field_row("Diagnosis Date", esc_or_dash(diabetes_diagnosis_date))}
