@@ -3115,6 +3115,11 @@ class ReportsPage(QWidget):
             return
 
         self.status_label.setText(f"Exported patient history for {patient_name} to {path}")
+        QMessageBox.information(
+            self,
+            "Export Successful",
+            f"The CSV file has been successfully created and saved in:\n{path}"
+        )
 
     def _fetch_full_patient_record(self, record_id: int) -> dict:
         """Fetch complete patient record from database."""
@@ -3312,6 +3317,11 @@ class ReportsPage(QWidget):
             UserManager.add_activity_log(
                 self.username,
                 f"REPORT_EXPORT_CSV rows={len(self._filtered_rows)}; path={os.path.basename(path)}",
+            )
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"The CSV file has been successfully created and saved in:\n{path}"
             )
         except OSError as err:
             QMessageBox.warning(self, "Export", f"Failed to export summary: {err}")

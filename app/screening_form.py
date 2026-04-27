@@ -1317,8 +1317,14 @@ class ScreeningPage(QWidget):
         section_title(c2, "DIABETIC HISTORY", "scr_clinical_history")
         self.diabetes_type = QComboBox()
         self.diabetes_type.setObjectName("diabetesTypeDropdown")
-        self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational"])
+        # Initialize with normal options; will be updated via signal if sex is Female
+        self.diabetes_type.addItems(["Select", "Type 1", "Type 2", "Type 1 + Type 2"])
         self._apply_visible_dropdown_style(self.diabetes_type)
+        
+        # Connect Sex signal to update Diabetes options
+        self.p_sex.currentTextChanged.connect(self._update_diabetes_options)
+        # Trigger initial update in case sex is already selected (e.g. from EMR)
+        self._update_diabetes_options(self.p_sex.currentText())
         self.diabetes_diagnosis_date = QLineEdit()
         self.diabetes_diagnosis_date.setPlaceholderText("dd/mm/yyyy")
         self.diabetes_diagnosis_date.setMaxLength(10)
@@ -1622,19 +1628,10 @@ class ScreeningPage(QWidget):
         if hasattr(self, "p_address") and not self.p_address.text().strip():
             missing.append("Address")
             
-        if hasattr(self, "diabetes_type") and self.diabetes_type.currentText().strip() in ("", "Select"):
-            missing.append("Diabetes Type")
-            
-        # Clinical variables
+        # Clinical variables are no longer strictly mandatory for patients without diabetes.
         if hasattr(self, "diabetes_diagnosis_date") and self.diabetes_diagnosis_date.isEnabled():
-            if not self.diabetes_diagnosis_date.text().strip() and self.diabetes_type.currentText().strip() not in ("", "Select", "None", "No Diabetes"):
-                missing.append("Diabetes Diagnosis Date")
-                
-        if hasattr(self, "treatment_regimen") and self.treatment_regimen.currentText().strip() in ("", "Select"):
-            missing.append("Treatment Regimen")
-            
-        if hasattr(self, "prev_dr_stage") and self.prev_dr_stage.currentText().strip() in ("", "Select"):
-            missing.append("Previous DR Stage")
+            if self.diabetes_diagnosis_date.text().strip() and not self._get_diagnosis_date().isValid():
+                missing.append("Valid Diabetes Diagnosis Date")
             
         if missing:
             QMessageBox.warning(
@@ -1978,16 +1975,7 @@ class ScreeningPage(QWidget):
             QMessageBox.warning(self, "Invalid Age", "Age must be between 1 and 120.")
             return False
 
-        # Validate clinical history for new patients
-        if not follow_up_mode:
-            diabetes_type = self.diabetes_type.currentText().strip() if hasattr(self, "diabetes_type") else ""
-            if diabetes_type == "" or diabetes_type == "Select":
-                QMessageBox.warning(
-                    self,
-                    "Missing Diabetic History",
-                    "Please select a Diabetes Type for new patients.",
-                )
-                return False
+        # Diabetic history is now optional per user request.
 
         va_left_text, _ = self._normalize_visual_acuity(self.va_left.text()) if hasattr(self, "va_left") else ("", True)
         va_right_text, _ = self._normalize_visual_acuity(self.va_right.text()) if hasattr(self, "va_right") else ("", True)
@@ -2212,6 +2200,36 @@ class ScreeningPage(QWidget):
         if today.day() < diag_date.day():
             months -= 1
         self.diabetes_duration.setValue(max(0, months))
+
+    def _update_diabetes_options(self, sex_text: str):
+        """Update diabetes type options based on patient sex."""
+        if not hasattr(self, "diabetes_type"):
+            return
+
+        current_selection = self.diabetes_type.currentText()
+        
+        normal_options = ["Select", "None", "Type 1", "Type 2", "Type 1 + Type 2"]
+        gestational_options = ["Gestational", "Type 1 + Gestational", "Type 2 + Gestational"]
+        
+        self.diabetes_type.blockSignals(True)
+        self.diabetes_type.clear()
+        
+        if sex_text == "Female":
+            self.diabetes_type.addItems(normal_options + gestational_options)
+        else:
+            self.diabetes_type.addItems(normal_options)
+            # If a gestational option was selected and we're no longer female, reset to Select
+            if current_selection in gestational_options:
+                current_selection = "Select"
+                
+        # Restore selection if it still exists in the new list
+        idx = self.diabetes_type.findText(current_selection)
+        if idx >= 0:
+            self.diabetes_type.setCurrentIndex(idx)
+        else:
+            self.diabetes_type.setCurrentIndex(0)
+            
+        self.diabetes_type.blockSignals(False)
 
     def _validate_blood_pressure(self):
         """Validate blood pressure ranges - no warnings, just validation."""

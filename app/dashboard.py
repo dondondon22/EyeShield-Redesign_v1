@@ -341,7 +341,7 @@ class EyeShieldApp(QMainWindow):
             },
             {
                 "icon": self._resolve_existing_path(os.path.join(icons_dir, "screening.svg")),
-                "label": "Assessment",
+                "label": "Patient Profiling",
                 "page_index": 1,
                 "group": None,
             },
