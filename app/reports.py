@@ -186,8 +186,8 @@ class ScreeningComparisonDialog(QDialog):
         self.previous_record = self.all_records[-2] if len(self.all_records) >= 2 else self.latest_record
         
         self.setWindowTitle("Compare Screenings")
-        self.resize(1240, 820)
-        self.setMinimumSize(980, 680)
+        self.resize(1320, 960)
+        self.setMinimumSize(1100, 850)
 
         self._root = QVBoxLayout(self)
         self._root.setContentsMargins(18, 16, 18, 16)
@@ -213,7 +213,7 @@ class ScreeningComparisonDialog(QDialog):
         history.reverse() # Newest first
         for rec in history:
             dt = _format_screening_datetime_label(rec.get("screened_at"))
-            self._prev_selector.addItem(f"Screening on {dt}", rec)
+            self._prev_selector.addItem(dt, rec)
         
         self._prev_selector.currentIndexChanged.connect(self._on_previous_changed)
         header.addWidget(self._prev_selector)
