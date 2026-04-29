@@ -1126,8 +1126,19 @@ class EyeShieldApp(QMainWindow):
             QTimer.singleShot(0, self.reports_page.refresh_report)
         if index == 4 and hasattr(self, "activity_log_page") and hasattr(self.activity_log_page, "load_activity_log"):
             QTimer.singleShot(0, self.activity_log_page.load_activity_log)
-        if index == 10 and hasattr(self, "emr_page") and hasattr(self.emr_page, "refresh"):
-            QTimer.singleShot(0, self.emr_page.refresh)
+        if index == 10 and hasattr(self, "emr_page"):
+            emr = self.emr_page
+            nav_for_emr = str(getattr(self, "_active_nav_key", "") or "").strip()
+
+            def _emr_on_enter():
+                # Opening EMR does not reset the nested stacks; returning from embedded doctor
+                # diagnosis requires restoring the Patient Queue table explicitly.
+                if nav_for_emr == "Patient Queue" and hasattr(emr, "_show_queue_page"):
+                    emr._show_queue_page(refresh=True)
+                elif hasattr(emr, "refresh"):
+                    emr.refresh()
+
+            QTimer.singleShot(0, _emr_on_enter)
         QTimer.singleShot(0, lambda: self._set_active_nav(self.pages.currentIndex()))
 
     def _global_save_shortcut(self):
@@ -1166,8 +1177,17 @@ class EyeShieldApp(QMainWindow):
             if now - self._last_activity_log_refresh_at >= 1.0:
                 self._last_activity_log_refresh_at = now
                 QTimer.singleShot(120, self.activity_log_page.load_activity_log)
-        if index == 10 and hasattr(self, "emr_page") and hasattr(self.emr_page, "refresh"):
-            QTimer.singleShot(80, self.emr_page.refresh)
+        if index == 10 and hasattr(self, "emr_page"):
+            emr = self.emr_page
+            nk_tab = str(getattr(self, "_active_nav_key", "") or "").strip()
+
+            def _emr_tab_refresh():
+                if nk_tab == "Patient Queue" and hasattr(emr, "_show_queue_page"):
+                    emr._show_queue_page(refresh=True)
+                elif hasattr(emr, "refresh"):
+                    emr.refresh()
+
+            QTimer.singleShot(80, _emr_tab_refresh)
 
     def _set_active_nav(self, index: int):
         if not hasattr(self, "nav_buttons"):

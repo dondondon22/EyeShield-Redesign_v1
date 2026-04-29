@@ -16,18 +16,22 @@ _DIALOG_STYLE = """
 QMessageBox {
     background-color: white;
 }
-QLabel {
+QMessageBox QLabel {
     color: #111827;
+    font-size: 14px;
+    min-width: 200px;
+    padding: 12px;
 }
 QPushButton {
     background-color: #f1f5f9;
     color: #374151;
     border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    padding: 6px 16px;
-    font-size: 12px;
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-size: 13px;
     font-weight: 600;
-    min-width: 80px;
+    min-width: 100px;
+    margin-left: 8px;
 }
 QPushButton:hover {
     background-color: #e2e8f0;

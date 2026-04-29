@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QSizePolicy,
     QGridLayout,
-    QScrollArea,
     QTextEdit,
 )
 from PySide6.QtCore import Qt, QDate, QTime
@@ -199,16 +198,10 @@ class DoctorDiagnosisForm(QWidget):
         content_row.addWidget(left, 2)
         content_row.addWidget(self.screening, 3)
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; } QScrollBar:vertical { width: 10px; } QScrollBar:horizontal { height: 10px; }")
-        
         # Give the content a minimum width to prevent text scrambling at lower resolutions
         content.setMinimumWidth(850)
         
-        scroll_area.setWidget(content)
-        root.addWidget(scroll_area, 1)
+        root.addWidget(content, 1)
         self._update_results_focus_mode(0)
 
     # ── Style helpers ──────────────────────────────────────────────────────────

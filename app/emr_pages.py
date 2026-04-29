@@ -1505,6 +1505,10 @@ class EmrVisitsPage(QWidget):
         self._emr_stack.setCurrentIndex(1)
 
     def _show_queue_page(self, *, refresh: bool = True) -> None:
+        # Inner stack: queue table vs follow-up review overlay — always land on the table.
+        if hasattr(self, "_queue_stack"):
+            self._queue_stack.setCurrentIndex(0)
+        # Outer stack: queue list vs embedded diagnosis — leaving diagnosis must restore the table.
         if hasattr(self, "_emr_stack"):
             self._emr_stack.setCurrentIndex(0)
         if refresh:

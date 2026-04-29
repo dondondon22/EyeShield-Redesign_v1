@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QLineEdit, QVBoxLayout, QHBoxLayout,
     QFileDialog, QFormLayout, QGroupBox, QComboBox, QDateEdit, QMessageBox,
     QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit, QCalendarWidget, QStackedWidget,
-    QGridLayout, QFrame, QSizePolicy, QScrollArea, QSplitter, QAbstractSpinBox,
+    QGridLayout, QFrame, QSizePolicy, QSplitter, QAbstractSpinBox,
     QApplication,
 )
 from PySide6.QtGui import (
@@ -173,7 +173,7 @@ class DropZoneLabel(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Default is tall for the standalone Screening page; embedding flows
         # can override via `set_compact(True)` below.
-        self.setMinimumHeight(400)
+        self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._pixmap_full = QPixmap()
         self._reset_placeholder()
@@ -181,7 +181,7 @@ class DropZoneLabel(QLabel):
     def set_compact(self, enabled: bool = True) -> None:
         """Reduce height/typography for embedded layouts."""
         if bool(enabled):
-            self.setMinimumHeight(180)
+            self.setMinimumHeight(120)
             self.setStyleSheet(self._IDLE.replace("font-size:13px", "font-size:12px"))
         else:
             self.setMinimumHeight(400)
@@ -645,8 +645,8 @@ class ScreeningPage(QWidget):
         root_layout = QVBoxLayout(root)
         embedded = bool(getattr(self, "_embedded_compact", False))
         # Wider side gutters improve readability (less edge-to-edge scanning).
-        root_layout.setContentsMargins(0 if embedded else 24, 0 if embedded else 20, 0 if embedded else 24, 0 if embedded else 20)
-        root_layout.setSpacing(10 if embedded else 12)
+        root_layout.setContentsMargins(0 if embedded else 16, 0 if embedded else 12, 0 if embedded else 16, 0 if embedded else 12)
+        root_layout.setSpacing(8 if embedded else 10)
 
         # Follow-up Context Header
         self.followup_header = QFrame()
@@ -726,11 +726,11 @@ class ScreeningPage(QWidget):
             frame.setObjectName("card")
             layout = QVBoxLayout(frame)
             if embedded:
-                layout.setContentsMargins(16, 14, 16, 14)
-                layout.setSpacing(10)
+                layout.setContentsMargins(12, 10, 12, 10)
+                layout.setSpacing(8)
             else:
-                layout.setContentsMargins(24, 20, 24, 22)
-                layout.setSpacing(14)
+                layout.setContentsMargins(20, 16, 20, 18)
+                layout.setSpacing(12)
             return frame, layout
 
         self._scr_unified_labels = {}
@@ -1218,16 +1218,10 @@ class ScreeningPage(QWidget):
         self._apply_role_permissions()
         self._set_tab_order_unified()
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; } QScrollBar:vertical { width: 10px; } QScrollBar:horizontal { height: 10px; }")
-        
         # Give the root a minimum width to prevent overlapping/scrambling at lower resolutions
         root.setMinimumWidth(850)
         
-        scroll_area.setWidget(root)
-        return scroll_area
+        return root
 
     def _current_role(self) -> str:
         return str(getattr(self, "role", "") or "").strip().lower()
@@ -2849,10 +2843,14 @@ class ScreeningPage(QWidget):
                 self.results_page.override_reason_input.setText(self.last_override_justification)
                 self.results_page.findings_input.setText(self.last_doctor_findings)
                 if self.last_doctor_classification in ("No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"):
-                    if hasattr(self.results_page, "doctor_classification_combo"):
-                        self.results_page.doctor_classification_combo.setCurrentText(self.last_doctor_classification)
-                    elif hasattr(self.results_page, "doctor_classification_input"):
-                        self.results_page.doctor_classification_input.setText(self.last_doctor_classification)
+                    # Handle both legacy QLineEdit and new QComboBox widgets
+                    widget = getattr(self.results_page, "doctor_classification_input", None) or \
+                             getattr(self.results_page, "doctor_classification_combo", None)
+                    if widget:
+                        if hasattr(widget, "setCurrentText"):
+                            widget.setCurrentText(self.last_doctor_classification)
+                        elif hasattr(widget, "setText"):
+                            widget.setText(self.last_doctor_classification)
                 self.results_page._refresh_decision_ui_state()
 
             # Set eye based on previous record - match against available options
@@ -3573,10 +3571,14 @@ class ScreeningPage(QWidget):
             self.results_page.override_reason_input.setText(self.last_override_justification)
             self.results_page.findings_input.setText(self.last_doctor_findings)
             if self.last_doctor_classification in ("No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"):
-                if hasattr(self.results_page, "doctor_classification_combo"):
-                    self.results_page.doctor_classification_combo.setCurrentText(self.last_doctor_classification)
-                elif hasattr(self.results_page, "doctor_classification_input"):
-                    self.results_page.doctor_classification_input.setText(self.last_doctor_classification)
+                # Handle both legacy QLineEdit and new QComboBox widgets
+                widget = getattr(self.results_page, "doctor_classification_input", None) or \
+                         getattr(self.results_page, "doctor_classification_combo", None)
+                if widget:
+                    if hasattr(widget, "setCurrentText"):
+                        widget.setCurrentText(self.last_doctor_classification)
+                    elif hasattr(widget, "setText"):
+                        widget.setText(self.last_doctor_classification)
             self.results_page._refresh_decision_ui_state()
         self._current_eye_saved = bool(data.get("result_saved"))
         write_activity("INFO", "RESTORE_DRAFT", f"Draft restored from {self._draft_path}")

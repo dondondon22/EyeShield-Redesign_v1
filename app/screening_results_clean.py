@@ -14,7 +14,7 @@ import re
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGroupBox,
     QScrollArea, QFrame, QProgressBar, QMessageBox, QFileDialog, QStyle, QProgressDialog, QApplication, QDialog,
-    QComboBox, QLineEdit, QTextEdit, QGridLayout, QSizePolicy,
+    QComboBox, QLineEdit, QTextEdit, QGridLayout
 )
 from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QIcon, QPalette, QImage, QPdfWriter, QPageSize, QPageLayout, QTextDocument
 from PySide6.QtCore import Qt, QSize, QEvent, QTimer, QByteArray, QBuffer, QIODevice, QMarginsF
@@ -172,85 +172,6 @@ class ResultsWindow(QWidget):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(12)
 
-        # --- Define Header Components ---
-        heading_col = QVBoxLayout()
-        heading_col.setSpacing(2)
-        self.breadcrumb_label = QLabel("SCREENING RESULTS")
-        self.breadcrumb_label.setObjectName("crumbLabel")
-        heading_col.addWidget(self.breadcrumb_label)
-
-        self.title_label = QLabel("Results")
-        self.title_label.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
-        self.title_label.setObjectName("pageHeader")
-        heading_col.addWidget(self.title_label)
-
-        # Removed subtitle_label ("Screening complete") to save space
-
-        pills_row = QHBoxLayout()
-        pills_row.setSpacing(8)
-        self.eye_badge_label = QLabel("\u2022 Right Eye")
-        self.eye_badge_label.setObjectName("infoPill")
-        self.eye_badge_label.setMinimumHeight(30)
-        pills_row.addWidget(self.eye_badge_label)
-
-        self.save_status_label = QLabel("Saved \u2713")
-        self.save_status_label.setObjectName("savedPill")
-        self.save_status_label.setMinimumHeight(30)
-        self.save_status_label.hide()
-        pills_row.addWidget(self.save_status_label)
-        pills_row.addStretch(1)
-        heading_col.addLayout(pills_row)
-
-        layout.addLayout(heading_col)
-
-        # Progression Summary Panel (Follow-up only)
-        self.progression_panel = QFrame()
-        self.progression_panel.setObjectName("progressionPanel")
-        self.progression_panel.setStyleSheet("""
-            QFrame#progressionPanel {
-                background: #fdf2f2;
-                border: 1px solid #fecaca;
-                border-radius: 12px;
-                margin-top: 10px;
-            }
-        """)
-        self.progression_panel.hide()
-        prog_layout = QVBoxLayout(self.progression_panel)
-        prog_layout.setContentsMargins(16, 12, 16, 12)
-        prog_layout.setSpacing(6)
-        
-        prog_header = QLabel("CLINICAL PROGRESSION SUMMARY")
-        prog_header.setStyleSheet("font-size: 11px; font-weight: 700; color: #991b1b; letter-spacing: 0.5px;")
-        prog_layout.addWidget(prog_header)
-        
-        self.progression_text = QLabel("Progression detected: Mild -> Moderate")
-        self.progression_text.setStyleSheet("font-size: 14px; font-weight: 600; color: #1f2937;")
-        prog_layout.addWidget(self.progression_text)
-        
-        self.progression_trend = QLabel("Trend: Stable")
-        self.progression_trend.setStyleSheet("font-size: 13px; color: #4b5563;")
-        prog_layout.addWidget(self.progression_trend)
-        
-        layout.addWidget(self.progression_panel)
-
-        self._loading_bar = QProgressBar()
-        self._loading_bar.setRange(0, 0)   # indeterminate / marquee
-        self._loading_bar.setFixedHeight(4)
-        self._loading_bar.setTextVisible(False)
-        self._loading_bar.setStyleSheet("""
-            QProgressBar {
-                background: #e5e7eb;
-                border: none;
-                border-radius: 2px;
-            }
-            QProgressBar::chunk {
-                background: #2563eb;
-                border-radius: 2px;
-            }
-        """)
-        self._loading_bar.hide()
-        layout.addWidget(self._loading_bar)
-
         # --- Main Split Layout ---
         main_content_layout = QHBoxLayout()
         main_content_layout.setSpacing(24)
@@ -265,6 +186,39 @@ class ResultsWindow(QWidget):
         right_col = QVBoxLayout()
         right_col.setSpacing(20)
         main_content_layout.addLayout(right_col, 35)
+
+        # --- Define UI Components ---
+        heading_col = QVBoxLayout()
+        heading_col.setSpacing(2)
+        self.breadcrumb_label = QLabel("SCREENING RESULTS")
+        self.breadcrumb_label.setObjectName("crumbLabel")
+        heading_col.addWidget(self.breadcrumb_label)
+
+        self.title_label = QLabel("Results")
+        self.title_label.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        self.title_label.setObjectName("pageHeader")
+        heading_col.addWidget(self.title_label)
+
+        self.subtitle_label = QLabel("Analyzing image  please wait...")
+        self.subtitle_label.setObjectName("pageSubtitle")
+        self.subtitle_label.setWordWrap(True)
+        heading_col.addWidget(self.subtitle_label)
+
+        heading_col.addSpacing(4)
+        pills_row = QHBoxLayout()
+        pills_row.setSpacing(8)
+        self.eye_badge_label = QLabel("\u2022 Right Eye")
+        self.eye_badge_label.setObjectName("infoPill")
+        self.eye_badge_label.setMinimumHeight(30)
+        pills_row.addWidget(self.eye_badge_label)
+
+        self.save_status_label = QLabel("Saved \u2713")
+        self.save_status_label.setObjectName("savedPill")
+        self.save_status_label.setMinimumHeight(30)
+        self.save_status_label.hide()
+        pills_row.addWidget(self.save_status_label)
+        pills_row.addStretch(1)
+        heading_col.addLayout(pills_row)
 
         self.btn_back = QPushButton("Back")
         self.btn_back.setObjectName("ghostAction")
@@ -300,12 +254,55 @@ class ResultsWindow(QWidget):
         # Removed from workflow: history replaces PDF-style navigation.
         self.btn_new.hide()
 
+        self._loading_bar = QProgressBar()
+        self._loading_bar.setRange(0, 0)   # indeterminate / marquee
+        self._loading_bar.setFixedHeight(4)
+        self._loading_bar.setTextVisible(False)
+        self._loading_bar.setStyleSheet("""
+            QProgressBar {
+                background: #e5e7eb;
+                border: none;
+                border-radius: 2px;
+            }
+            QProgressBar::chunk {
+                background: #2563eb;
+                border-radius: 2px;
+            }
+        """)
+        self._loading_bar.hide()
+        layout.addWidget(self._loading_bar)
 
-
-
+        # Progression Summary Panel (Follow-up only)
+        self.progression_panel = QFrame()
+        self.progression_panel.setObjectName("progressionPanel")
+        self.progression_panel.setStyleSheet("""
+            QFrame#progressionPanel {
+                background: #fdf2f2;
+                border: 1px solid #fecaca;
+                border-radius: 12px;
+                margin-top: 10px;
+            }
+        """)
+        self.progression_panel.hide()
+        prog_layout = QVBoxLayout(self.progression_panel)
+        prog_layout.setContentsMargins(16, 12, 16, 12)
+        prog_layout.setSpacing(6)
+        
+        prog_header = QLabel("CLINICAL PROGRESSION SUMMARY")
+        prog_header.setStyleSheet("font-size: 11px; font-weight: 700; color: #991b1b; letter-spacing: 0.5px;")
+        prog_layout.addWidget(prog_header)
+        
+        self.progression_text = QLabel("Progression detected: Mild -> Moderate")
+        self.progression_text.setStyleSheet("font-size: 14px; font-weight: 600; color: #1f2937;")
+        prog_layout.addWidget(self.progression_text)
+        
+        self.progression_trend = QLabel("Trend: Stable")
+        self.progression_trend.setStyleSheet("font-size: 13px; color: #4b5563;")
+        prog_layout.addWidget(self.progression_trend)
 
         # --- Populate Columns ---
-
+        left_col.addLayout(heading_col)
+        left_col.addWidget(self.progression_panel)
 
         # -- Visual Data Cards --
         image_row = QHBoxLayout()
@@ -399,28 +396,39 @@ class ResultsWindow(QWidget):
 
         class_card = QFrame()
         class_card.setObjectName("resultStatCard")
-        class_layout = QHBoxLayout(class_card)
-        class_layout.setContentsMargins(18, 12, 18, 12)
-        class_layout.setSpacing(16)
+        class_layout = QVBoxLayout(class_card)
+        class_layout.setContentsMargins(18, 18, 18, 18)
+        class_layout.setSpacing(10)
         
-        class_title = QLabel("AI Classification:")
+        class_title = QLabel("AI CLASSIFICATION")
         class_title.setObjectName("resultStatTitle")
         
         self.classification_value = QLabel("Pending")
         self.classification_value.setObjectName("classificationValue")
-        self.classification_value.setStyleSheet("font-size: 20px; font-weight: 800;")
+        
+        metrics_row = QHBoxLayout()
+        metrics_row.setSpacing(20)
         
         self.confidence_value = QLabel("Confidence: ( )")
-        self.confidence_value.setStyleSheet("font-weight: 700; color: #2563eb; font-size: 13px;")
+        self.confidence_value.setObjectName("metaText")
+        self.confidence_value.setStyleSheet("font-weight: 700; color: #2563eb;")
         
         self.uncertainty_value = QLabel("Uncertainty: ( )")
-        self.uncertainty_value.setStyleSheet("font-weight: 700; color: #b45309; font-size: 13px;")
+        self.uncertainty_value.setObjectName("metaText")
+        self.uncertainty_value.setStyleSheet("font-weight: 700; color: #b45309;")
+        
+        metrics_row.addWidget(self.confidence_value)
+        metrics_row.addWidget(self.uncertainty_value)
+        metrics_row.addStretch(1)
+
+        self.classification_subtitle = QLabel("Awaiting model result")
+        self.classification_subtitle.setObjectName("metaText")
+        self.classification_subtitle.setWordWrap(True)
         
         class_layout.addWidget(class_title)
         class_layout.addWidget(self.classification_value)
-        class_layout.addStretch(1)
-        class_layout.addWidget(self.confidence_value)
-        class_layout.addWidget(self.uncertainty_value)
+        class_layout.addLayout(metrics_row)
+        class_layout.addWidget(self.classification_subtitle)
 
         decision_group = QGroupBox("Doctor Assessment")
         decision_group.setObjectName("resultGroupCard")
@@ -452,11 +460,11 @@ class ResultsWindow(QWidget):
         doctor_tag.setObjectName("decisionRoleTag")
         doctor_tag.setFixedHeight(34)
         doctor_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.doctor_classification_input = QComboBox()
-        self.doctor_classification_input.addItems(["Select classification...", "No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"])
+        self.doctor_classification_input = QLineEdit()
+        self.doctor_classification_input.setPlaceholderText("Enter doctor classification (e.g., No DR)")
         self.doctor_classification_input.setMaximumWidth(280)
         self.doctor_classification_input.setFixedHeight(34)
-        self.doctor_classification_input.currentTextChanged.connect(self._on_doctor_classification_changed)
+        self.doctor_classification_input.textChanged.connect(self._on_doctor_classification_changed)
         doctor_row.addWidget(doctor_tag, 0, Qt.AlignmentFlag.AlignVCenter)
         doctor_row.addWidget(self.doctor_classification_input, 0, Qt.AlignmentFlag.AlignVCenter)
         doctor_row.addStretch(1)
@@ -489,24 +497,31 @@ class ResultsWindow(QWidget):
         documentation_layout.setContentsMargins(12, 10, 12, 12)
         documentation_layout.setSpacing(8)
 
+        self.step4_label = QLabel("4. Document your override")
+        self.step4_label.setObjectName("resultStatTitle")
+        documentation_layout.addWidget(self.step4_label)
+
+        self.step4_hint = QLabel("Override requires concise clinical justification.")
+        self.step4_hint.setObjectName("metaText")
+        self.step4_hint.setWordWrap(True)
+        documentation_layout.addWidget(self.step4_hint)
+
+        comments_grid = QGridLayout()
+        comments_grid.setHorizontalSpacing(12)
+        comments_grid.setVerticalSpacing(6)
+        comments_grid.setColumnStretch(0, 1)
+
         self.override_reason_label = QLabel("Override justification of results")
         self.override_reason_label.setObjectName("metaText")
         self.override_reason_input = QTextEdit()
         self.override_reason_input.setObjectName("overrideCommentBox")
         self.override_reason_input.setPlaceholderText("Provide concise clinical justification...")
-        self.override_reason_input.setMinimumHeight(100)
-        self.override_reason_input.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Minimum,
-        )
+        self.override_reason_input.setMinimumHeight(110)
         self.override_reason_input.textChanged.connect(self._on_override_reason_changed)
 
-        override_comment_col = QVBoxLayout()
-        override_comment_col.setSpacing(6)
-        override_comment_col.setContentsMargins(0, 0, 0, 0)
-        override_comment_col.addWidget(self.override_reason_label)
-        override_comment_col.addWidget(self.override_reason_input)
-        documentation_layout.addLayout(override_comment_col)
+        comments_grid.addWidget(self.override_reason_label, 0, 0)
+        comments_grid.addWidget(self.override_reason_input, 1, 0)
+        documentation_layout.addLayout(comments_grid)
 
         decision_layout.addWidget(self.documentation_panel)
 
@@ -535,22 +550,20 @@ class ResultsWindow(QWidget):
 
         # (Metrics cards are now placed in right_col below)
         # AI Recommendation Card
-        reco_card = QGroupBox("")
-        reco_card.setObjectName("resultGroupCard")
-        reco_card.setMinimumHeight(200)
+        reco_card = QFrame()
+        reco_card.setObjectName("resultStatCard")
         reco_layout = QVBoxLayout(reco_card)
-        reco_layout.setContentsMargins(14, 10, 14, 14)
-        reco_layout.setSpacing(6)
-        
-        reco_title = QLabel("AI RECOMMENDATION")
+        reco_layout.setContentsMargins(18, 18, 18, 18)
+        reco_layout.setSpacing(8)
+        reco_title = QLabel("AI Recommendation")
         reco_title.setObjectName("resultStatTitle")
-        
-        self.treatment_suggestions_value = QLabel("- Complete analysis to view possible treatment suggestions.")
-        self.treatment_suggestions_value.setObjectName("summaryBody")
+        self.treatment_suggestions_title = QLabel("Possible treatment suggestions (Doctor review required)")
+        self.treatment_suggestions_title.setObjectName("resultStatTitle")
+        self.treatment_suggestions_value = QLabel("- Awaiting model result")
+        self.treatment_suggestions_value.setObjectName("treatmentSuggestionsBody")
         self.treatment_suggestions_value.setWordWrap(True)
-        self.treatment_suggestions_value.setTextFormat(Qt.TextFormat.RichText)
-        
         reco_layout.addWidget(reco_title)
+        reco_layout.addWidget(self.treatment_suggestions_title)
         reco_layout.addWidget(self.treatment_suggestions_value)
 
         self.ai_disclaimer_label = QLabel(
@@ -616,12 +629,11 @@ class ResultsWindow(QWidget):
 
         self._apply_action_icons()
 
-        explanation_group = QGroupBox("")
+        explanation_group = QGroupBox("AI Summary")
         explanation_group.setObjectName("resultGroupCard")
-        explanation_group.setMinimumHeight(200)
         explanation_layout = QVBoxLayout(explanation_group)
-        explanation_layout.setContentsMargins(14, 10, 14, 14)
-        explanation_layout.setSpacing(6)
+        explanation_layout.setContentsMargins(22, 20, 22, 20)
+        explanation_layout.setSpacing(10)
 
         self.ai_summary_title = QLabel("AI SUMMARY")
         self.ai_summary_title.setObjectName("resultStatTitle")
@@ -630,11 +642,10 @@ class ResultsWindow(QWidget):
         self.explanation = QLabel("Awaiting clinical profile and model analysis...")
         self.explanation.setWordWrap(True)
         self.explanation.setObjectName("summaryBody")
-        self.explanation.setTextFormat(Qt.TextFormat.RichText)
         explanation_layout.addWidget(self.explanation)
 
         self.footer_label = QLabel(
-            "EyeShield_V2.0"
+            "Grad-CAM++ \u2022 Automated DR Screening v2.1 \u2022 Results are decision-support tools, not a clinical diagnosis"
         )
         self.footer_label.setObjectName("footerLabel")
         self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -645,8 +656,8 @@ class ResultsWindow(QWidget):
         
         summary_reco_row = QHBoxLayout()
         summary_reco_row.setSpacing(12)
-        summary_reco_row.addWidget(explanation_group, 1)
-        summary_reco_row.addWidget(reco_card, 1)
+        summary_reco_row.addWidget(explanation_group, 6)
+        summary_reco_row.addWidget(reco_card, 4)
         left_col.addLayout(summary_reco_row)
         
         left_col.addWidget(self.ai_disclaimer_label)
@@ -871,9 +882,6 @@ class ResultsWindow(QWidget):
                 font-size: 13px;
                 color: #1f2937;
             }
-            QTextEdit#overrideCommentBox {
-                min-height: 100px;
-            }
             QTextEdit#overrideCommentBox:focus,
             QTextEdit#findingsCommentBox:focus {
                 border: 1px solid #60a5fa;
@@ -907,6 +915,16 @@ class ResultsWindow(QWidget):
                 font-weight: 500;
                 line-height: 1.6;
                 padding: 0;
+            }
+            QLabel#treatmentSuggestionsBody {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                padding: 2px 0 0 0;
+                color: #1f2937;
+                font-size: 13px;
+                font-weight: 500;
+                line-height: 1.5;
             }
             QLabel#summaryRowSuccess {
                 background: transparent;
@@ -1138,8 +1156,7 @@ class ResultsWindow(QWidget):
             result_class,
             ["Ophthalmology review for confirmation and management planning"],
         )
-        content = "<b>Treatment / Management:</b><br><br>" + "<br>".join(f"&bull; {item}" for item in suggestions)
-        return f"<html><div style='line-height:150%;'>{content}</div></html>"
+        return "Treatment / Management:\n\n" + "\n".join(f"- {item}" for item in suggestions)
 
     def _reset_save_button_default(self):
         self.btn_save.setEnabled(True)
@@ -1190,7 +1207,7 @@ class ResultsWindow(QWidget):
     def _accept_ai_classification(self):
         ai_value = str(self._current_result_class or "").strip()
         if ai_value:
-            self.doctor_classification_input.setCurrentText(ai_value)
+            self.doctor_classification_input.setText(ai_value)
             self._doctor_classification = ai_value
             self._decision_mode = "accepted"
             self._override_justification = ""
@@ -1204,8 +1221,6 @@ class ResultsWindow(QWidget):
 
     def _on_doctor_classification_changed(self, value: str):
         chosen = str(value or "").strip()
-        if chosen == "":
-            chosen = ""
         self._doctor_classification = chosen
         ai_value = str(self._current_result_class or "").strip()
         if self._decision_mode in ("accepted", "override"):
@@ -1233,9 +1248,7 @@ class ResultsWindow(QWidget):
 
     def _refresh_decision_ui_state(self):
         ai_value = str(self._current_result_class or "").strip()
-        doctor_value = str(self.doctor_classification_input.currentText() or self._doctor_classification or "").strip()
-        if doctor_value == "":
-            doctor_value = ""
+        doctor_value = str(self.doctor_classification_input.text() or self._doctor_classification or "").strip()
         requires_override = bool(doctor_value and doctor_value != ai_value)
 
         show_documentation = self._decision_mode == "override" or requires_override
@@ -1263,9 +1276,7 @@ class ResultsWindow(QWidget):
 
     def get_decision_payload(self) -> dict:
         ai_value = str(self._current_result_class or "").strip()
-        doctor_value = str(self.doctor_classification_input.currentText() or self._doctor_classification or "").strip()
-        if doctor_value == "Select classification...":
-            doctor_value = ""
+        doctor_value = str(self.doctor_classification_input.text() or self._doctor_classification or "").strip()
         requires_override = bool(doctor_value and ai_value and doctor_value != ai_value)
         mode = self._decision_mode if self._decision_mode in ("accepted", "override") else "pending"
         if mode == "accepted" and requires_override:
@@ -1379,10 +1390,16 @@ class ResultsWindow(QWidget):
         self.classification_value.setText(result_class)
         self.ai_classification_value.setText(result_class)
         grade_color = DR_COLORS.get(result_class, "#1f2937")
-        self.classification_value.setStyleSheet(f"color:{grade_color};font-size:20px;font-weight:800;")
+        self.classification_value.setStyleSheet(f"color:{grade_color};font-size:33px;font-weight:800;")
 
-        # Classification subtitle removed to save space
-        pass
+        class_subtitles = {
+            "No DR": "No diabetic retinopathy detected",
+            "Mild DR": "Mild non-proliferative diabetic retinopathy",
+            "Moderate DR": "Moderate non-proliferative diabetic retinopathy",
+            "Severe DR": "Severe non-proliferative diabetic retinopathy",
+            "Proliferative DR": "Proliferative diabetic retinopathy",
+        }
+        self.classification_subtitle.setText(class_subtitles.get(result_class, "Clinical review advised"))
 
         confidence_pct = self._extract_percent_value(confidence_text)
         confidence_display = self._format_percent(confidence_pct)
@@ -1404,8 +1421,21 @@ class ResultsWindow(QWidget):
                 self._build_treatment_suggestions(result_class, patient_data, uncertainty_pct)
             )
 
-        # Subtitle label removed per user request
-        pass
+        # Subtitle
+        if is_loading:
+            self.subtitle_label.setText("Running DR analysis  please wait")
+        elif heatmap_pending:
+            conf_part = f" with confidence {confidence_display}" if confidence_text else ""
+            self.subtitle_label.setText(
+                f"Screening complete  {result_class}{conf_part}. "
+                "Generating the Grad-CAM++ heatmap now."
+            )
+        else:
+            conf_part = f" with confidence {confidence_display}" if not is_loading else ""
+            self.subtitle_label.setText(
+                f"Screening complete  {result_class}{conf_part}. "
+                "Review source fundus, Grad-CAM++ heatmap, and the clinical summary below."
+            )
 
         # Image and heatmap panels
         if image_path:
@@ -1448,14 +1478,7 @@ class ResultsWindow(QWidget):
             
             history = []
             if p_type and p_type != "Select": history.append(f"{p_type} diabetes")
-            if p_duration:
-                y = p_duration // 12
-                m = p_duration % 12
-                if y > 0:
-                    dur_str = f"{y}y {m}m" if m > 0 else f"{y} years"
-                else:
-                    dur_str = f"{m} months"
-                history.append(f"{dur_str} duration")
+            if p_duration: history.append(f"{p_duration} years duration")
             if p_hba1c: history.append(f"HbA1c {p_hba1c}%")
             history_txt = f" with a history of {', '.join(history)}" if history else " with no recorded diabetic history"
             
@@ -1472,8 +1495,7 @@ class ResultsWindow(QWidget):
                 f"The current AI analysis of the {eye_label.lower()} {severity_desc}. "
                 f"Clinical correlation with a specialist review is recommended (Uncertainty: {self._format_percent(uncertainty_pct)})."
             )
-            self.explanation.setTextFormat(Qt.TextFormat.RichText)
-            self.explanation.setText(f"<html><div style='line-height:150%;'>{summary_paragraph}</div></html>")
+            self.explanation.setText(summary_paragraph)
 
         # Keep state current so generate_report always has the latest values
         self._current_image_path   = image_path or ""
@@ -1483,7 +1505,7 @@ class ResultsWindow(QWidget):
         self._current_eye_label    = eye_label
         self._current_patient_name = patient_name or ""
         if result_class in ICDR_OPTIONS:
-            self.doctor_classification_input.setCurrentText(result_class)
+            self.doctor_classification_input.setText(result_class)
             self._doctor_classification = result_class
             self._decision_mode = "accepted"
             self._override_justification = ""
@@ -1510,74 +1532,18 @@ class ResultsWindow(QWidget):
             self.bilateral_second_saved_lbl.setStyleSheet("font-weight:700;font-size:13px;")
             self.bilateral_second_saved_lbl.setObjectName("successLabel")
 
-    def reset_ui(self):
-        """Thoroughly reset the results interface to a clean, pending state."""
-        self.classification_value.setText("Pending")
-        self.confidence_value.setText("Confidence: ( )")
-        self.uncertainty_value.setText("Uncertainty: ( )")
-        self.ai_classification_value.setText("Pending")
-        self.doctor_classification_input.setCurrentIndex(0)
-        self.classification_match_label.setText("Enter your classification to continue.")
-        self.explanation.setText("Analysis in progress  awaiting clinical summary...")
-        self.treatment_suggestions_value.setText("- Complete analysis to view possible treatment suggestions.")
-        self.source_label.clear_view("Source image")
-        self.heatmap_label.clear_view("Heatmap Image")
-        self.override_reason_input.clear()
-        self.findings_input.clear()
-
-        self._current_image_path = ""
-        self._current_heatmap_path = ""
-        self._current_result_class = "Pending"
-        self._doctor_classification = "Pending"
-        self._decision_mode = "pending"
-        self._override_justification = ""
-        self._doctor_findings = ""
-        self._uncertainty_pct = 0.0
-
-        self.btn_save.setEnabled(True)
-        self.btn_save.setText("Save to Patient Record")
-        self.btn_save.setObjectName("ghostAction")
-        self.save_status_label.hide()
-        self.progression_panel.hide()
-        self.bilateral_frame.hide()
-        self._refresh_decision_ui_state()
-
     def go_back(self):
-        """Prompt user for navigation choice: back to form or back to queue."""
+        """Go back to screening form - clears all fields with confirmation."""
         if not self.parent_page:
             return
         page = self.parent_page
 
-        box = QMessageBox(self)
-        apply_dialog_style(box)
-        box.setWindowTitle("Navigation")
-        box.setText("<b>Where would you like to go?</b>")
-        box.setInformativeText("Returning to the queue will reset current results.")
-        
-        diag_btn = box.addButton("Diagnosis Window", QMessageBox.ButtonRole.ActionRole)
-        queue_btn = box.addButton("Patient Queue", QMessageBox.ButtonRole.ActionRole)
-        cancel_btn = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-        
-        box.exec()
-        choice = box.clickedButton()
-        
-        if choice == diag_btn:
-            # Go back to intake form (index 0)
-            if hasattr(page, "stacked_widget"):
-                page.stacked_widget.setCurrentIndex(0)
-                write_activity("INFO", "NAV_BACK_TO_DIAGNOSIS", "User went back to diagnosis form")
-        elif choice == queue_btn:
-            # Reset everything and go to queue
-            self.reset_ui()
-            if hasattr(page, "reset_screening"):
-                page.reset_screening(confirm_unsaved=False)
-            
-            main_win = self.window()
-            if hasattr(main_win, "_navigate_to"):
-                main_win._navigate_to(10, nav_key="Patient Queue")
-            elif hasattr(main_win, "pages"):
-                main_win.pages.setCurrentIndex(10)
-            write_activity("INFO", "NAV_BACK_TO_QUEUE", "User went back to patient queue")
+        # Switch back to patient info form (stacked index 0) without clearing
+        if hasattr(page, "stacked_widget"):
+            page.stacked_widget.setCurrentIndex(0)
+            write_activity("INFO", "DIALOG_BACK_TO_SCREENING", "User went back to patient info")
+        else:
+            write_activity("WARNING", "DIALOG_BACK_TO_SCREENING", "No stacked_widget found")
 
     def set_progression_info(self, prev_result, current_result):
         """Show progression summary for follow-up screenings."""
@@ -1622,24 +1588,6 @@ class ResultsWindow(QWidget):
 
     def save_patient(self):
         if not self.parent_page or not hasattr(self.parent_page, "save_screening"):
-            return
-
-        # Formal clinical finalization prompt
-        confirm_box = QMessageBox(self)
-        apply_dialog_style(confirm_box)
-        confirm_box.setWindowTitle("Finalize Assessment")
-        confirm_box.setIcon(QMessageBox.Icon.Question)
-        confirm_box.setText("<b>Confirm Clinical Finalization</b>")
-        confirm_box.setInformativeText(
-            "Are you certain you wish to finalize and save this clinical screening result? "
-            "Once saved, the diagnostic data will be committed to the patient's permanent record."
-        )
-        confirm_btn = confirm_box.addButton("Finalize and Save", QMessageBox.ButtonRole.AcceptRole)
-        confirm_box.addButton("Review Assessment", QMessageBox.ButtonRole.RejectRole)
-        confirm_box.setDefaultButton(confirm_btn)
-        
-        confirm_box.exec()
-        if confirm_box.clickedButton() != confirm_btn:
             return
 
         # Pre-save decision (doctor UX): prompt to screen other eye on the *first-eye* save.
@@ -1723,11 +1671,6 @@ class ResultsWindow(QWidget):
                 if choice == refer_btn:
                     self.generate_referral()
                 elif choice == queue_btn:
-                    # Clear results before navigating
-                    self.reset_ui()
-                    if hasattr(pp, "reset_screening"):
-                        pp.reset_screening(confirm_unsaved=False)
-
                     main_win = self.window()
                     if hasattr(main_win, "_navigate_to"):
                         main_win._navigate_to(10, nav_key="Patient Queue")
@@ -1763,23 +1706,13 @@ class ResultsWindow(QWidget):
                             QMessageBox.StandardButton.Yes,
                         )
                         if q_box == QMessageBox.StandardButton.Yes:
-                            self.reset_ui()
-                            if hasattr(pp, "reset_screening"):
-                                pp.reset_screening(confirm_unsaved=False)
                             main_win = self.window()
-                            if hasattr(main_win, "_navigate_to"):
-                                main_win._navigate_to(10, nav_key="Patient Queue")
-                            elif hasattr(main_win, "pages"):
-                                main_win.pages.setCurrentIndex(10)
+                            if hasattr(main_win, "pages"):
+                                main_win.pages.setCurrentIndex(0)
                 elif choice == queue_btn:
-                    self.reset_ui()
-                    if hasattr(pp, "reset_screening"):
-                        pp.reset_screening(confirm_unsaved=False)
                     main_win = self.window()
-                    if hasattr(main_win, "_navigate_to"):
-                        main_win._navigate_to(10, nav_key="Patient Queue")
-                    elif hasattr(main_win, "pages"):
-                        main_win.pages.setCurrentIndex(10)
+                    if hasattr(main_win, "pages"):
+                        main_win.pages.setCurrentIndex(0)
                 return
 
             # Otherwise (screen other eye), logic handled above.
@@ -2900,9 +2833,9 @@ img {{
             referral_id=referral_id,
             actor_username=username,
             patient_name=patient_name_raw,
-            destination_name=hosp_name,
-            destination_department="",
-            destination_contact="",
+            destination_name=hospital_name,
+            destination_department=hospital_dept,
+            destination_contact=hospital_contact,
             urgency=urgency,
             pdf_path=path,
         )
