@@ -605,7 +605,8 @@ class EyeShieldApp(QMainWindow):
                 apply_dialog_style(msg)
                 msg.setWindowTitle("Patient Queue Notification")
                 msg.setIcon(QMessageBox.Icon.Information)
-                msg.setText(f"Welcome, {self.display_name}!\n\nThere are {waiting_count} new patient(s) waiting in the queue.")
+                msg.setText(f"Welcome back, {self.display_name}!")
+                msg.setInformativeText(f"There are currently {waiting_count} patient(s) waiting in your queue.")
 
                 view_list_btn = msg.addButton("View Patient Queue", QMessageBox.ActionRole)
                 ok_btn = msg.addButton("Stay on Dashboard", QMessageBox.RejectRole)

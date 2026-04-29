@@ -367,6 +367,7 @@ class PatientTimelineDialog(QWidget):
     def _build_body(self) -> QWidget:
         """Two-page tab body: Overview vs Screening History."""
         # Build cards once so _refresh always updates the same widgets.
+        self._actions_card_embedded = False
         self._card_patient_info = self._build_patient_info_card()
         self._card_history = self._build_history_card()
         self._card_screening = self._build_screening_card()
@@ -386,6 +387,9 @@ class PatientTimelineDialog(QWidget):
                 center_widgets=[self._card_history],
                 right_widgets=[self._card_screening] + ([self._card_actions] if self._show_actions else []),
             )
+            if self._show_actions:
+                self._actions_card_embedded = True
+            self._apply_compare_enabled_state()
         else:
             right_widgets = [self._card_context]
             if self._on_start_diagnosis:
@@ -414,13 +418,14 @@ class PatientTimelineDialog(QWidget):
                 self._inline_compare_btn.clicked.connect(self._handle_compare)
                 right_widgets.append(self._inline_compare_btn)
             
-            # Ensure all compare buttons (inline or action card) are correctly enabled/disabled.
-            self._apply_compare_enabled_state()
-            
             if self._show_actions:
                 # Only show the actions card when it contains any buttons.
                 if bool(getattr(self, "_actions_has_buttons", False)):
                     right_widgets.append(self._card_actions)
+                    self._actions_card_embedded = True
+
+            # After layout membership is known (inline vs embedded actions card).
+            self._apply_compare_enabled_state()
 
             overview_page = self._build_three_col_page(
                 # Vital Signs & Symptoms removed from Patient Overview per request.
@@ -453,9 +458,19 @@ class PatientTimelineDialog(QWidget):
             if btn is None:
                 continue
             with contextlib.suppress(Exception):
-                btn.setEnabled(bool(can_compare))
+                btn.setVisible(bool(can_compare))
             with contextlib.suppress(Exception):
                 btn.setToolTip(hint)
+        
+        # If the actions card is not placed in the overview (e.g. EMR review uses inline compare only),
+        # never show it — an unparented QFrame becomes a stray top-level window when setVisible(True).
+        if hasattr(self, "_card_actions") and not self._frontdesk_mode:
+            embedded = bool(getattr(self, "_actions_card_embedded", False))
+            with contextlib.suppress(Exception):
+                if embedded:
+                    self._card_actions.setVisible(bool(can_compare))
+                else:
+                    self._card_actions.setVisible(False)
 
     def _build_screening_history_page(self) -> QWidget:
         page = QWidget()
@@ -954,6 +969,8 @@ class PatientTimelineDialog(QWidget):
 
     def _build_actions_card(self) -> QWidget:
         card, v = self._card("Actions")
+        # Widgets created without a parent are native windows; parent now even if not embedded in layout.
+        card.setParent(self)
         self._actions_has_buttons = False
         if self._frontdesk_mode:
             # Frontdesk mode: show only the follow-up screening button
@@ -1434,8 +1451,13 @@ class PatientTimelineDialog(QWidget):
         # Filter for completed screenings before passing to the comparison handler.
         completed = [r for r in (self.timeline_records or []) if _is_completed_visit(r)]
         if len(completed) < 2:
-            # Keep behavior consistent even if the button is triggered programmatically.
-            QMessageBox.information(self, "Compare Screenings", "At least two completed screenings are required for comparison.")
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Compare Screenings")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("At least two completed screenings are required for comparison.")
+            if "apply_dialog_style" in globals() or "apply_dialog_style" in locals():
+                apply_dialog_style(msg)
+            msg.exec()
             return
         if callable(self._on_compare):
             self._on_compare(completed)

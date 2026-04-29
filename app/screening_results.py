@@ -428,7 +428,7 @@ class ResultsWindow(QWidget):
         decision_layout.setContentsMargins(14, 14, 14, 14)
         decision_layout.setSpacing(10)
 
-        self.step1_label = QLabel("1. Review AI result")
+        self.step1_label = QLabel("1. Review Result.")
         self.step1_label.setObjectName("resultStatTitle")
         decision_layout.addWidget(self.step1_label)
 
@@ -442,7 +442,7 @@ class ResultsWindow(QWidget):
         ai_row.addWidget(self.ai_classification_value, 1)
         decision_layout.addLayout(ai_row)
 
-        self.step2_label = QLabel("2. Confirm your classification")
+        self.step2_label = QLabel("2. Confirm")
         self.step2_label.setObjectName("resultStatTitle")
         decision_layout.addWidget(self.step2_label)
 
@@ -462,12 +462,12 @@ class ResultsWindow(QWidget):
         doctor_row.addStretch(1)
         decision_layout.addLayout(doctor_row)
 
-        self.classification_match_label = QLabel("Your current classification matches the AI")
+        self.classification_match_label = QLabel("")
         self.classification_match_label.setObjectName("metaText")
         self.classification_match_label.setWordWrap(True)
         decision_layout.addWidget(self.classification_match_label)
 
-        self.step3_label = QLabel("3. Decide: accept or override the AI result")
+        self.step3_label = QLabel("3. Decide")
         self.step3_label.setObjectName("resultStatTitle")
         decision_layout.addWidget(self.step3_label)
 
@@ -525,7 +525,7 @@ class ResultsWindow(QWidget):
         self.findings_label.setObjectName("metaText")
         self.findings_input = QTextEdit()
         self.findings_input.setObjectName("findingsCommentBox")
-        self.findings_input.setPlaceholderText("Optional: add retinal findings or clinical comments...")
+        self.findings_input.setPlaceholderText("")
         self.findings_input.setMinimumHeight(96)
         self.findings_input.textChanged.connect(self._on_findings_changed)
         optional_layout.addWidget(self.findings_label)
@@ -623,7 +623,7 @@ class ResultsWindow(QWidget):
         explanation_layout.setContentsMargins(14, 10, 14, 14)
         explanation_layout.setSpacing(6)
 
-        self.ai_summary_title = QLabel("AI SUMMARY")
+        self.ai_summary_title = QLabel("PATIENT INFORMATION SUMMARY")
         self.ai_summary_title.setObjectName("resultStatTitle")
         explanation_layout.addWidget(self.ai_summary_title)
 
@@ -1554,7 +1554,7 @@ class ResultsWindow(QWidget):
         box.setText("<b>Where would you like to go?</b>")
         box.setInformativeText("Returning to the queue will reset current results.")
         
-        diag_btn = box.addButton("Diagnosis Window", QMessageBox.ButtonRole.ActionRole)
+        diag_btn = box.addButton("Diagnosis", QMessageBox.ButtonRole.ActionRole)
         queue_btn = box.addButton("Patient Queue", QMessageBox.ButtonRole.ActionRole)
         cancel_btn = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         

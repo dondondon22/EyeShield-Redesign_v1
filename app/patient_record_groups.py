@@ -145,7 +145,11 @@ def group_patient_record_rows(rows: list[dict]) -> list[dict]:
             eye_details.append(detail)
 
         eye_labels = _dedupe_strings([detail["eye_label"] for detail in eye_details])
-        eye_result_lines = [f"{detail['eye_label']}: {detail['display_result']}" for detail in eye_details]
+        eye_result_lines = [
+            f"{detail['eye_label']}: {detail['display_result']}" 
+            for detail in eye_details 
+            if detail['eye_label'] != "Both Eyes"
+        ]
         confidence_lines = [
             f"{detail['eye_label']}: {detail.get('confidence') or '—'}"
             for detail in eye_details

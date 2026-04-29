@@ -362,7 +362,7 @@ class TrustedHospitalsPage(QWidget):
 
         root.addWidget(self.referral_hospitals_group)
 
-        self.status_label = QLabel("Ready")
+        self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
         root.addWidget(self.status_label)
         root.addStretch(1)

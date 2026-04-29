@@ -58,6 +58,7 @@ try:
     from .auth import UserManager
     from . import emr_service as emr
     from .safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
+    from .ui_feedback import apply_dialog_style
 except ImportError:
     from screening_styles import (
         SCREENING_PAGE_STYLE,
@@ -81,6 +82,9 @@ except ImportError:
     from auth import UserManager
     import emr_service as emr
     from safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
+    from ui_feedback import apply_dialog_style
+except Exception:
+    pass
 
 # Central records DB helpers
 try:
@@ -2975,14 +2979,22 @@ class ScreeningPage(QWidget):
         if self._guard_busy_action("uploading a new image"):
             return
 
-        confirm = QMessageBox.question(
-            self,
-            "Confirm Image Upload",
-            "Before uploading, please ensure the selected image is clear, in focus, and properly illuminated so it can be accepted by the system.\n\nDo you want to continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+        msg = QMessageBox(self)
+        apply_dialog_style(msg)
+        msg.setWindowTitle("Confirm Image Upload")
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setText("<b>Verify Image Quality</b>")
+        msg.setInformativeText(
+            "Before uploading, please ensure the selected image is clear, in focus, and properly illuminated. "
+            "High-quality images are required for accurate clinical analysis.\n\n"
+            "Do you want to continue?"
         )
-        if confirm != QMessageBox.StandardButton.Yes:
+        yes_btn = msg.addButton("Continue to Upload", QMessageBox.ButtonRole.YesRole)
+        msg.addButton("Cancel", QMessageBox.ButtonRole.NoRole)
+        msg.setDefaultButton(yes_btn)
+        
+        msg.exec()
+        if msg.clickedButton() != yes_btn:
             return
 
         path, _ = QFileDialog.getOpenFileName(

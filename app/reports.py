@@ -33,11 +33,13 @@ try:
     from .app_paths import PATIENT_RECORDS_DB_PATH
     from .patient_record_groups import group_patient_record_rows
     from . import emr_service as emr
+    from .ui_feedback import apply_dialog_style
 except Exception:  # pragma: no cover
     from auth import UserManager
     from app_paths import PATIENT_RECORDS_DB_PATH
     from patient_record_groups import group_patient_record_rows
     import emr_service as emr
+    from ui_feedback import apply_dialog_style
 try:
     from .screening_widgets import ClickableImageLabel
 except Exception:
@@ -178,7 +180,10 @@ def _timeline_sort_key(record: dict) -> tuple[datetime, int]:
 
 class ScreeningComparisonDialog(QDialog):
     def __init__(self, all_records: list[dict], parent=None):
-        super().__init__(parent)
+        # Parent deep inside EMR stacks can yield odd auxiliary-window sizing; prefer the top-level window.
+        root = parent.window() if parent is not None and parent.window() is not None else parent
+        super().__init__(root)
+        self.setWindowFlag(Qt.WindowType.Window, True)
         # Filter for completed screenings only (ignore pending/on-going sessions)
         self.all_records = [
             rec for rec in (all_records or [])
@@ -231,7 +236,10 @@ class ScreeningComparisonDialog(QDialog):
 
         self._summary = QLabel("")
         self._summary.setWordWrap(True)
-        self._summary.setStyleSheet("background:#f8fafc;border:1px solid #dbeafe;border-radius:10px;padding:10px;")
+        self._summary.setMinimumHeight(60)
+        self._summary.setStyleSheet(
+            "background:#f1f5f9;border:1px solid #cbd5e1;border-radius:12px;padding:12px 16px;font-size:14px;color:#334155;"
+        )
         self._root.addWidget(self._summary)
 
         # Eye toggle (OD/OS)
@@ -450,7 +458,7 @@ class ScreeningComparisonDialog(QDialog):
             )
 
         columns = QHBoxLayout()
-        columns.setSpacing(10)
+        columns.setSpacing(20)
         host = QWidget()
         host.setStyleSheet("background:transparent;")
         host.setLayout(columns)
@@ -461,13 +469,14 @@ class ScreeningComparisonDialog(QDialog):
     def _build_eye_card(self, record: dict, *, heading: str) -> QGroupBox:
         has_data = self._has_real_eye_payload(record)
         card = QGroupBox(heading)
+        card.setMinimumWidth(480)
         card.setStyleSheet(
-            "QGroupBox{font-weight:700;padding-top:16px;}"
-            "QGroupBox::title{subcontrol-origin:margin;left:12px;padding:0 6px;}"
+            "QGroupBox{font-weight:700;padding-top:24px;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;color:#1e293b;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:12px;padding:0 8px;color:#64748b;}"
         )
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(8)
-        card_layout.setContentsMargins(12, 14, 12, 12)
+        card_layout.setSpacing(12)
+        card_layout.setContentsMargins(16, 20, 16, 16)
 
         date_label = escape(_format_screening_datetime_label(record.get('screened_at')))
         eye_label = str(record.get("eye_label") or record.get("eyes") or "—")

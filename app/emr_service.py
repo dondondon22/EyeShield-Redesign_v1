@@ -2129,7 +2129,10 @@ def list_screenings_for_patient(patient_id: int) -> list[dict[str, Any]]:
                 side = str(eye[0] or "")
                 final_grade = eye[5]
                 ai_grade = eye[1]
-                final_labels.append(f"{side}:{final_grade if final_grade is not None else 'Pending'}")
+                if side == "Both Eyes":
+                    final_labels.append(side)
+                else:
+                    final_labels.append(f"{side}:{final_grade if final_grade is not None else 'Pending'}")
                 eyes.append(
                     {
                         "eye_side": side,

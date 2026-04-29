@@ -1812,8 +1812,9 @@ class EmrVisitsPage(QWidget):
             show_warning(self, "Compare Screenings", "At least two completed screenings are required for comparison.")
             return
         
-        dialog = ScreeningComparisonDialog(completed, self)
+        dialog = ScreeningComparisonDialog(completed, self.window() if hasattr(self, "window") else self)
         apply_dialog_style(dialog)
+        dialog.resize(max(dialog.width(), 1320), max(dialog.height(), 960))
         dialog.exec()
 
     def _start_diagnosis_from_review(self) -> None:
