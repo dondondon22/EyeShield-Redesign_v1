@@ -59,6 +59,7 @@ try:
     from . import emr_service as emr
     from .safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
     from .ui_feedback import apply_dialog_style
+    from .model_inference import SYSTEM_UNCERTAIN_LABEL
 except ImportError:
     from screening_styles import (
         SCREENING_PAGE_STYLE,
@@ -83,6 +84,7 @@ except ImportError:
     import emr_service as emr
     from safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
     from ui_feedback import apply_dialog_style
+    from model_inference import SYSTEM_UNCERTAIN_LABEL
 except Exception:
     pass
 
@@ -2271,7 +2273,21 @@ class ScreeningPage(QWidget):
         return ""
 
     def _ensure_emr_screening_session(self, image_path: str) -> bool:
-        if not self._emr_patient_pk or not self._emr_queue_entry_id or self._emr_screening_id:
+        if not self._emr_patient_pk or not self._emr_queue_entry_id:
+            return True
+
+        if self._emr_screening_id:
+            eye = self._selected_emr_eye_screened()
+            if eye and eye != "Both":
+                username = str(getattr(self, "username", "") or os.environ.get("EYESHIELD_CURRENT_USER", "")).strip()
+                uid = emr.get_user_id(username)
+                # Ensure the EMR record is updated with the current image path (e.g. if previous one was rejected)
+                emr.update_screening_eye_image(
+                    screening_id=int(self._emr_screening_id),
+                    eye_side=eye,
+                    fundus_source_path=image_path,
+                    performed_by=uid
+                )
             return True
 
         username = str(getattr(self, "username", "") or os.environ.get("EYESHIELD_CURRENT_USER", "")).strip()
@@ -3165,6 +3181,7 @@ class ScreeningPage(QWidget):
         )
         self._worker.error.connect(self._on_inference_error)
         self._worker.ungradable.connect(self._on_image_ungradable)
+        self._worker.system_uncertain.connect(self._on_system_uncertain)
         self._set_navigation_locked(True)
         self._worker.start()
 
@@ -3270,6 +3287,7 @@ class ScreeningPage(QWidget):
         )
         self._worker.error.connect(self._on_inference_error)
         self._worker.ungradable.connect(self._on_image_ungradable)
+        self._worker.system_uncertain.connect(self._on_system_uncertain)
         self._set_navigation_locked(True)
         self._worker.start()
 
@@ -3353,33 +3371,56 @@ class ScreeningPage(QWidget):
                 write_activity("WARNING", "PROGRESSION_SUMMARY_FAILED", f"Error fetching previous result: {str(e)}")
 
     def _on_inference_error(self, message: str):
+        """Internal model or system error during analysis."""
         self._set_navigation_locked(False)
         self.btn_analyze.setEnabled(True)
+        self.clear_image()
         self._reparent_results_into_stack(set_index_0=True)
-        write_activity("ERROR", "SCREENING_INFERENCE_FAILED", message)
-        QMessageBox.critical(
-            self, "Analysis Failed",
-            f"Could not run the DR model:\n\n{message}"
-        )
+        write_activity("ERROR", "SCREENING_INFERENCE_ERROR", message)
+        QMessageBox.critical(self, "Analysis Error", f"The screening process encountered an error:\n\n{message}")
 
     def _on_image_ungradable(self, message: str):
         """Called when the quality check rejects the uploaded image."""
         self._set_navigation_locked(False)
         self.btn_analyze.setEnabled(True)
+        self.clear_image()
         self._reparent_results_into_stack(set_index_0=True)
         write_activity("WARNING", "SCREENING_UNGRADABLE", message)
         msg = QMessageBox(self)
-        msg.setWindowTitle("Image Not Gradable")
+        msg.setWindowTitle("Image quality — non-gradable")
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setText(
-            "<b>The uploaded image does not meet the minimum quality "
-            "requirements for DR screening.</b>"
+            "<b>The uploaded image does not meet the minimum quality requirements for DR screening.</b>"
         )
-        msg.setInformativeText(
-            message + "\n\nPlease upload a clearer, well-lit fundus photograph and try again."
+        detail = (message or "").strip()
+        reason_line = f"Reason: {detail}" if detail else "Reason: Unspecified quality issue."
+        footer = (
+            "Please upload a clearer, well-lit fundus photograph and try again."
         )
+        msg.setInformativeText(f"{reason_line}\n\n{footer}")
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
+
+    def _on_system_uncertain(self):
+        """Model confidence below threshold: show uncertain result, no grade text, no heatmap."""
+        self._set_navigation_locked(False)
+        self.btn_analyze.setEnabled(True)
+        write_activity("WARNING", "SCREENING_SYSTEM_UNCERTAIN", f"image={self.current_image}")
+        eye_label = self.p_eye.currentText()
+        patient_data = self._collect_patient_data()
+        self.last_result_class = SYSTEM_UNCERTAIN_LABEL
+        self.last_result_conf = ""
+        self.results_page.set_results(
+            self.p_name.text(),
+            self.current_image,
+            SYSTEM_UNCERTAIN_LABEL,
+            "Confidence: —   |   Uncertainty: —",
+            eye_label=eye_label,
+            first_eye_result=self._first_eye_result,
+            heatmap_path="",
+            patient_data=patient_data,
+            heatmap_pending=False,
+        )
 
     def _collect_patient_data(self) -> dict:
         """Snapshot the current intake form into a plain dict for the explanation generator."""

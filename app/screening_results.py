@@ -25,12 +25,14 @@ try:
     from .safety_runtime import can_write_directory, get_free_space_mb, write_activity
     from .auth import UserManager
     from .ui_feedback import apply_dialog_style
+    from .model_inference import SYSTEM_UNCERTAIN_LABEL
 except Exception:  # pragma: no cover
     from screening_styles import DR_COLORS, DR_RECOMMENDATIONS, PROGRESSBAR_STYLE
     from screening_widgets import ClickableImageLabel
     from safety_runtime import can_write_directory, get_free_space_mb, write_activity
     from auth import UserManager
     from ui_feedback import apply_dialog_style
+    from model_inference import SYSTEM_UNCERTAIN_LABEL
 
 ICDR_OPTIONS = ["No DR", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"]
 
@@ -428,7 +430,7 @@ class ResultsWindow(QWidget):
         decision_layout.setContentsMargins(14, 14, 14, 14)
         decision_layout.setSpacing(10)
 
-        self.step1_label = QLabel("1. Review Result.")
+        self.step1_label = QLabel("1. Review Result")
         self.step1_label.setObjectName("resultStatTitle")
         decision_layout.addWidget(self.step1_label)
 
@@ -1332,6 +1334,7 @@ class ResultsWindow(QWidget):
 
     def set_results(self, patient_name, image_path, result_class="Pending", confidence_text="Pending", eye_label="", first_eye_result=None, heatmap_path="", patient_data=None, heatmap_pending=False):
         is_loading = result_class in ("Analyzing", "Pending")
+        is_system_uncertain = result_class == SYSTEM_UNCERTAIN_LABEL
         is_busy = is_loading or heatmap_pending
 
         if patient_name:
@@ -1378,27 +1381,41 @@ class ResultsWindow(QWidget):
         # Classification with severity colour
         self.classification_value.setText(result_class)
         self.ai_classification_value.setText(result_class)
-        grade_color = DR_COLORS.get(result_class, "#1f2937")
+        if is_system_uncertain:
+            grade_color = "#b45309"
+        else:
+            grade_color = DR_COLORS.get(result_class, "#1f2937")
         self.classification_value.setStyleSheet(f"color:{grade_color};font-size:20px;font-weight:800;")
 
         # Classification subtitle removed to save space
         pass
 
-        confidence_pct = self._extract_percent_value(confidence_text)
-        confidence_display = self._format_percent(confidence_pct)
-        self.confidence_value.setText(f"Confidence: {confidence_display}")
-
-        uncertainty_match = re.search(r"uncertainty\s*:?\s*(\d+(?:\.\d+)?)\s*%", str(confidence_text or ""), re.IGNORECASE)
-        if uncertainty_match:
-            uncertainty_pct = max(0.0, min(100.0, float(uncertainty_match.group(1))))
+        if is_system_uncertain:
+            self.confidence_value.setText("Confidence: —")
+            self.uncertainty_value.setText("Uncertainty: —")
+            self._uncertainty_pct = 0.0
         else:
-            uncertainty_pct = max(0.0, min(100.0, 100.0 - confidence_pct))
-        self._uncertainty_pct = uncertainty_pct
-        self.uncertainty_value.setText(f"Uncertainty: {self._format_percent(uncertainty_pct)}")
+            confidence_pct = self._extract_percent_value(confidence_text)
+            confidence_display = self._format_percent(confidence_pct)
+            self.confidence_value.setText(f"Confidence: {confidence_display}")
+
+            uncertainty_match = re.search(r"uncertainty\s*:?\s*(\d+(?:\.\d+)?)\s*%", str(confidence_text or ""), re.IGNORECASE)
+            if uncertainty_match:
+                uncertainty_pct = max(0.0, min(100.0, float(uncertainty_match.group(1))))
+            else:
+                uncertainty_pct = max(0.0, min(100.0, 100.0 - confidence_pct))
+            self._uncertainty_pct = uncertainty_pct
+            self.uncertainty_value.setText(f"Uncertainty: {self._format_percent(uncertainty_pct)}")
 
         # Severity-based possible treatment suggestions
         if is_loading:
             self.treatment_suggestions_value.setText("- Complete analysis to view possible treatment suggestions.")
+        elif is_system_uncertain:
+            self.treatment_suggestions_value.setText(
+                "<html><div style='line-height:150%;'><b>Treatment / Management:</b><br><br>"
+                "&bull; No automated DR grade is available for this image.<br>"
+                "&bull; Specialist review is required before any clinical decisions.</div></html>"
+            )
         else:
             self.treatment_suggestions_value.setText(
                 self._build_treatment_suggestions(result_class, patient_data, uncertainty_pct)
@@ -1413,6 +1430,8 @@ class ResultsWindow(QWidget):
             self.source_label.set_viewable_pixmap(source_pixmap, 520, 390)
             if is_loading:
                 self.heatmap_label.setText("Analyzing image...")
+            elif is_system_uncertain:
+                self.heatmap_label.setText("No heatmap — specialist review required")
             elif heatmap_path:
                 heatmap_pixmap = QPixmap(heatmap_path)
                 self.heatmap_label.set_viewable_pixmap(heatmap_pixmap, 520, 390)
@@ -1422,6 +1441,14 @@ class ResultsWindow(QWidget):
                 self.heatmap_label.setText("No heatmap available")
         if is_loading:
             self.explanation.setText("Analysis in progress  awaiting clinical summary...")
+        elif is_system_uncertain:
+            elab = (eye_label or "screened eye").lower()
+            summary_paragraph = (
+                f"The AI model did not reach sufficient confidence to assign a DR grade for this {elab}. "
+                "Specialist review is required. No heatmap is generated or recorded for this analysis."
+            )
+            self.explanation.setTextFormat(Qt.TextFormat.RichText)
+            self.explanation.setText(f"<html><div style='line-height:150%;'>{summary_paragraph}</div></html>")
         else:
             pd = patient_data or {}
             # Gather profile details
@@ -1874,7 +1901,8 @@ class ResultsWindow(QWidget):
             QMessageBox.information(self, "Generate Report", "No completed screening results to report.")
             return
 
-        if self.parent_page and not getattr(self.parent_page, "_current_eye_saved", False):
+        _ai_uncertain = str(self._current_result_class or "").strip() == SYSTEM_UNCERTAIN_LABEL
+        if self.parent_page and not getattr(self.parent_page, "_current_eye_saved", False) and not _ai_uncertain:
             QMessageBox.warning(self, "Generate Report", "Please save the result before generating a report")
             return
 
@@ -2019,6 +2047,7 @@ class ResultsWindow(QWidget):
             "Moderate DR": "#fde8d8",
             "Severe DR": "#fde8ea",
             "Proliferative DR": "#f5d5d8",
+            SYSTEM_UNCERTAIN_LABEL: "#fffbeb",
         }
         grade_bg = grade_bg_map.get(result_raw, "#f3f4f6")
 
@@ -2048,6 +2077,10 @@ class ResultsWindow(QWidget):
                 "Proliferative DR": (
                     "Proliferative diabetic retinopathy was detected, a sight-threatening condition. "
                     "Immediate ophthalmology referral is required."
+                ),
+                SYSTEM_UNCERTAIN_LABEL: (
+                    "Automated screening did not produce a reliable diabetic retinopathy severity grade for this image. "
+                    "Specialist review is recommended for clinical assessment and management."
                 ),
             }
             explanation_html = escape(summary_map.get(result_raw, "Please consult a qualified ophthalmologist."))
@@ -2244,6 +2277,7 @@ class ResultsWindow(QWidget):
             "Moderate DR": "#9a3412",
             "Severe DR": "#7f1d1d",
             "Proliferative DR": "#6b1a1a",
+            SYSTEM_UNCERTAIN_LABEL: "#92400e",
         }
         _BG = {
             "No DR": "#f0fdf4",
@@ -2251,6 +2285,7 @@ class ResultsWindow(QWidget):
             "Moderate DR": "#fff7ed",
             "Severe DR": "#fff8f8",
             "Proliferative DR": "#fff8f8",
+            SYSTEM_UNCERTAIN_LABEL: "#fffbeb",
         }
         _BORDER = {
             "No DR": "#16a34a",
@@ -2258,6 +2293,7 @@ class ResultsWindow(QWidget):
             "Moderate DR": "#ea580c",
             "Severe DR": "#c24141",
             "Proliferative DR": "#b91c1c",
+            SYSTEM_UNCERTAIN_LABEL: "#d97706",
         }
         _REC = {
             "No DR": "Annual screening recommended",
@@ -2265,6 +2301,7 @@ class ResultsWindow(QWidget):
             "Moderate DR": "Ophthalmology referral within 3 months",
             "Severe DR": "Urgent ophthalmology referral",
             "Proliferative DR": "Immediate ophthalmology referral",
+            SYSTEM_UNCERTAIN_LABEL: "Specialist review and referral as clinically indicated",
         }
         _SUM = {
             "No DR": "No signs of diabetic retinopathy were detected in this fundus image. Continue standard diabetes management, maintain optimal glycaemic and blood pressure control, and schedule routine annual retinal screening.",
@@ -2272,6 +2309,11 @@ class ResultsWindow(QWidget):
             "Moderate DR": "Features consistent with moderate non-proliferative diabetic retinopathy (NPDR) were detected, including microaneurysms, haemorrhages, and/or hard exudates. Referral to an ophthalmologist within 3 months is advised. Reassess systemic metabolic control.",
             "Severe DR": "Findings consistent with severe non-proliferative diabetic retinopathy (NPDR) were detected. The risk of progression to proliferative disease within 12 months is high. Urgent ophthalmology referral is required.",
             "Proliferative DR": "Proliferative diabetic retinopathy (PDR) was detected &#8212; a sight-threatening condition. Immediate ophthalmology referral is required for evaluation and potential intervention, such as laser photocoagulation or intravitreal anti-VEGF therapy.",
+            SYSTEM_UNCERTAIN_LABEL: (
+                "Automated diabetic retinopathy screening did not yield a reliable ICDR grade for this examination. "
+                "This does not exclude retinopathy or other pathology. Please arrange specialist ophthalmology review "
+                "for dilated examination, independent image interpretation, and management advice."
+            ),
         }
         gc = _COL.get(result_raw, "#1e3a5f")
         gbg = _BG.get(result_raw, "#f8faff")
@@ -2343,6 +2385,8 @@ class ResultsWindow(QWidget):
             result_badge_color = "#dc2626"  # Red
         elif result_raw == "Proliferative DR":
             result_badge_color = "#991b1b"  # Dark red
+        elif result_raw == SYSTEM_UNCERTAIN_LABEL:
+            result_badge_color = "#b45309"  # Amber — indeterminate AI
         else:
             result_badge_color = "#6b7280"  # Gray
 
@@ -2590,7 +2634,9 @@ img {{
             QMessageBox.information(self, "Referral", "No completed screening result available for referral.")
             return
 
-        if self.parent_page and not getattr(self.parent_page, "_current_eye_saved", False):
+        if self.parent_page and not getattr(self.parent_page, "_current_eye_saved", False) and str(
+            self._current_result_class or ""
+        ).strip() != SYSTEM_UNCERTAIN_LABEL:
             QMessageBox.warning(self, "Referral", "Please save the result before creating a referral letter.")
             return
         self.generate_referral()
@@ -2601,7 +2647,8 @@ img {{
             QMessageBox.information(self, "Generate Referral", "No completed screening results to generate referral.")
             return False
 
-        if self.parent_page and not getattr(self.parent_page, "_current_eye_saved", False):
+        _ai_uncertain = str(self._current_result_class or "").strip() == SYSTEM_UNCERTAIN_LABEL
+        if self.parent_page and not getattr(self.parent_page, "_current_eye_saved", False) and not _ai_uncertain:
             QMessageBox.warning(self, "Generate Referral", "Please save the result before generating a referral")
             return False
 
@@ -2673,9 +2720,17 @@ img {{
             "Moderate DR": ("Priority", "Refer to ophthalmology within 3 months for specialist evaluation."),
             "Severe DR": ("Urgent", "Urgent ophthalmology review is advised due to high progression risk."),
             "Proliferative DR": ("Immediate", "Immediate specialist referral is required for potential sight-threatening disease."),
+            SYSTEM_UNCERTAIN_LABEL: (
+                "Priority",
+                "Automated DR screening produced an indeterminate grade; specialist examination is requested for diagnosis and management.",
+            ),
         }
         final_dx = self.get_decision_payload().get("final_diagnosis_icdr") or self._current_result_class
-        urgency, rationale = referral_map.get(final_dx, ("Clinical Review", "Please evaluate for diabetic retinopathy management."))
+        is_uncertain_referral = str(self._current_result_class or "").strip() == SYSTEM_UNCERTAIN_LABEL
+        if is_uncertain_referral:
+            urgency, rationale = referral_map[SYSTEM_UNCERTAIN_LABEL]
+        else:
+            urgency, rationale = referral_map.get(final_dx, ("Clinical Review", "Please evaluate for diabetic retinopathy management."))
 
         report_date = datetime.now().strftime("%B %d, %Y")
         screen_date_text = esc(_to_long_date(datetime.now().strftime("%B %d, %Y")))
@@ -2791,22 +2846,24 @@ img {{
         # Build professional 2-page HTML
         style = """
         <style>
-            @page { margin: 10mm; }
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; line-height: 1.4; font-size: 11.5pt; margin: 0; padding: 0; }
+            @page { margin: 8mm; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; line-height: 1.3; font-size: 10.5pt; margin: 0; padding: 0; }
             .page { width: 100%; }
-            .header { text-align: center; margin-bottom: 20px; }
-            .header h1 { font-size: 20pt; color: #0f172a; text-transform: uppercase; border-bottom: 2px solid #0f172a; padding-bottom: 5px; margin: 0; }
-            .meta-row { margin-bottom: 3px; }
-            .subject { font-weight: bold; margin-top: 15px; margin-bottom: 15px; text-decoration: underline; }
-            .section-title { font-weight: bold; margin-top: 15px; margin-bottom: 5px; color: #334155; text-transform: uppercase; font-size: 11pt; }
-            .findings-list { margin-left: 20px; margin-top: 5px; margin-bottom: 10px; }
-            .findings-list li { margin-bottom: 2px; }
-            .footer { margin-top: 30px; }
-            .page-break { page-break-before: always; }
-            .image-container { text-align: center; margin-top: 15px; margin-bottom: 30px; }
-            .image-container img { border: 1px solid #e2e8f0; border-radius: 4px; max-width: 600px; max-height: 400px; object-fit: contain; }
-            .eye-label { font-size: 16pt; font-weight: bold; color: #1e40af; margin-top: 5px; }
-            p { margin: 0 0 10px 0; }
+            .header { text-align: center; margin-bottom: 10px; }
+            .header h1 { font-size: 18pt; color: #0f172a; text-transform: uppercase; border-bottom: 2px solid #0f172a; padding-bottom: 3px; margin: 0; }
+            .meta-row { margin-bottom: 2px; }
+            .subject { font-weight: bold; margin-top: 10px; margin-bottom: 10px; text-decoration: underline; }
+            .section-title { font-weight: bold; margin-top: 10px; margin-bottom: 3px; color: #334155; text-transform: uppercase; font-size: 10pt; }
+            .findings-list { margin-left: 20px; margin-top: 3px; margin-bottom: 5px; }
+            .findings-list li { margin-bottom: 1px; }
+            .footer { margin-top: 15px; }
+            .page-break { display: none; }
+            .image-row { text-align: center; margin-top: 10px; }
+            .image-container { display: inline-block; text-align: center; margin: 5px; border: 1px solid #e2e8f0; padding: 5px; border-radius: 4px; }
+            .image-container img { max-width: 280px; max-height: 200px; object-fit: contain; }
+            .eye-label { font-size: 10pt; font-weight: bold; color: #1e40af; margin-bottom: 3px; }
+            p { margin: 0 0 6px 0; }
+            .referral-uncertain-panel { background: #fffbeb; border-left: 4px solid #d97706; padding: 8px 10px; margin: 8px 0; font-size: 9.5pt; }
         </style>
         """
 
@@ -2822,35 +2879,50 @@ img {{
         
         html += f"<p>Dear Dr. {esc(surname)},</p>"
         html += "<p>I am writing to formally refer the above-mentioned patient to your specialized care for further evaluation and management.</p>"
-        
-        html += "<div class='section-title'>Clinical Findings:</div>"
-        html += f"<p>Based on the Diabetic Retinopathy (DR) screening conducted today ({screen_date_text}), the following status has been identified:</p>"
-        html += "<ul class='findings-list'>"
-        
-        # Gather images/diagnosis for both eyes if available
+
         referral_eyes = []
         if first_eye_label and first_source_path:
-             referral_eyes.append({
-                 "label": first_eye_label.upper(),
-                 "diagnosis": esc(first_eye_ctx.get("result") or "N/A"),
-                 "path": first_source_path
-             })
-        
+            referral_eyes.append({
+                "label": first_eye_label.upper(),
+                "diagnosis": esc(first_eye_ctx.get("result") or "N/A"),
+                "path": first_source_path,
+            })
+
+        display_dx_second = SYSTEM_UNCERTAIN_LABEL if is_uncertain_referral else final_dx
         referral_eyes.append({
             "label": second_eye_label.upper(),
-            "diagnosis": esc(final_dx),
-            "path": image_path
+            "diagnosis": esc(display_dx_second),
+            "path": image_path,
         })
 
-        for eye in referral_eyes:
-            html += f"<li><strong>{eye['label']}:</strong> {eye['diagnosis']}</li>"
-        html += "</ul>"
-        
-        html += "<p>I would appreciate your expert consultation and any necessary intervention or specialized care that the patient may require. "
-        html += "Screening reports and fundus images have been provided to the patient for your reference.</p>"
-        
-        html += "<p>Thank you for your collaboration in providing comprehensive care for this patient.</p>"
-        
+        findings_items = "".join(
+            f"<li><strong>{eye['label']}:</strong> {eye['diagnosis']}</li>" for eye in referral_eyes
+        )
+
+        if is_uncertain_referral:
+            html += "<div class='referral-uncertain-panel'>"
+            html += "<p><strong>Screening system outcome:</strong> Automated diabetic retinopathy (DR) grading did not reach sufficient confidence to assign a reliable ICDR severity score for this encounter. "
+            html += "This result does <em>not</em> exclude retinopathy or other pathology; it indicates that specialist interpretation is required.</p>"
+            html += f"<p><strong>Clinical note:</strong> {esc(rationale)}</p>"
+            html += "</div>"
+            html += "<div class='section-title'>Summary by eye (screening documentation)</div>"
+            html += "<ul class='findings-list'>"
+            html += findings_items
+            html += "</ul>"
+            html += (
+                "<p>I would appreciate your expert assessment and management recommendations. "
+                "Thank you for accepting this referral.</p>"
+            )
+        else:
+            html += "<div class='section-title'>Clinical Findings:</div>"
+            html += f"<p>Based on the Diabetic Retinopathy (DR) screening conducted today ({screen_date_text}), the following status has been identified:</p>"
+            html += "<ul class='findings-list'>"
+            html += findings_items
+            html += "</ul>"
+            html += "<p>I would appreciate your expert consultation and any necessary intervention or specialized care that the patient may require. "
+            html += "Screening reports and fundus images have been provided to the patient for your reference.</p>"
+            html += "<p>Thank you for your collaboration in providing comprehensive care for this patient.</p>"
+
         html += "<div class='footer'>"
         html += "<p>Sincerely,</p><br>"
         html += f"<strong>{screened_by_label}</strong><br>"
@@ -2858,16 +2930,17 @@ img {{
         html += "</div>"
         html += "</div>" # End Page 1
 
-        # Page 2: Images
-        html += "<div class='page-break'>"
-        html += "<div class='header'><h1>Screening Images</h1></div>"
+        # Images section (on the same page)
+        html += "<div class='section-title'>Retinal Fundus Images</div>"
+        html += "<div class='image-row'>"
         for eye in referral_eyes:
             img_url = Path(eye['path']).resolve().as_uri()
             html += "<div class='image-container'>"
             html += f"<div class='eye-label'>{eye['label']}</div>"
-            html += f"<img src='{img_url}' width='600'>"
+            html += f"<img src='{img_url}'>"
             html += "</div>"
-            
+        html += "</div>"
+        
         html += "</body></html>"
 
         doc = QTextDocument()

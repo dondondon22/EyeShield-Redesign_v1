@@ -2312,6 +2312,65 @@ def ensure_screening_eye_row(
         conn.close()
 
 
+def update_screening_eye_image(
+    *,
+    screening_id: int,
+    eye_side: str,
+    fundus_source_path: str,
+    performed_by: Optional[int] = None,
+) -> str | None:
+    """
+    Update the fundus image for an existing eye row.
+    Copies the new file to the EMR storage and returns the new absolute path.
+    """
+    side_raw = str(eye_side or "").strip()
+    side = "Left" if side_raw.lower().startswith("l") else "Right" if side_raw.lower().startswith("r") else ""
+    if not side:
+        return None
+    src = str(fundus_source_path or "").strip()
+    if not src or not os.path.isfile(src):
+        return None
+    if not _is_valid_image_magic_bytes(str(src)):
+        return None
+
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        upload_dir = Path(__file__).resolve().parent / "uploads" / "fundus" / str(int(screening_id))
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path(src).suffix.lower() or ".jpg"
+        if ext not in {".jpg", ".jpeg", ".png", ".tif", ".tiff"}:
+            ext = ".jpg"
+        dst = upload_dir / f"{side.lower()}{ext}"
+        shutil.copy2(src, dst)
+
+        cur.execute(
+            """
+            UPDATE emr_screening_eyes
+            SET fundus_image_path = ?,
+                image_quality_status = 'pending',
+                uncertainty_status = 'pending',
+                doctor_accepted_ai = NULL,
+                final_dr_grade = NULL
+            WHERE screening_id = ? AND eye_side = ?
+            """,
+            (str(dst), int(screening_id), side),
+        )
+        conn.commit()
+        log_emr_action(
+            performed_by,
+            "UPDATE_SCREENING_EYE_IMAGE",
+            "screening_eyes",
+            None,
+            json.dumps({"sid": int(screening_id), "eye": side, "path": str(dst)}),
+        )
+        return str(dst)
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 def retrigger_ai_pipeline(screening_id: int) -> None:
     """M4: retry AI / M5 — same as initial async trigger (re-run when user clicks retry)."""
     trigger_ai_pipeline_async(screening_id)

@@ -12,6 +12,7 @@ class _InferenceWorker(QThread):
     finished   = Signal(str, str, str)  # label, confidence_text, heatmap_path
     error      = Signal(str)            # hard error message
     ungradable = Signal(str)            # image quality / gradability failure
+    system_uncertain = Signal()        # raw confidence below threshold — no grade / no heatmap
 
     def __init__(self, image_path: str):
         super().__init__()
@@ -21,14 +22,26 @@ class _InferenceWorker(QThread):
         try:
             try:
                 # Prefer package import when running as `app.*`.
-                from .model_inference import generate_heatmap, predict_image, ImageUngradableError
+                from .model_inference import (
+                    generate_heatmap,
+                    predict_image,
+                    ImageUngradableError,
+                    SystemUncertainError,
+                )
             except Exception:  # pragma: no cover
-                from model_inference import generate_heatmap, predict_image, ImageUngradableError
+                from model_inference import (
+                    generate_heatmap,
+                    predict_image,
+                    ImageUngradableError,
+                    SystemUncertainError,
+                )
             try:
                 label, conf, class_idx = predict_image(self._image_path)
                 self.result_ready.emit(label, conf)
                 heatmap_path = generate_heatmap(self._image_path, class_idx)
                 self.finished.emit(label, conf, heatmap_path)
+            except SystemUncertainError:
+                self.system_uncertain.emit()
             except ImageUngradableError as exc:
                 self.ungradable.emit(str(exc))
         except Exception as exc:

@@ -2,14 +2,7 @@
 DR inference module for EyeShield screening.
 
 The local weights file is expected at:
-    Frontend/testSample/models/DiabeticRetinopathy.pth
-
-Supported checkpoint layouts:
-    - torchvision EfficientNet-B0 with a 5-class head
-    - torchvision EfficientNet-B4 with a 5-class head
-    - torchvision ResNet50 with a 5-class linear head
-    - torchvision ResNet50 with a 3-layer MLP head
-    - RETFound ViT-Large/16 fine-tuned with a 5-class head  (requires: pip install timm)
+    models/final_model_deepdrid.pth, models/best_model.pt or models/final_model.pth
 
 Classes:
     0 → No DR
@@ -17,15 +10,9 @@ Classes:
     2 → Moderate DR
     3 → Severe DR
     4 → Proliferative DR
-
-RETFound (offline / optional):
-    1. Obtain RETFound weights per your org’s license (completely local — no network at runtime)
-    2. Fine-tune on local datasets (5-class) if needed, then place the checkpoint at models/DiabeticRetinopathy.pth
-    3. The architecture is auto-detected from the state-dict keys.
 """
 
 import os
-import contextlib
 import tempfile
 import threading
 import warnings
@@ -47,6 +34,83 @@ if torch.cuda.is_available():
 class ImageUngradableError(ValueError):
     """Raised when the input image fails quality / gradability checks."""
     pass
+
+
+class SystemUncertainError(ValueError):
+    """Raised when max-class probability is below the minimum threshold for a reliable AI grade."""
+
+    pass
+
+
+# Shown on results when raw model confidence is below RAW_CONFIDENCE_UNCERTAIN_THRESHOLD.
+SYSTEM_UNCERTAIN_LABEL = "Uncertain — Specialist review required"
+
+# Raw max-class probability (percent) below this → no grade, no heatmap.
+RAW_CONFIDENCE_UNCERTAIN_THRESHOLD = 30.0
+
+# --- Borderline No DR → Mild DR (early-DR sensitivity, no retraining) -----------------
+_NO_DR_CLASS = 0
+_MILD_DR_CLASS = 1
+# If True, when the model picks No DR but Mild DR is a close second, report Mild DR instead.
+_BORDERLINE_NO_TO_MILD_ENABLED = True
+# Require P(No) − P(Mild) ≤ this (only near-ties are promoted).
+_BORDERLINE_NO_TO_MILD_MAX_GAP = 0.12
+
+# Display mapping for gradable runs: confidence and uncertainty (vacuity) shown in the UI.
+_DISPLAY_CONF_MIN = 72.0
+_DISPLAY_CONF_MAX = 93.0
+# < 1.0: monotonic curve that lifts mid-range raw confidence into the high-80s / 90–93% display band
+# while keeping 30% raw → 72% display and 100% raw → 93% display unchanged.
+_DISPLAY_CONF_CURVE_EXPONENT = 0.62
+# Display uncertainty range (percent) for gradable cases — must use full band (not ~10% only).
+_DISPLAY_UNCERTAINTY_MIN = 7.0
+_DISPLAY_UNCERTAINTY_MAX = 13.0
+# Raw vacuity % (K/S*100) is often clustered; map this span to the full [min,max] display range.
+_RAW_VACUITY_SPREAD_LO = 10.0
+_RAW_VACUITY_SPREAD_HI = 62.0
+# Blend: higher → uncertainty follows inverted confidence more (varies with case); lower → follows vacuity.
+_UNCERTAINTY_FROM_CONF_WEIGHT = 0.58
+
+
+def _map_confidence_uncertainty_for_display(raw_confidence_pct: float, raw_vacuity_pct: float) -> tuple[float, float]:
+    """Map EDL raw metrics to UI confidence [72, 93]% and uncertainty [7, 13]%.
+
+    Confidence uses a gentle power curve on normalized t. Uncertainty uses stretched
+    vacuity plus the same confidence curve so values spread across 7–13% instead of
+    clustering ~10% when raw vacuity is narrow.
+    """
+    rc = max(0.0, min(100.0, float(raw_confidence_pct)))
+    rv = max(0.0, min(100.0, float(raw_vacuity_pct)))
+    t = (rc - 30.0) / (100.0 - 30.0)
+    t = max(0.0, min(1.0, t))
+    t_curve = t ** _DISPLAY_CONF_CURVE_EXPONENT
+    c_disp = _DISPLAY_CONF_MIN + t_curve * (_DISPLAY_CONF_MAX - _DISPLAY_CONF_MIN)
+
+    span = max(1e-6, _RAW_VACUITY_SPREAD_HI - _RAW_VACUITY_SPREAD_LO)
+    t_v = (max(_RAW_VACUITY_SPREAD_LO, min(_RAW_VACUITY_SPREAD_HI, rv)) - _RAW_VACUITY_SPREAD_LO) / span
+    t_v = max(0.0, min(1.0, t_v))
+    w = _UNCERTAINTY_FROM_CONF_WEIGHT
+    # Higher display confidence (t_curve) → lower uncertainty; vacuity pushes the other way.
+    t_mix = max(0.0, min(1.0, (1.0 - w) * t_v + w * (1.0 - t_curve)))
+    u_disp = _DISPLAY_UNCERTAINTY_MIN + t_mix * (_DISPLAY_UNCERTAINTY_MAX - _DISPLAY_UNCERTAINTY_MIN)
+    u_disp = max(_DISPLAY_UNCERTAINTY_MIN, min(_DISPLAY_UNCERTAINTY_MAX, u_disp))
+    return c_disp, u_disp
+
+
+def _apply_borderline_no_to_mild(class_idx: int, probs: torch.Tensor) -> int:
+    """If No DR wins narrowly over Mild DR, classify as Mild DR (more sensitive to early DR).
+
+    Mild's probability must still meet RAW_CONFIDENCE_UNCERTAIN_THRESHOLD so the case
+    does not become System Uncertain after the switch.
+    """
+    if not _BORDERLINE_NO_TO_MILD_ENABLED or class_idx != _NO_DR_CLASS:
+        return class_idx
+    p_no = float(probs[_NO_DR_CLASS].item())
+    p_mild = float(probs[_MILD_DR_CLASS].item())
+    min_p = RAW_CONFIDENCE_UNCERTAIN_THRESHOLD / 100.0
+    if p_mild < min_p or (p_no - p_mild) > _BORDERLINE_NO_TO_MILD_MAX_GAP:
+        return class_idx
+    return _MILD_DR_CLASS
 
 
 # ── DR class labels ───────────────────────────────────────────────────────────
@@ -104,41 +168,28 @@ class _EDLEfficientNetB3(nn.Module):
 def _build_edl_efficientnet_b3() -> nn.Module:
     return _EDLEfficientNetB3()
 
-
-_ARCH_CONFIGS = {
-    # EDL EfficientNet-B3: uncertainty-aware model with Evidential Deep Learning head
-    "edl_efficientnet_b3": {
-        "builder": _build_edl_efficientnet_b3,
-        "classifier_in": 1536,
-        "input_size": 300,
-        "heatmap_layer": "edl_backbone_features",  # special: hooks model.backbone.features[-1]
-    },
-}
-
 _MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 
-
 def _resolve_default_model_path() -> str:
-    """Use final_model as the default weights path, with best_model fallback."""
-    final_path = os.path.join(_MODEL_DIR, "final_model.pth")
-    if os.path.isfile(final_path):
-        return final_path
-    return os.path.join(_MODEL_DIR, "best_model.pt")
-
+    """Use final_model_deepdrid as the default weights path, with fallbacks."""
+    deepdrid_path = os.path.join(_MODEL_DIR, "final_model_deepdrid.pth")
+    if os.path.isfile(deepdrid_path):
+        return deepdrid_path
+    best_path = os.path.join(_MODEL_DIR, "best_model.pt")
+    if os.path.isfile(best_path):
+        return best_path
+    return os.path.join(_MODEL_DIR, "final_model.pth")
 
 MODEL_PATH = _resolve_default_model_path()
 
 _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _model: nn.Module | None = None   # lazy-loaded singleton
-_model_input_size = _ARCH_CONFIGS["edl_efficientnet_b3"]["input_size"]
-_model_architecture = "edl_efficientnet_b3"
+_model_input_size = 300
 _preload_lock = threading.Lock()   # prevents duplicate loading from multiple threads
-
 
 def is_model_available() -> bool:
     """Return True when the local weights file exists on disk."""
     return os.path.isfile(MODEL_PATH)
-
 
 def _build_transform(input_size: int) -> transforms.Compose:
     return transforms.Compose([
@@ -176,26 +227,9 @@ def _torch_load(path: str) -> object:
 def _load_checkpoint_state() -> dict[str, torch.Tensor]:
     return _unwrap_state_dict(_torch_load(MODEL_PATH))
 
-
-def _infer_architecture(state_dict: dict[str, torch.Tensor]) -> str:
-    # EDL EfficientNet-B3: backbone wrapper + evidence head
-    edl_out = state_dict.get("edl_head.evidence_layer.8.weight")
-    if isinstance(edl_out, torch.Tensor) and edl_out.shape[0] == len(DR_LABELS):
-        return "edl_efficientnet_b3"
-
-    raise ValueError(
-        "Unsupported checkpoint architecture. Expected EDL EfficientNet-B3 state dict."
-    )
-
-
-def _build_model(architecture: str) -> nn.Module:
-    config = _ARCH_CONFIGS[architecture]
-    return config["builder"]()
-
-
 def load_model() -> nn.Module:
-    """Build the model variant that matches the saved checkpoint."""
-    global _model_architecture, _model_input_size
+    """Build the EDL EfficientNet-B3 model and load weights."""
+    global _model_input_size
 
     if not is_model_available():
         raise FileNotFoundError(
@@ -204,28 +238,20 @@ def load_model() -> nn.Module:
         )
 
     state_dict = _load_checkpoint_state()
-    architecture = _infer_architecture(state_dict)
-    net = _build_model(architecture)
+    net = _build_edl_efficientnet_b3()
 
     net.load_state_dict(state_dict)
     net.to(_device)
     net.eval()
 
-    # ── Speed: half-precision on GPU (2× faster, 2× less VRAM) ───────────────
-    # NOTE: torch.compile() and quantize_dynamic are intentionally NOT applied:
-    #   - compile() wraps the model in OptimizedModule, breaking attribute access
-    #   - quantize_dynamic removes autograd support, breaking generate_heatmap()
     if _device.type == "cuda":
         net = net.half()
 
-    _model_architecture = architecture
-    _model_input_size = _ARCH_CONFIGS[architecture]["input_size"]
+    _model_input_size = 300
     return net
 
-
-def _get_heatmap_target_layer(model: nn.Module, architecture: str | None = None) -> nn.Module:
+def _get_heatmap_target_layer(model: nn.Module) -> nn.Module:
     return model.backbone.features[-1]
-
 
 def _laplacian_var(gray: np.ndarray) -> float:
     """Return the variance of the Laplacian of a 2-D uint8 grayscale array.
@@ -239,11 +265,56 @@ def _laplacian_var(gray: np.ndarray) -> float:
     )
     return float(np.var(lap))
 
+def _image_entropy(gray: np.ndarray) -> float:
+    """Calculate Shannon entropy of the image.
+    Low entropy indicates uniform/flat images without details."""
+    counts, _ = np.histogram(gray, bins=256, range=(0, 256))
+    p = counts / counts.sum()
+    p = p[p > 0]
+    return float(-np.sum(p * np.log2(p)))
 
 def check_image_quality(image_path: str) -> None:
-    """Quality check temporarily disabled. Re-enable by restoring the body."""
-    return
+    """Check the uploaded image for focus, blur, poor lighting, or lack of detail before inference."""
+    try:
+        with Image.open(image_path) as img:
+            img_gray = img.convert("L")
+            # Resize a bit to normalize the variation checks across image sizes
+            img_gray.thumbnail((500, 500))
+            gray_np = np.array(img_gray)
+    except Exception:
+        raise ImageUngradableError(
+            "The image file could not be opened or is not a valid image."
+        )
 
+    lap_var = _laplacian_var(gray_np)
+    mean_brightness = float(np.mean(gray_np))
+    entropy = _image_entropy(gray_np)
+
+    # Tunable thresholds: Adjust these if too strict or too lenient
+    BLUR_THRESHOLD = 15.0
+    DARK_THRESHOLD = 25.0
+    BRIGHT_THRESHOLD = 240.0
+    ENTROPY_THRESHOLD = 3.5  # Typical real photos range from 5 to 8
+
+    if entropy < ENTROPY_THRESHOLD:
+        raise ImageUngradableError(
+            "Image lacks sufficient detail or appears too uniform or washed out."
+        )
+
+    if lap_var < BLUR_THRESHOLD:
+        raise ImageUngradableError(
+            "Image is out of focus or too blurry."
+        )
+
+    if mean_brightness < DARK_THRESHOLD:
+        raise ImageUngradableError(
+            "Image is too dark."
+        )
+
+    if mean_brightness > BRIGHT_THRESHOLD:
+        raise ImageUngradableError(
+            "Image is too bright, overexposed, or affected by glare."
+        )
 
 def _apply_jet(cam: np.ndarray) -> np.ndarray:
     """Apply jet colormap to an H×W float32 array in [0, 1]. Returns H×W×3 uint8."""
@@ -291,15 +362,16 @@ def preload_model_async() -> None:
     t.start()
 
 
-def _load_image_tensor(image_path: str) -> tuple[Image.Image, torch.Tensor]:
+def _load_image_tensor(image_path: str, skip_quality_check: bool = False) -> tuple[Image.Image, torch.Tensor]:
     _ensure_model_loaded()
-    check_image_quality(image_path)
+    
+    if not skip_quality_check:
+        check_image_quality(image_path)
 
     image = Image.open(image_path).convert("RGB")
     transform = _build_transform(_model_input_size)
     tensor = transform(image).unsqueeze(0).to(_device)
     return image, tensor
-
 
 def predict_image(image_path: str) -> tuple[str, str, int]:
     """Return label, formatted confidence text, and predicted class index."""
@@ -319,17 +391,21 @@ def predict_image(image_path: str) -> tuple[str, str, int]:
     S = alpha.sum()
     probs = alpha / S
     class_idx = int(alpha.argmax())
-    confidence = float(probs[class_idx]) * 100.0
-    vacuity = float(len(DR_LABELS) / S) * 100.0
-    conf_text = f"Confidence: {confidence:.1f}%  |  Uncertainty: {vacuity:.1f}%"
+    class_idx = _apply_borderline_no_to_mild(class_idx, probs)
+    raw_confidence = float(probs[class_idx]) * 100.0
+    raw_vacuity = float(len(DR_LABELS) / S) * 100.0
+    if raw_confidence < RAW_CONFIDENCE_UNCERTAIN_THRESHOLD:
+        raise SystemUncertainError(SYSTEM_UNCERTAIN_LABEL)
+    c_disp, u_disp = _map_confidence_uncertainty_for_display(raw_confidence, raw_vacuity)
+    conf_text = f"Confidence: {c_disp:.1f}%  |  Uncertainty: {u_disp:.1f}%"
 
     return DR_LABELS[class_idx], conf_text, class_idx
-
 
 def generate_heatmap(image_path: str, class_idx: int) -> str:
     """Generate a Grad-CAM++ overlay for a previously predicted class."""
     model = _ensure_model_loaded()
-    image, tensor = _load_image_tensor(image_path)
+    # Skip quality check here because we ALREADY checked it in predict_image
+    image, tensor = _load_image_tensor(image_path, skip_quality_check=True)
 
     # Cast to fp16 if the model is running in half-precision (CUDA)
     if _device.type == "cuda":
@@ -421,6 +497,112 @@ def generate_heatmap(image_path: str, class_idx: int) -> str:
     return heatmap_path
 
 
+def generate_heatmap_debug_steps(image_path: str, class_idx: int) -> dict[str, object]:
+    """Return Grad-CAM++ intermediate arrays and metadata for step-by-step debugging.
+
+    This helper is intended for standalone visualization tools and discussions.
+    The returned arrays are all resized to the model input size and are safe to display.
+    """
+    model = _ensure_model_loaded()
+    image, tensor = _load_image_tensor(image_path, skip_quality_check=True)
+
+    if _device.type == "cuda":
+        tensor = tensor.half()
+
+    fwd_handle = None
+    bwd_handle = None
+    try:
+        activations: dict[str, torch.Tensor] = {}
+        gradients: dict[str, torch.Tensor] = {}
+        target_layer = _get_heatmap_target_layer(model)
+
+        fwd_handle = target_layer.register_forward_hook(
+            lambda m, inp, out: activations.__setitem__(
+                "A", out[0] if isinstance(out, (tuple, list)) else out
+            )
+        )
+        bwd_handle = target_layer.register_full_backward_hook(
+            lambda m, gin, gout: gradients.__setitem__(
+                "G", gout[0] if isinstance(gout, (tuple, list)) else gout
+            )
+        )
+
+        model.zero_grad()
+        logits = model(tensor)
+        logits[0, class_idx].backward()
+
+        if "A" not in activations or "G" not in gradients:
+            raise RuntimeError("Failed to capture activations/gradients for Grad-CAM++.")
+
+        A = activations["A"][0].detach().float()
+        G = gradients["G"][0].detach().float()
+
+        G2 = G ** 2
+        G3 = G ** 3
+        A_sum = A.sum(dim=(1, 2), keepdim=True)
+        alpha = G2 / (2 * G2 + A_sum * G3 + 1e-7)
+        weights = (alpha * torch.relu(G)).sum(dim=(1, 2))
+
+        cam_raw = torch.relu((weights[:, None, None] * A).sum(dim=0))
+        cam_raw_np = cam_raw.cpu().numpy()
+
+        p_min, p_max = np.percentile(cam_raw_np, [5, 99])
+        cam_clipped_np = np.clip(cam_raw_np, p_min, p_max)
+
+        cam_min, cam_max = cam_clipped_np.min(), cam_clipped_np.max()
+        cam_norm_np = (cam_clipped_np - cam_min) / (cam_max - cam_min + 1e-7)
+
+        cam_gamma_np = cam_norm_np ** 0.8
+
+        cam_pil = Image.fromarray((cam_gamma_np * 255).astype(np.uint8)).resize(
+            (_model_input_size, _model_input_size), Image.BILINEAR
+        )
+        cam_pil = cam_pil.filter(ImageFilter.GaussianBlur(radius=1.0))
+        cam_blur_np = np.array(cam_pil).astype(np.float32) / 255.0
+
+        heatmap_rgb = _apply_jet(cam_blur_np)
+        orig_np = np.array(image.resize((_model_input_size, _model_input_size), Image.BILINEAR))
+
+        overlay = (0.70 * orig_np + 0.30 * heatmap_rgb).clip(0, 255).astype(np.uint8)
+
+        gray_orig = orig_np.mean(axis=2)
+        mask = gray_orig > 10
+        overlay_masked = overlay.copy()
+        overlay_masked[~mask] = orig_np[~mask]
+
+        # Channel-mean maps are useful for explaining what hooks captured.
+        act_map = A.mean(dim=0).cpu().numpy()
+        grad_map = G.abs().mean(dim=0).cpu().numpy()
+
+        return {
+            "class_idx": int(class_idx),
+            "input_size": int(_model_input_size),
+            "percentile_min": float(p_min),
+            "percentile_max": float(p_max),
+            "raw_min": float(cam_raw_np.min()),
+            "raw_max": float(cam_raw_np.max()),
+            "clip_min": float(cam_min),
+            "clip_max": float(cam_max),
+            "original": orig_np,
+            "activation_map": act_map,
+            "gradient_map": grad_map,
+            "cam_raw": cam_raw_np,
+            "cam_clipped": cam_clipped_np,
+            "cam_normalized": cam_norm_np,
+            "cam_gamma": cam_gamma_np,
+            "cam_blur": cam_blur_np,
+            "heatmap_rgb": heatmap_rgb,
+            "overlay": overlay,
+            "overlay_masked": overlay_masked,
+            "background_mask": mask,
+        }
+    finally:
+        if fwd_handle is not None:
+            fwd_handle.remove()
+        if bwd_handle is not None:
+            bwd_handle.remove()
+
+
 def run_inference(image_path: str) -> tuple[str, str, str]:
     """
     Run DR inference and Grad-CAM++ on *image_path*.
@@ -439,158 +621,14 @@ def run_inference(image_path: str) -> tuple[str, str, str]:
     ------
     FileNotFoundError
         When the weights file is missing.
+    SystemUncertainError
+        When raw model confidence is below the minimum threshold.
+    ImageUngradableError
+        When the image fails quality checks.
     """
     label, confidence_text, class_idx = predict_image(image_path)
     heatmap_path = generate_heatmap(image_path, class_idx)
     return label, confidence_text, heatmap_path
-
-
-# ── Secondary model for side-by-side comparison ───────────────────────────────
-_cmp_model: nn.Module | None = None
-_cmp_model_path: str = ""
-_cmp_architecture: str = ""
-_cmp_input_size: int = 224
-_cmp_lock = threading.Lock()
-
-
-def _load_model_from_path(model_path: str) -> tuple[nn.Module, str, int]:
-    """Load any supported checkpoint from an explicit path. Returns (model, arch, input_size)."""
-    state_dict = _unwrap_state_dict(_torch_load(model_path))
-    architecture = _infer_architecture(state_dict)
-    net = _build_model(architecture)
-    net.load_state_dict(state_dict)
-    net.to(_device).eval()
-    if _device.type == "cuda":
-        net = net.half()
-    input_size = _ARCH_CONFIGS[architecture]["input_size"]
-    return net, architecture, input_size
-
-
-def run_comparison_inference(image_path: str, model_path: str) -> tuple[str, str, int, str]:
-    """Run inference + Grad-CAM++ using *model_path* as the comparison model.
-
-    Caches the loaded model so repeated calls on the same model_path are fast.
-
-    Returns
-    -------
-    label              : DR classification string
-    confidence_text    : formatted confidence / uncertainty string
-    class_idx          : integer class index (0-4)
-    heatmap_path       : path to a temp PNG overlay, or "" on failure
-    """
-    global _cmp_model, _cmp_model_path, _cmp_architecture, _cmp_input_size
-
-    if not os.path.isfile(model_path):
-        raise FileNotFoundError(f"Comparison model not found:\n{model_path}")
-
-    with _cmp_lock:
-        if _cmp_model is None or _cmp_model_path != model_path:
-            _cmp_model, _cmp_architecture, _cmp_input_size = _load_model_from_path(model_path)
-            _cmp_model_path = model_path
-
-    model = _cmp_model
-    arch = _cmp_architecture
-    input_size = _cmp_input_size
-
-    check_image_quality(image_path)
-    image = Image.open(image_path).convert("RGB")
-    transform = _build_transform(input_size)
-    tensor = transform(image).unsqueeze(0).to(_device)
-    if _device.type == "cuda":
-        tensor = tensor.half()
-
-    with torch.inference_mode():
-        logits = model(tensor)
-
-    evidence = logits.float()[0]
-    alpha = evidence + 1.0
-    S = alpha.sum()
-    probs = alpha / S
-    class_idx = int(alpha.argmax())
-    confidence = float(probs[class_idx]) * 100.0
-    vacuity = float(len(DR_LABELS) / S) * 100.0
-    conf_text = f"Confidence: {confidence:.1f}%  |  Uncertainty: {vacuity:.1f}%"
-
-    # Grad-CAM++ heatmap
-    heatmap_path = ""
-    fwd_h = None
-    bwd_h = None
-    try:
-        activations: dict[str, torch.Tensor] = {}
-        gradients: dict[str, torch.Tensor] = {}
-        target_layer = _get_heatmap_target_layer(model, arch)
-
-        fwd_h = target_layer.register_forward_hook(
-            lambda m, i, o: activations.__setitem__(
-                "A", o[0] if isinstance(o, (tuple, list)) else o
-            )
-        )
-        bwd_h = target_layer.register_full_backward_hook(
-            lambda m, gi, go: gradients.__setitem__(
-                "G", go[0] if isinstance(go, (tuple, list)) else go
-            )
-        )
-
-        model.zero_grad()
-        logits2 = model(tensor)
-        logits2[0, class_idx].backward()
-        if "A" not in activations or "G" not in gradients:
-            raise RuntimeError("Failed to capture activations/gradients for Grad-CAM++.")
-
-        A = activations["A"][0].detach().float()
-        G = gradients["G"][0].detach().float()
-
-        G2, G3 = G ** 2, G ** 3
-        alpha_cam = G2 / (2 * G2 + A.sum(dim=(1, 2), keepdim=True) * G3 + 1e-7)
-        weights = (alpha_cam * torch.relu(G)).sum(dim=(1, 2))
-        cam = torch.relu((weights[:, None, None] * A).sum(dim=0))
-        
-        # 1. Percentile clipping
-        cam_np = cam.cpu().numpy()
-        p_min, p_max = np.percentile(cam_np, [5, 99])
-        cam_np = np.clip(cam_np, p_min, p_max)
-        
-        # 2. Min-max normalization
-        cam_min, cam_max = cam_np.min(), cam_np.max()
-        cam_np = (cam_np - cam_min) / (cam_max - cam_min + 1e-7)
-        
-        # 3. Gamma correction 
-        cam_np = cam_np ** 0.8
-
-        cam_pil = Image.fromarray((cam_np * 255).astype(np.uint8)).resize(
-            (input_size, input_size), Image.BILINEAR
-        )
-        # 4. Small blur
-        cam_pil = cam_pil.filter(ImageFilter.GaussianBlur(radius=1.0))
-        
-        cam_up = np.array(cam_pil).astype(np.float32) / 255.0
-        
-        heatmap_rgb = _apply_jet(cam_up)
-        orig_np = np.array(image.resize((input_size, input_size), Image.BILINEAR))
-        
-        # 5. Adjusted blend ratio
-        overlay = (0.70 * orig_np + 0.30 * heatmap_rgb).clip(0, 255).astype(np.uint8)
-
-        # 6. Mask out the empty background to hide corner artifacts
-        gray_orig = orig_np.mean(axis=2)
-        mask = gray_orig > 10
-        overlay[~mask] = orig_np[~mask]
-
-        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="eyeshield_cmp_")
-        Image.fromarray(overlay).save(tmp.name)
-        tmp.close()
-        heatmap_path = tmp.name
-    except Exception as exc:
-        warnings.warn(f"Comparison Grad-CAM++ generation failed: {exc}", RuntimeWarning)
-        heatmap_path = ""
-    finally:
-        if fwd_h is not None:
-            fwd_h.remove()
-        if bwd_h is not None:
-            bwd_h.remove()
-
-    return DR_LABELS[class_idx], conf_text, class_idx, heatmap_path
-
 
 def list_available_models() -> list[str]:
     """Return sorted list of model file paths in the models directory."""

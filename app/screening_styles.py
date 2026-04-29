@@ -3,6 +3,9 @@ Stylesheet constants for the screening module.
 Extracted to avoid duplication and improve maintainability.
 """
 
+# AI screening could not assign a reliable grade — must match model_inference.SYSTEM_UNCERTAIN_LABEL.
+_SYS_UNCERTAIN = "Uncertain — Specialist review required"
+
 # ── Per-grade clinical constants ──────────────────────────────────────────────
 DR_COLORS = {
     "No DR":              "#198754",
@@ -10,6 +13,7 @@ DR_COLORS = {
     "Moderate DR":        "#c1540a",
     "Severe DR":          "#dc3545",
     "Proliferative DR":   "#842029",
+    _SYS_UNCERTAIN:       "#b45309",
 }
 
 DR_RECOMMENDATIONS = {
@@ -18,6 +22,7 @@ DR_RECOMMENDATIONS = {
     "Moderate DR":      "Ophthalmology referral within 3 months",
     "Severe DR":        "Urgent ophthalmology referral",
     "Proliferative DR": "Immediate ophthalmology referral",
+    _SYS_UNCERTAIN: "Specialist ophthalmology review recommended (automated screening indeterminate).",
 }
 
 DR_SUMMARIES = {
@@ -46,6 +51,11 @@ DR_SUMMARIES = {
         "Proliferative diabetic retinopathy (PDR) was detected — a sight-threatening condition. "
         "Immediate ophthalmology referral is required for evaluation and potential intervention, "
         "such as laser photocoagulation or intravitreal anti-VEGF therapy."
+    ),
+    _SYS_UNCERTAIN: (
+        "Automated diabetic retinopathy screening did not yield a reliable ICDR severity grade for the submitted "
+        "fundus image. This outcome does not exclude disease. Specialist ophthalmology review is recommended for "
+        "clinical examination, independent image interpretation, and appropriate management."
     ),
 }
 
