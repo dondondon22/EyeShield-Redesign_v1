@@ -2536,6 +2536,7 @@ class ScreeningPage(QWidget):
         self.p_eye.setCurrentIndex(0)
         self.diabetes_type.setCurrentIndex(0)
         if hasattr(self, "diabetes_diagnosis_date"):
+            self.diabetes_diagnosis_date.setDate(self.min_diagnosis_date)
             self.diabetes_diagnosis_date.clear()
         self.diabetes_duration.setValue(0)
         # HbA1c removed from UI.
@@ -4386,6 +4387,7 @@ class ScreeningPage(QWidget):
             opposite_eye = "Left Eye" if current_eye == "Right Eye" else "Right Eye"
             self._set_eye_selection(opposite_eye)
             self.stacked_widget.setCurrentIndex(0)
+            self.clear_image()
             return
 
         current_eye = self.p_eye.currentText().strip()

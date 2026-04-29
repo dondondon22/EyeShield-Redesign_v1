@@ -2676,47 +2676,37 @@ class EyeShieldApp(QMainWindow):
         all_sessions = {}
         self._dash_db_error_text = ""
         try:
+            all_flat_records = []
             for pid_pk in emr.list_patient_ids_with_screenings():
                 timeline = emr.list_emr_timeline_records(int(pid_pk)) or []
-                for rec in timeline:
-                    # Use screening_group_id as the unique visit identifier (handles bilateral eyes)
-                    # Fallback to id // 10 for legacy/unlinked records
-                    group_key = rec.get("screening_group_id") or str(rec.get("id", 0) // 10)
-                    
-                    res_label = self._normalize_severity_label(rec.get("result", ""))
-                    # Rank severity to keep the worst eye result for the session summary
-                    ranks = {"Proliferative DR": 4, "Severe DR": 3, "Moderate DR": 2, "Mild DR": 1, "No DR": 0}
-                    res_rank = ranks.get(res_label, -1)
-                    
-                    if group_key not in all_sessions:
-                        all_sessions[group_key] = {
-                            "patient_id": str(rec.get("patient_id") or "").strip(),
-                            "name": str(rec.get("name") or "Unknown"),
-                            "contact": str(rec.get("contact") or rec.get("phone") or "—"),
-                            "result": rec.get("result") or "",
-                            "screened_at": str(rec.get("screened_at") or ""),
-                            "_rank": res_rank
-                        }
-                    else:
-                        if res_rank > all_sessions[group_key]["_rank"]:
-                            all_sessions[group_key]["result"] = rec.get("result") or ""
-                            all_sessions[group_key]["_rank"] = res_rank
+                all_flat_records.extend(timeline)
             
-            all_screenings = list(all_sessions.values())
+            all_screenings = group_patient_record_rows(all_flat_records)
+            # Ensure _rank is present for any dashboard sorting/filtering that depends on it
+            ranks = {"Proliferative DR": 4, "Severe DR": 3, "Moderate DR": 2, "Mild DR": 1, "No DR": 0}
+            for s in all_screenings:
+                s["_rank"] = ranks.get(self._normalize_severity_label(s.get("result", "")), -1)
         except Exception as err:
             self._dash_db_error_text = str(err)
             all_screenings = []
 
-        # Sort newest first
-        all_screenings.sort(key=lambda x: x["screened_at"], reverse=True)
-        total_count = len(all_screenings)
+        # Patient Records list shows each patient only once (latest screening).
+        # We match this logic for the dashboard KPIs to ensure consistency.
+        latest_by_patient = {}
+        for s in all_screenings:
+            pid = str(s.get("patient_id") or "").strip()
+            if pid and pid not in latest_by_patient:
+                latest_by_patient[pid] = s
+        
+        display_screenings = list(latest_by_patient.values())
+        total_count = len(display_screenings)
 
-        # Calculate metrics
+        # Calculate metrics using the deduped list
         this_month_count = 0
         high_risk_count = 0
         now_dt = datetime.now()
         
-        # Weekly data
+        # Weekly data (still use all_screenings for accurate daily activity trends)
         weekly_data = [0] * 7
         weekly_labels = []
         today_date = date.today()
@@ -2730,7 +2720,7 @@ class EyeShieldApp(QMainWindow):
                     count += 1
             weekly_data[6-i] = count
 
-        for s in all_screenings:
+        for s in display_screenings:
             # High risk check
             level = self._normalize_severity_label(s["result"])
             if level in ("Severe DR", "Proliferative DR"):

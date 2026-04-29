@@ -1795,11 +1795,20 @@ class EmrVisitsPage(QWidget):
         if not timeline:
             show_warning(self, "Compare Screenings", "No screening history found to compare.")
             return
-        if len(timeline) < 2:
-            show_warning(self, "Compare Screenings", "At least two screenings are required for comparison.")
+        
+        # Filter for completed screenings only (ignore pending/on-going sessions)
+        try:
+            from .reports import ScreeningComparisonDialog
+        except Exception:
+            from reports import ScreeningComparisonDialog
+            
+        completed = ScreeningComparisonDialog.filter_completed_screenings(timeline)
+        
+        if len(completed) < 2:
+            show_warning(self, "Compare Screenings", "At least two completed screenings are required for comparison.")
             return
         
-        dialog = ScreeningComparisonDialog(timeline, self)
+        dialog = ScreeningComparisonDialog(completed, self)
         apply_dialog_style(dialog)
         dialog.exec()
 

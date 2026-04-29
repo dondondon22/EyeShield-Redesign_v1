@@ -341,11 +341,7 @@ class TrustedHospitalsPage(QWidget):
         self.referral_hospitals_table.setShowGrid(False)
         self.referral_hospitals_table.setAlternatingRowColors(False)
         self.referral_hospitals_table.horizontalHeader().setStretchLastSection(False)
-        self.referral_hospitals_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.referral_hospitals_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.referral_hospitals_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.referral_hospitals_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.referral_hospitals_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.referral_hospitals_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.referral_hospitals_table.horizontalHeader().setMinimumSectionSize(90)
         self.referral_hospitals_table.setWordWrap(True)
         self.referral_hospitals_table.itemSelectionChanged.connect(self._sync_referral_action_buttons)
@@ -413,12 +409,24 @@ class TrustedHospitalsPage(QWidget):
 
             contact_item = QTableWidgetItem(str(item.get("contact_person") or ""))
             contact_item.setData(Qt.UserRole, int(item.get("id") or 0))
+            contact_item.setTextAlignment(Qt.AlignCenter)
             self.referral_hospitals_table.setItem(row_index, 0, contact_item)
             
-            self.referral_hospitals_table.setItem(row_index, 1, QTableWidgetItem(str(item.get("hospital_name") or "")))
-            self.referral_hospitals_table.setItem(row_index, 2, QTableWidgetItem(str(item.get("address") or "")))
-            self.referral_hospitals_table.setItem(row_index, 3, QTableWidgetItem(str(item.get("phone") or "")))
-            self.referral_hospitals_table.setItem(row_index, 4, QTableWidgetItem(str(item.get("email") or "")))
+            h_item = QTableWidgetItem(str(item.get("hospital_name") or ""))
+            h_item.setTextAlignment(Qt.AlignCenter)
+            self.referral_hospitals_table.setItem(row_index, 1, h_item)
+            
+            a_item = QTableWidgetItem(str(item.get("address") or ""))
+            a_item.setTextAlignment(Qt.AlignCenter)
+            self.referral_hospitals_table.setItem(row_index, 2, a_item)
+            
+            p_item = QTableWidgetItem(str(item.get("phone") or ""))
+            p_item.setTextAlignment(Qt.AlignCenter)
+            self.referral_hospitals_table.setItem(row_index, 3, p_item)
+            
+            e_item = QTableWidgetItem(str(item.get("email") or ""))
+            e_item.setTextAlignment(Qt.AlignCenter)
+            self.referral_hospitals_table.setItem(row_index, 4, e_item)
             
             # Apply alternating row background colors
             bg_color = QColor("#ffffff") if row_index % 2 == 0 else QColor("#f3f4f6")

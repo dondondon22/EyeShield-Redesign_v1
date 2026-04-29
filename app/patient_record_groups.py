@@ -112,7 +112,17 @@ def group_patient_record_rows(rows: list[dict]) -> list[dict]:
 
     for raw_row in rows or []:
         row = dict(raw_row or {})
-        group_id = str(row.get("screening_group_id") or "").strip() or f"record-{int(row.get('id') or 0)}"
+        group_id = str(row.get("screening_group_id") or "").strip()
+        if not group_id or group_id.startswith("screening-"):
+            # Robust grouping: same patient + same day = same visit
+            # This handles clinician-saves where each eye might get a fresh session ID
+            # if the form was reset between eyes.
+            day = str(row.get("screened_at") or row.get("screened_date") or "")[:10]
+            patient = str(row.get("patient_id") or "").strip()
+            if day and patient:
+                group_id = f"v-{patient}-{day}"
+            else:
+                group_id = group_id or f"record-{int(row.get('id') or 0)}"
         if group_id not in grouped:
             grouped[group_id] = []
             group_order.append(group_id)

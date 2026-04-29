@@ -179,11 +179,21 @@ def _timeline_sort_key(record: dict) -> tuple[datetime, int]:
 class ScreeningComparisonDialog(QDialog):
     def __init__(self, all_records: list[dict], parent=None):
         super().__init__(parent)
-        self.all_records = list(all_records or [])
-        # We always compare against the LATEST screening.
-        self.latest_record = self.all_records[-1]
-        # Initially, we compare against the one immediately before it.
-        self.previous_record = self.all_records[-2] if len(self.all_records) >= 2 else self.latest_record
+        # Filter for completed screenings only (ignore pending/on-going sessions)
+        self.all_records = [
+            rec for rec in (all_records or [])
+            if any(self._has_real_eye_payload(d) for d in (rec.get("eye_details") or []))
+        ]
+        
+        if not self.all_records:
+            # Fallback if no completed records found (should be caught by caller)
+            self.latest_record = {}
+            self.previous_record = {}
+        else:
+            # We always compare against the LATEST COMPLETED screening.
+            self.latest_record = self.all_records[-1]
+            # Initially, we compare against the one immediately before it.
+            self.previous_record = self.all_records[-2] if len(self.all_records) >= 2 else self.latest_record
         
         self.setWindowTitle("Compare Screenings")
         self.resize(1320, 960)
@@ -276,12 +286,18 @@ class ScreeningComparisonDialog(QDialog):
         self._eye_map_latest = self._build_eye_map(self.latest_record)
         self._eye_map_prev = self._build_eye_map(self.previous_record)
 
-        # Setup toggle enabling
-        has_od = "od" in self._eye_map_latest
-        has_os = "os" in self._eye_map_latest
+        # Setup toggle enabling: enable if eye exists ANYWHERE in history
+        available_sides = set()
+        for rec in self.all_records:
+            available_sides.update(self._build_eye_map(rec).keys())
+            
+        has_od = "od" in available_sides
+        has_os = "os" in available_sides
+        
         self._btn_od.setEnabled(has_od)
         self._btn_os.setEnabled(has_os)
         
+        # Default to OD if available, otherwise OS, otherwise OD.
         self._active_side = "od" if has_od else ("os" if has_os else "od")
         self._set_mode(self._active_side)
 
@@ -325,27 +341,25 @@ class ScreeningComparisonDialog(QDialog):
 
     @staticmethod
     def _has_real_eye_payload(detail: dict) -> bool:
-        """Heuristic: returns True when the eye detail is not just a placeholder."""
+        """Heuristic: returns True when the eye detail has actual screening media (images)."""
         if not isinstance(detail, dict) or not detail:
             return False
 
-        # Media paths are the strongest indicator.
+        # Media paths are the MANDATORY indicator for comparison.
+        # Ongoing sessions or pre-filled forms without images should be ignored.
         for k in ("source_image_path", "heatmap_image_path", "image_path", "fundus_image_path"):
             if str(detail.get(k) or "").strip():
                 return True
 
-        # Otherwise accept any meaningful model/diagnosis content.
-        for k in (
-            "final_diagnosis_icdr",
-            "doctor_classification",
-            "ai_classification",
-            "result",
-            "confidence",
-        ):
-            if str(detail.get(k) or "").strip():
-                return True
-
         return False
+
+    @classmethod
+    def filter_completed_screenings(cls, all_records: list[dict]) -> list[dict]:
+        """Utility to extract only records that have actual screening data."""
+        return [
+            rec for rec in (all_records or [])
+            if any(cls._has_real_eye_payload(d) for d in (rec.get("eye_details") or []))
+        ]
 
     @staticmethod
     def _trend_label(prev_sev: str, latest_sev: str) -> tuple[str, str]:
@@ -3171,9 +3185,12 @@ class ReportsPage(QWidget):
         )
 
     def _compare_latest_two_screenings(self, timeline_records: list[dict]):
-        ordered = sorted(list(timeline_records or []), key=_timeline_sort_key)
+        # Filter for completed screenings only
+        ordered = ScreeningComparisonDialog.filter_completed_screenings(
+            sorted(list(timeline_records or []), key=_timeline_sort_key)
+        )
         if len(ordered) < 2:
-            QMessageBox.information(self, "Compare Screenings", "At least two screenings are required for comparison.")
+            QMessageBox.information(self, "Compare Screenings", "At least two completed screenings are required for comparison.")
             return
 
         dialog = ScreeningComparisonDialog(ordered, self)

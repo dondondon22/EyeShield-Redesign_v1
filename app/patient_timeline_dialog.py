@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime
 from pathlib import Path
 import re
@@ -47,6 +48,21 @@ def _parse_dt(value: str) -> datetime | None:
 def _fmt_long(v: str) -> str:
     p = _parse_dt(v)
     return p.strftime("%B %d, %Y") if p else (str(v or "-") or "-")
+
+
+def _is_completed_visit(visit: dict) -> bool:
+    """Heuristic: a visit is only comparable if it has real fundus images."""
+    if not isinstance(visit, dict):
+        return False
+    eye_details = list(visit.get("eye_details") or [])
+    for d in eye_details:
+        if not isinstance(d, dict):
+            continue
+        # Media paths are mandatory for a valid 'completed' screening in comparison contexts.
+        for k in ("source_image_path", "heatmap_image_path", "image_path", "fundus_image_path"):
+            if str(d.get(k) or "").strip():
+                return True
+    return False
 
 def _fmt_short(v: str) -> str:
     p = _parse_dt(v)
@@ -396,8 +412,10 @@ class PatientTimelineDialog(QWidget):
                 )
                 # Match Patient Records compare behavior: always pass the full timeline list.
                 self._inline_compare_btn.clicked.connect(self._handle_compare)
-                self._apply_compare_enabled_state()
                 right_widgets.append(self._inline_compare_btn)
+            
+            # Ensure all compare buttons (inline or action card) are correctly enabled/disabled.
+            self._apply_compare_enabled_state()
             
             if self._show_actions:
                 # Only show the actions card when it contains any buttons.
@@ -422,9 +440,11 @@ class PatientTimelineDialog(QWidget):
 
     def _apply_compare_enabled_state(self) -> None:
         """Enable compare only when there are at least 2 screenings to compare."""
-        can_compare = len(list(self.timeline_records or [])) >= 2
+        # Only consider completed visits for the compare button
+        completed_count = sum(1 for r in (self.timeline_records or []) if _is_completed_visit(r))
+        can_compare = completed_count >= 2
         hint = (
-            "Compare requires at least two screening records."
+            "Compare requires at least two completed screening records."
             if not can_compare
             else "Compare screening history across visits."
         )
@@ -1411,12 +1431,14 @@ class PatientTimelineDialog(QWidget):
     def _handle_view_report(self):
         if callable(self._on_view_report): self._on_view_report(self._selected_record)
     def _handle_compare(self):
-        if len(list(self.timeline_records or [])) < 2:
+        # Filter for completed screenings before passing to the comparison handler.
+        completed = [r for r in (self.timeline_records or []) if _is_completed_visit(r)]
+        if len(completed) < 2:
             # Keep behavior consistent even if the button is triggered programmatically.
-            QMessageBox.information(self, "Compare Screenings", "At least two screenings are required for comparison.")
+            QMessageBox.information(self, "Compare Screenings", "At least two completed screenings are required for comparison.")
             return
         if callable(self._on_compare):
-            self._on_compare(self.timeline_records)
+            self._on_compare(completed)
     def _handle_export(self):
         if callable(self._on_export): self._on_export(self.timeline_records)
 
