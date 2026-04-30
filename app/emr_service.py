@@ -21,9 +21,11 @@ from PIL import Image
 try:
     from .auth import UserManager, get_connection
     from .activity_logger import log_action as log_activity
+    from .app_paths import PATIENT_RECORDS_DB_PATH
 except Exception:  # pragma: no cover
     from auth import UserManager, get_connection
     from activity_logger import log_action as log_activity
+    from app_paths import PATIENT_RECORDS_DB_PATH
 
 # -------------------- M5 configurable thresholds (named constants; env can override) --------------------
 BLUR_THRESHOLD = float(os.environ.get("EYESHIELD_BLUR_THRESHOLD", os.environ.get("EYESHIELD_QUALITY_BLUR_MIN", "100.0")))
@@ -218,34 +220,117 @@ def _next_patient_code_in_tx(cur: sqlite3.Cursor, *, year: Optional[int] = None)
     return f"{prefix}{(max_suffix + 1):05d}"
 
 
-def find_duplicate_patient(first_name: str, last_name: str, date_of_birth: str) -> Optional[dict[str, Any]]:
+def find_duplicate_patient(first_name: str, last_name: str, date_of_birth: str, middle_name: str = "") -> Optional[dict[str, Any]]:
     fn = (first_name or "").strip()
     ln = (last_name or "").strip()
+    mn = (middle_name or "").strip()
     dob = (date_of_birth or "").strip()[:10]
     if not fn or not ln or not dob:
         return None
+    
+    # 1. Check EMR (users.db)
     conn = _open_conn()
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT patient_id, patient_code, first_name, last_name, date_of_birth
-            FROM emr_patients
-            WHERE lower(trim(first_name)) = lower(trim(?)) AND lower(trim(last_name)) = lower(trim(?)) AND date_of_birth = ?
-            LIMIT 1
-            """,
-            (fn, ln, dob),
-        )
+        # Check with and without middle name in EMR
+        if mn:
+            cur.execute(
+                """
+                SELECT patient_id, patient_code, first_name, last_name, date_of_birth
+                FROM emr_patients
+                WHERE lower(trim(first_name)) = lower(trim(?)) 
+                  AND lower(trim(last_name)) = lower(trim(?))
+                  AND lower(trim(middle_name)) = lower(trim(?))
+                  AND date_of_birth = ?
+                LIMIT 1
+                """,
+                (fn, ln, mn, dob),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT patient_id, patient_code, first_name, last_name, date_of_birth
+                FROM emr_patients
+                WHERE lower(trim(first_name)) = lower(trim(?)) 
+                  AND lower(trim(last_name)) = lower(trim(?))
+                  AND date_of_birth = ?
+                LIMIT 1
+                """,
+                (fn, ln, dob),
+            )
         row = cur.fetchone()
-        if not row:
-            return None
-        return {
-            "patient_id": row[0],
-            "patient_code": row[1],
-            "first_name": row[2],
-            "last_name": row[3],
-            "date_of_birth": row[4],
-        }
+        if row:
+            return {
+                "patient_id": row[0],
+                "patient_code": row[1],
+                "first_name": row[2],
+                "last_name": row[3],
+                "date_of_birth": row[4],
+                "source": "emr"
+            }
+    finally:
+        conn.close()
+
+    # 2. Check Legacy (patient_records.db)
+    if os.path.exists(PATIENT_RECORDS_DB_PATH):
+        try:
+            conn_leg = sqlite3.connect(str(PATIENT_RECORDS_DB_PATH))
+            cur_leg = conn_leg.cursor()
+            
+            # Construct possible full name variants for legacy
+            name_variants = []
+            if mn:
+                name_variants.append(f"{fn} {mn} {ln}")
+                name_variants.append(f"{ln}, {fn} {mn}")
+            name_variants.append(f"{fn} {ln}")
+            name_variants.append(f"{ln}, {fn}")
+            
+            placeholders = ",".join(["?"] * len(name_variants))
+            cur_leg.execute(
+                f"""
+                SELECT patient_id, name, birthdate 
+                FROM patient_records 
+                WHERE lower(trim(name)) IN ({placeholders})
+                  AND birthdate = ? 
+                LIMIT 1
+                """,
+                (*[v.lower() for v in name_variants], dob)
+            )
+            row = cur_leg.fetchone()
+            if row:
+                return {
+                    "patient_id": row[0],
+                    "patient_code": row[0],
+                    "first_name": fn,
+                    "last_name": ln,
+                    "date_of_birth": row[2],
+                    "source": "legacy"
+                }
+        except Exception:
+            pass
+        finally:
+            conn_leg.close()
+
+    return None
+
+
+def has_visit_today(patient_id: Any) -> bool:
+    """
+    Check if a patient (identified by EMR int ID or Legacy string ID)
+    has an active or completed visit today.
+    """
+    vd = date.today().isoformat()
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        # patient_id in emr_queue_entries could be an int or a string 
+        # depending on how it was inserted for legacy patients.
+        cur.execute(
+            "SELECT COUNT(*) FROM emr_queue_entries WHERE (patient_id = ? OR CAST(patient_id AS TEXT) = ?) AND visit_date = ?",
+            (patient_id, str(patient_id), vd),
+        )
+        r = cur.fetchone()
+        return int(r[0] or 0) > 0
     finally:
         conn.close()
 
@@ -282,6 +367,38 @@ def find_patient_by_name_dob(first_name: str, last_name: str, date_of_birth: str
             return None
         cols = [d[0] for d in cur.description]
         return dict(zip(cols, row))
+    finally:
+        conn.close()
+
+
+def find_patients_by_identity(first_name: str, last_name: str, sex: str, address: str) -> list[dict[str, Any]]:
+    """
+    Search for patients with matching name, sex, and address.
+    Used for secondary identity verification in the front desk workflow.
+    """
+    fn = (first_name or "").strip()
+    ln = (last_name or "").strip()
+    s = (sex or "").strip()
+    addr = (address or "").strip()
+    if not fn or not ln:
+        return []
+    conn = _open_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT patient_id, first_name, last_name, sex, address, patient_code
+            FROM emr_patients
+            WHERE lower(trim(first_name)) = lower(trim(?))
+              AND lower(trim(last_name)) = lower(trim(?))
+              AND lower(trim(sex)) = lower(trim(?))
+              AND lower(trim(address)) = lower(trim(?))
+            """,
+            (fn, ln, s, addr),
+        )
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
     finally:
         conn.close()
 
@@ -351,18 +468,22 @@ def upsert_patient_by_name_dob(
         "contact_number": (contact_number or "").strip() or None,
         "email": (email or "").strip() or None,
         "address": (address or "").strip() or None,
-        "height_cm": height_cm,
-        "weight_kg": weight_kg,
-        "diabetes_type": (diabetes_type or "").strip() or None,
-        "dm_duration_years": dm_duration_years,
-        "hba1c": hba1c,
-        "current_medications": (current_medications or "").strip() or None,
-        "known_allergies": (known_allergies or "").strip() or None,
-        "other_conditions": (other_conditions or "").strip() or None,
-        "current_eye_treatment": (current_eye_treatment or "").strip() or None,
-        "previous_eye_treatment": (previous_eye_treatment or "").strip() or None,
-        "last_eye_exam_date": (last_eye_exam_date or "").strip() or None,
     }
+    if height_cm is not None and height_cm > 0:
+        fields["height_cm"] = height_cm
+    if weight_kg is not None and weight_kg > 0:
+        fields["weight_kg"] = weight_kg
+    
+    # Other clinical defaults (upsert only if non-empty)
+    if diabetes_type: fields["diabetes_type"] = (diabetes_type or "").strip() or None
+    if dm_duration_years is not None: fields["dm_duration_years"] = dm_duration_years
+    if hba1c is not None: fields["hba1c"] = hba1c
+    if current_medications: fields["current_medications"] = (current_medications or "").strip() or None
+    if known_allergies: fields["known_allergies"] = (known_allergies or "").strip() or None
+    if other_conditions: fields["other_conditions"] = (other_conditions or "").strip() or None
+    if current_eye_treatment: fields["current_eye_treatment"] = (current_eye_treatment or "").strip() or None
+    if previous_eye_treatment: fields["previous_eye_treatment"] = (previous_eye_treatment or "").strip() or None
+    if last_eye_exam_date: fields["last_eye_exam_date"] = (last_eye_exam_date or "").strip() or None
     # Best-effort update; if nothing changes, it's fine.
     update_patient_fields(pid, fields, acting_user_id, action="UPSERT_PATIENT_IDENTITY", target_type="patient")
     return pid, False
@@ -996,7 +1117,7 @@ def search_patients(query: str, limit: int = 50) -> list[dict[str, Any]]:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT patient_id, patient_code, last_name, first_name, date_of_birth, contact_number
+            SELECT patient_id, patient_code, last_name, first_name, date_of_birth, contact_number, height_cm, weight_kg, bmi
             FROM emr_patients
             WHERE patient_code LIKE ? OR last_name LIKE ? OR first_name LIKE ?
                 OR (ifnull(first_name,'') || ' ' || ifnull(last_name,'')) LIKE ?
@@ -1005,7 +1126,7 @@ def search_patients(query: str, limit: int = 50) -> list[dict[str, Any]]:
             """,
             (like, like, like, like, limit),
         )
-        cols = ["patient_id", "patient_code", "last_name", "first_name", "date_of_birth", "contact_number"]
+        cols = ["patient_id", "patient_code", "last_name", "first_name", "date_of_birth", "contact_number", "height_cm", "weight_kg", "bmi"]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
     finally:
         conn.close()
@@ -1615,9 +1736,9 @@ def list_emr_timeline_records(patient_id: int) -> list[dict[str, Any]]:
                     "doctor_findings": str(final_notes or doctor_notes or ""),
                     "source_image_path": str(fundus_path or ""),
                     "heatmap_image_path": str(grad_path or ""),
-                    "height": str((visit_details or {}).get("height_cm") or ""),
-                    "weight": str((visit_details or {}).get("weight_kg") or ""),
-                    "bmi": str((visit_details or {}).get("bmi") or ""),
+                    "height": str((visit_details or {}).get("height_cm") or patient.get("height_cm") or ""),
+                    "weight": str((visit_details or {}).get("weight_kg") or patient.get("weight_kg") or ""),
+                    "bmi": str((visit_details or {}).get("bmi") or patient.get("bmi") or ""),
                     "visual_acuity_left": str((visit_details or {}).get("visual_acuity_left") or ""),
                     "visual_acuity_right": str((visit_details or {}).get("visual_acuity_right") or ""),
                     "blood_pressure_systolic": str((visit_details or {}).get("blood_pressure_systolic") or ""),
@@ -2982,6 +3103,14 @@ def can_create_visit_for_patient(patient_id: int) -> tuple[bool, str]:
             f"{ex.get('queue_number', '')} (status: {ex.get('status', 'unknown')})."
         )
     return True, ""
+
+
+def has_visit_today(patient_id: int) -> bool:
+    """Return True if the patient has any queue entry for today (any status)."""
+    last = get_latest_queue_for_patient(patient_id)
+    if not last:
+        return False
+    return str(last.get("visit_date") or "") == date.today().isoformat()
 
 
 def can_cancel_visit(queue_id: int) -> tuple[bool, str]:

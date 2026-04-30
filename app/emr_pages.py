@@ -68,6 +68,11 @@ try:
 except Exception:
     from app_paths import PATIENT_RECORDS_DB_PATH
 
+try:
+    from .logic_improvements import DuplicateDetector, DuplicateDialog
+except Exception:
+    from logic_improvements import DuplicateDetector, DuplicateDialog
+
 LEGACY_DB_FILE = str(PATIENT_RECORDS_DB_PATH)
 
 
@@ -1033,6 +1038,7 @@ class EmrVisitsPage(QWidget):
         self._toast = EmrToast(self)
         self._au = QTimer(self)
         self._au.timeout.connect(self.refresh)
+        self._duplicate_detector = DuplicateDetector()
         if self._is_front():
             self._au.start(30_000)
         elif self._is_clinical():
@@ -1892,6 +1898,85 @@ class EmrVisitsPage(QWidget):
             show_warning(self, "Register", "Invalid date of birth.")
             return
         dob_s = d.toString("yyyy-MM-dd")
+        phone = self.in_phone.text().strip()
+
+        # 1. Check for Exact Duplicate Identity
+        existing = emr.find_duplicate_patient(first, last, dob_s, middle)
+        if existing:
+            pid_val = existing["patient_id"] # Safe to keep as string if legacy
+            if emr.has_visit_today(pid_val):
+                show_warning(
+                    self,
+                    "Duplicate Visit",
+                    f"Patient '{first} {last}' already has a visit recorded for today."
+                )
+                return
+            else:
+                # Prompt for historical exact match
+                box = QMessageBox(self)
+                apply_dialog_style(box)
+                box.setWindowTitle("Duplicate Record Notification")
+                box.setIcon(QMessageBox.Icon.Question)
+                box.setText(f"<b>Potential Duplicate Detected:</b> A patient profile for <b>{first} {last}</b> with the same birthdate already exists in the database.")
+                box.setInformativeText(
+                    "Please confirm: Is this a <b>distinct individual</b> from the existing record, or the same person?<br><br>"
+                    "<i>Select 'Proceed' to update and reuse the existing record, or 'Cancel' to review the entry.</i>"
+                )
+                same_btn = box.addButton("Proceed as Same Individual", QMessageBox.ButtonRole.AcceptRole)
+                diff_btn = box.addButton("Confirm Distinct Individual", QMessageBox.ButtonRole.ActionRole)
+                cancel_btn = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+                box.setDefaultButton(same_btn)
+                box.exec()
+                
+                if box.clickedButton() == cancel_btn:
+                    return
+                # If 'Confirm Distinct Individual' or 'Proceed as Same Individual', we proceed.
+                # Note: Currently system merges by Name/DOB, so 'Distinct' will still merge.
+        else:
+            # 2. Check for Fuzzy Match (catching typos)
+            match = self._duplicate_detector.find_duplicate(
+                name=f"{first} {last}",
+                dob=dob_s,
+                contact=phone
+            )
+            if match and match.get("patient_id"):
+                res = DuplicateDialog(match, self).exec()
+                if res == DuplicateDialog.USE_EXISTING:
+                    pid_val = match["patient_id"]
+                    if emr.has_visit_today(pid_val):
+                        show_warning(
+                            self,
+                            "Duplicate Visit",
+                            "This patient already has a visit recorded for today."
+                        )
+                        return
+                    # We will proceed to upsert/reuse this ID below.
+        
+        # 3. Secondary Identity Check (Name, Sex, Address) - Catching variants with different DOB/Contact
+        sex = self.in_sex.currentText()
+        address = self.in_address.text().strip()
+        identity_matches = emr.find_patients_by_identity(first, last, sex, address)
+        for im in identity_matches:
+            if emr.has_visit_today(int(im["patient_id"])):
+                box = QMessageBox(self)
+                apply_dialog_style(box)
+                box.setWindowTitle("Identity Verification Required")
+                box.setIcon(QMessageBox.Icon.Warning)
+                box.setText(f"<b>Clinical Alert:</b> A patient with matching demographic identifiers (Name, Sex, and Address) is currently in the patient queue.")
+                box.setInformativeText(
+                    f"Identified patient: <b>{first} {last}</b>.<br><br>"
+                    "Please verify the clinical record and confirm if this is a <b>distinct individual</b> before proceeding with a new registration."
+                )
+                diff_btn = box.addButton("Confirm Distinct Individual", QMessageBox.ButtonRole.AcceptRole)
+                cancel_btn = box.addButton("Cancel Registration", QMessageBox.ButtonRole.RejectRole)
+                box.setDefaultButton(cancel_btn)
+                box.exec()
+                
+                if box.clickedButton() == cancel_btn:
+                    return
+                else:
+                    break # User confirmed distinct individual, allow loop to finish and proceed.
+
         last_eye_exam_raw = self.in_last_eye_exam.text().strip()
         if last_eye_exam_raw:
             parsed = QDate.fromString(last_eye_exam_raw, "yyyy-MM-dd")
@@ -1906,7 +1991,7 @@ class EmrVisitsPage(QWidget):
                 middle_name=self.in_middle.text().strip(),
                 date_of_birth=dob_s,
                 sex=self.in_sex.currentText(),
-                contact_number=self.in_phone.text().strip(),
+                contact_number=phone,
                 email=self.in_email.text().strip(),
                 address=self.in_address.text().strip(),
                 height_cm=self.in_height.value() or None,
@@ -2077,6 +2162,9 @@ class EmrVisitsPage(QWidget):
             f"Name: {name or '-'}\n"
             f"DOB: {p.get('date_of_birth', '-')}\n"
             f"Sex: {p.get('sex', '-')}\n"
+            f"Height: {p.get('height_cm', '-')}\n"
+            f"Weight: {p.get('weight_kg', '-')}\n"
+            f"BMI: {p.get('bmi', '-')}\n"
             f"Contact: {p.get('contact_number', '-')}\n"
             f"Address: {p.get('address', '-')}"
         )
