@@ -429,6 +429,7 @@ _PAGE_STYLE = """
     }
     QLineEdit, QComboBox {
         background: #ffffff;
+        color: #111827;
         border: 1px solid #ced4da;
         border-radius: 8px;
         padding: 8px 10px;
@@ -437,6 +438,7 @@ _PAGE_STYLE = """
     QLineEdit:focus, QComboBox:focus { border: 1.5px solid #0d6efd; }
     QTableWidget {
         background: #ffffff;
+        color: #111827;
         gridline-color: #ecf0f4;
         border: 1px solid #e3e8ef;
         border-radius: 10px;
@@ -745,6 +747,7 @@ _ACTIVITY_LOG_STYLE = """
     }
     QTableWidget#usrActivityTable {
         background: #ffffff;
+        color: #1a1a1a;
         border: none;
         gridline-color: transparent;
         font-size: 13px;
@@ -868,6 +871,7 @@ _ACTIVITY_LOG_STYLE = """
     }
     QTableWidget#usrUsersTable {
         background: #ffffff;
+        color: #1a1a1a;
         border: none;
         gridline-color: transparent;
         font-size: 13px;

@@ -1208,31 +1208,31 @@ class ScreeningComparisonDialog(QDialog):
         layout.setContentsMargins(16, 18, 16, 14)
         layout.setSpacing(12)
 
-        notes_k = QLabel("DOCTOR NOTES")
-        notes_k.setStyleSheet("font-size:10px;font-weight:900;color:#64748b;letter-spacing:1.1px;background:transparent;border:none;")
-        layout.addWidget(notes_k)
+        optional_k = QLabel("OPTIONAL COMMENTS")
+        optional_k.setStyleSheet("font-size:10px;font-weight:900;color:#64748b;letter-spacing:1.1px;background:transparent;border:none;")
+        layout.addWidget(optional_k)
 
-        self._ctx_notes = QTextEdit()
-        self._ctx_notes.setReadOnly(True)
-        self._ctx_notes.setPlaceholderText("No notes available for this screening.")
-        self._ctx_notes.setMinimumHeight(160)
-        self._ctx_notes.setStyleSheet(
+        self._ctx_optional = QTextEdit()
+        self._ctx_optional.setReadOnly(True)
+        self._ctx_optional.setPlaceholderText("No optional comments available.")
+        self._ctx_optional.setMinimumHeight(160)
+        self._ctx_optional.setStyleSheet(
             "QTextEdit{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:10px;"
             "font-size:12px;color:#0f172a;}"
         )
-        layout.addWidget(self._ctx_notes, 1)
+        layout.addWidget(self._ctx_optional, 1)
 
-        next_k = QLabel("NEXT STEPS")
-        next_k.setStyleSheet("font-size:10px;font-weight:900;color:#64748b;letter-spacing:1.1px;background:transparent;border:none;")
-        layout.addWidget(next_k)
+        override_k = QLabel("OVERRIDE COMMENTS")
+        override_k.setStyleSheet("font-size:10px;font-weight:900;color:#64748b;letter-spacing:1.1px;background:transparent;border:none;")
+        layout.addWidget(override_k)
 
-        self._ctx_next = QLabel("—")
-        self._ctx_next.setWordWrap(True)
-        self._ctx_next.setStyleSheet(
-            "background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:10px;"
-            "font-size:12px;color:#0c4a6e;font-weight:600;"
+        self._ctx_override = QLabel("—")
+        self._ctx_override.setWordWrap(True)
+        self._ctx_override.setStyleSheet(
+            "background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px;"
+            "font-size:12px;color:#334155;"
         )
-        layout.addWidget(self._ctx_next, 0)
+        layout.addWidget(self._ctx_override, 0)
         return panel
 
     def _build_diagnosis_card(self) -> QFrame:
@@ -1569,25 +1569,16 @@ class ScreeningComparisonDialog(QDialog):
         self._set_metric_bar(self._unc_row, "Uncertainty", unc_pct, "#f59e0b")
 
         # Clinical context (right sidebar)
-        eye_label = str(chosen.get("eye_label") or chosen.get("eyes") or "Eye").strip() or "Eye"
         doctor_notes = str(chosen.get("doctor_findings") or chosen.get("notes") or "").strip()
         override_reason = str(chosen.get("override_justification") or "").strip()
         accepted_raw = chosen.get("doctor_accepted_ai")
         accepted = str(accepted_raw).strip().lower() in {"1", "true", "yes"}
 
-        ctx_lines: list[str] = []
-        ctx_lines.append("Doctor Notes")
-        ctx_lines.append(doctor_notes if doctor_notes else "—")
-        ctx_lines.append("")
-        ctx_lines.append(f"{eye_label}:")
-        ctx_lines.append("")
-        ctx_lines.append("Override Justification Notes:")
+        self._ctx_optional.setPlainText(doctor_notes if doctor_notes else "No optional comments recorded.")
         if accepted:
-            ctx_lines.append("Doctor Accepted AI Result")
+            self._ctx_override.setText("Doctor Accepted AI Result")
         else:
-            ctx_lines.append(override_reason if override_reason else "—")
-        self._ctx_notes.setPlainText("\n".join(ctx_lines).strip())
-        self._ctx_next.setText(self._build_next_steps_text(result))
+            self._ctx_override.setText(override_reason if override_reason else "—")
 
         self._set_preview_image(self.source_preview, chosen.get("source_image_path"), "Fundus image unavailable")
         self._set_preview_image(self.heatmap_preview, chosen.get("heatmap_image_path"), "Grad-CAM unavailable")

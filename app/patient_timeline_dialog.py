@@ -947,23 +947,23 @@ class PatientTimelineDialog(QWidget):
     def _build_context_card(self) -> QWidget:
         card, v = self._card("Clinical Context")
 
-        notes_title = QLabel("Doctor Notes")
-        notes_title.setStyleSheet("font-size:11px;font-weight:600;color:#374151;")
-        self.notes_lbl = QLabel("-")
-        self.notes_lbl.setWordWrap(True)
-        self.notes_lbl.setStyleSheet("font-size:11px;color:#4b5563;font-weight:400;")
+        override_title = QLabel("Override Comments")
+        override_title.setStyleSheet("font-size:11px;font-weight:600;color:#374151;")
+        self.override_lbl = QLabel("-")
+        self.override_lbl.setWordWrap(True)
+        self.override_lbl.setStyleSheet("font-size:11px;color:#4b5563;font-weight:400;")
 
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setStyleSheet("background:#f1f5f9;max-height:1px;border:none;")
 
-        steps_title = QLabel("Next Steps")
-        steps_title.setStyleSheet("font-size:11px;font-weight:600;color:#374151;")
-        self.next_lbl = QLabel("-")
-        self.next_lbl.setWordWrap(True)
-        self.next_lbl.setStyleSheet("font-size:11px;color:#4b5563;font-weight:400;")
+        optional_title = QLabel("Optional Comments")
+        optional_title.setStyleSheet("font-size:11px;font-weight:600;color:#374151;")
+        self.notes_lbl = QLabel("-")
+        self.notes_lbl.setWordWrap(True)
+        self.notes_lbl.setStyleSheet("font-size:11px;color:#4b5563;font-weight:400;")
 
-        for w in (notes_title, self.notes_lbl, sep, steps_title, self.next_lbl):
+        for w in (override_title, self.override_lbl, sep, optional_title, self.notes_lbl):
             v.addWidget(w)
         return card
 
@@ -1139,10 +1139,9 @@ class PatientTimelineDialog(QWidget):
         self.unc_row[2].setValue( int(max(0, min(100, unc)))  if unc  is not None else 0)
 
         notes = str(detail_record.get("doctor_findings") or detail_record.get("notes") or "-").strip() or "-"
-        if len(record.get("eye_details") or []) > 1:
-            notes = f"{detail_record.get('eye_label') or 'Eye'}\n{notes}"
+        override = str(detail_record.get("override_justification") or "-").strip() or "-"
         self.notes_lbl.setText(notes)
-        self.next_lbl.setText(self._next_steps(severity))
+        self.override_lbl.setText(override)
 
         # Patient info
         self._si("name",       name)
