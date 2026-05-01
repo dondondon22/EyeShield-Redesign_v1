@@ -763,7 +763,7 @@ class PatientTimelineDialog(QWidget):
             ("duration",           "Duration"),
             ("diagnosed_date",     "Diagnosed Date"),
             ("treatment_regimen",  "Treatment Regimen"),
-            ("prev_dr_stage",      "Prev DR"),
+            ("prev_dr_stage",      "Family History of Diabetes"),
         ]:
             row_w, val_lbl = self._kv(label)
             self.history_rows[key] = val_lbl

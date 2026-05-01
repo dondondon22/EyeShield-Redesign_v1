@@ -367,14 +367,14 @@ class DoctorDiagnosisForm(QWidget):
         grid.setVerticalSpacing(8)
 
         left_fields = [
-            ("diabetes_type",    "DM Type"),
-            ("diagnosis_date",   "Dx Date"),
-            ("dm_duration_years","DM Duration"),
+            ("diabetes_type",    "Diabetes Type"),
+            ("diagnosis_date",   "Diagnosis Date"),
+            ("dm_duration_years","Duration"),
         ]
         right_fields = [
             ("treatment_regimen","Regimen"),
-            ("prev_dr_stage",    "Prev DR Stage"),
-            ("prev_treatment",   "Prev Treatment"),
+            ("prev_dr_stage",    "Family History of Diabetes"),
+ 
         ]
 
         for i, (key, label) in enumerate(left_fields):
@@ -696,7 +696,6 @@ class DoctorDiagnosisForm(QWidget):
                 "dm_duration_years":dm_txt,
                 "treatment_regimen":treatment_regimen,
                 "prev_dr_stage":    prev_dr_stage,
-                "prev_treatment":   prev_txt,
             }
             for key, val in updates.items():
                 if key in self._ch:
@@ -831,16 +830,13 @@ class DoctorDiagnosisForm(QWidget):
                 blank_values={""},
             )
 
-        in_prev_treatment = QCheckBox("Previous DR Treatment")
-        in_prev_treatment.setChecked(
-            bool(getattr(getattr(self.screening, "prev_treatment", None), "isChecked", lambda: False)())
-        )
+   
 
         form.addRow("Diabetes type", in_dm_type)
         form.addRow("Diagnosis date", in_diagnosis_date)
         form.addRow("Treatment regimen", in_treatment_regimen)
-        form.addRow("Previous DR stage", in_prev_dr_stage)
-        form.addRow("", in_prev_treatment)
+        form.addRow("Family History of Diabetes", in_prev_dr_stage)
+ 
         lay.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -859,7 +855,6 @@ class DoctorDiagnosisForm(QWidget):
                 "date_of_birth":         in_dob.date().toString("yyyy-MM-dd") if in_dob.date().isValid() else None,
                 "sex":                   in_sex.currentText().strip() or None,
                 "contact_number":        in_contact.text().strip() or None,
-                "previous_eye_treatment":("Laser/Injection" if in_prev_treatment.isChecked() else None),
             }
             original_emr = {
                 "first_name":            str(p.get("first_name") or "").strip() or None,
@@ -867,7 +862,6 @@ class DoctorDiagnosisForm(QWidget):
                 "date_of_birth":         str(p.get("date_of_birth") or "").strip() or None,
                 "sex":                   str(p.get("sex") or "").strip() or None,
                 "contact_number":        str(p.get("contact_number") or "").strip() or None,
-                "previous_eye_treatment":str(p.get("previous_eye_treatment") or "").strip() or None,
             }
             emr_dirty = original_emr != fields
             if emr_dirty:
@@ -896,7 +890,6 @@ class DoctorDiagnosisForm(QWidget):
                     "diabetes_diagnosis_date":  in_diagnosis_date.date().toString("dd/MM/yyyy") if in_diagnosis_date.date() != QDate(1900, 1, 1) else None,
                     "treatment_regimen":        in_treatment_regimen.currentText().strip() or None,
                     "prev_dr_stage":            in_prev_dr_stage.currentText().strip() or None,
-                    "prev_treatment":           "Yes" if in_prev_treatment.isChecked() else "No",
                     "height_cm":                float(in_height.value()) if in_height.value() > 0 else None,
                     "weight_kg":                float(in_weight.value()) if in_weight.value() > 0 else None,
                 }

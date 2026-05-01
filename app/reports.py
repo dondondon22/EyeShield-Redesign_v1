@@ -742,7 +742,7 @@ class ScreeningComparisonDialog(QDialog):
         vl.addWidget(self._info_row("VA (Left)", pt.get("visual_acuity_left")))
         vl.addWidget(self._info_row("VA (Right)", pt.get("visual_acuity_right")))
 
-        # ── Clinical History ──
+        # ── Diabetic History ──
         prev_tx = "Yes" if _is_truthy_flag(pt.get("prev_treatment")) else "No"
         vl.addWidget(self._section_header("📋  DIABETIC HISTORY"))
         vl.addWidget(self._info_row("Diabetes Type", pt.get("diabetes_type")))
@@ -750,8 +750,8 @@ class ScreeningComparisonDialog(QDialog):
         vl.addWidget(self._info_row("Duration", pt.get("duration")))
         vl.addWidget(self._info_row("HbA1c", f"{pt.get('hba1c')}%" if pt.get("hba1c") else None))
         vl.addWidget(self._info_row("Treatment", pt.get("treatment_regimen")))
-        vl.addWidget(self._info_row("Prev DR Stage", pt.get("prev_dr_stage")))
-        vl.addWidget(self._info_row("Prev DR Tx", prev_tx))
+        vl.addWidget(self._info_row("Family History of Diabetes", pt.get("prev_dr_stage")))
+    
 
         # ── Symptoms ──
         syms = []
@@ -1537,7 +1537,7 @@ class PatientDetailsDialog(QDialog):
         add_field("Diagnosed Date", str(patient_record.get("diabetes_diagnosis_date") or "N/A"))
         add_field("Duration", str(patient_record.get("duration") or "N/A"))
         add_field("Treatment Regimen", str(patient_record.get("treatment_regimen") or "N/A"))
-        add_field("Prev DR", str(patient_record.get("prev_dr_stage") or "N/A"))
+        add_field("Family History of Diabetes", str(patient_record.get("prev_dr_stage") or "N/A"))
         
         # Screening Result Section
         add_section("Screening Result")
@@ -1649,7 +1649,7 @@ class ReferralDetailDialog(QDialog):
         add_field("Duration", str(patient_record.get("duration") or "N/A"))
         add_field("Diagnosed Date", str(patient_record.get("diabetes_diagnosis_date") or "N/A"))
         add_field("Treatment Regimen", str(patient_record.get("treatment_regimen") or "N/A"))
-        add_field("Prev DR", str(patient_record.get("prev_dr_stage") or "N/A"))
+        add_field("Family History of Diabetes", str(patient_record.get("prev_dr_stage") or "N/A"))
 
         add_section("Screening Result")
         add_field("AI Classification", str(patient_record.get("ai_classification") or patient_record.get("result") or "N/A"))
@@ -4075,8 +4075,7 @@ class ReportsPage(QWidget):
   {field_row("Duration", dur_disp)}
   {field_row("HbA1c", esc(full.get("hba1c")))}
   {field_row("Treatment Regimen", treatment_regimen_disp)}
-  {field_row("Previous DR Stage", prev_dr_stage_disp)}
-  {field_row("Previous DR Treatment", esc(full.get("prev_treatment")), False)}
+  {field_row("Family History of Diabetes", prev_dr_stage_disp, False)}
   </table>
 
   {sec("Vital Signs")}

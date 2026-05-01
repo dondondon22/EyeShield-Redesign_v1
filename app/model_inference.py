@@ -467,19 +467,20 @@ def generate_heatmap(image_path: str, class_idx: int) -> str:
         # 3. Gamma correction to make hotspots punchier
         cam_np = cam_np ** 0.8
 
+        orig_size = image.size  # (width, height)
         cam_pil = Image.fromarray((cam_np * 255).astype(np.uint8)).resize(
-            (_model_input_size, _model_input_size), Image.BILINEAR
+            orig_size, Image.BILINEAR
         )
         # 4. Small blur for smoother overlay
-        cam_pil = cam_pil.filter(ImageFilter.GaussianBlur(radius=1.0))
+        cam_pil = cam_pil.filter(ImageFilter.GaussianBlur(radius=1.5))
         
         cam_up = np.array(cam_pil).astype(np.float32) / 255.0
 
         heatmap_rgb = _apply_jet(cam_up)
-        orig_np = np.array(image.resize((_model_input_size, _model_input_size), Image.BILINEAR))
+        orig_np = np.array(image)
         
-        # 5. Adjusted blend ratio for better readability (less intense heatmap)
-        overlay = (0.70 * orig_np + 0.30 * heatmap_rgb).clip(0, 255).astype(np.uint8)
+        # 5. Adjusted blend ratio for better readability
+        overlay = (0.75 * orig_np + 0.25 * heatmap_rgb).clip(0, 255).astype(np.uint8)
 
         # 6. Mask out the empty background to hide corner artifacts
         gray_orig = orig_np.mean(axis=2)

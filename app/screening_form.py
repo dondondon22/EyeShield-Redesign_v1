@@ -59,7 +59,7 @@ try:
     from . import emr_service as emr
     from .safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
     from .ui_feedback import apply_dialog_style
-    from .model_inference import SYSTEM_UNCERTAIN_LABEL
+    from .model_inference import SYSTEM_UNCERTAIN_LABEL, check_image_quality, ImageUngradableError
 except ImportError:
     from screening_styles import (
         SCREENING_PAGE_STYLE,
@@ -84,7 +84,7 @@ except ImportError:
     import emr_service as emr
     from safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
     from ui_feedback import apply_dialog_style
-    from model_inference import SYSTEM_UNCERTAIN_LABEL
+    from model_inference import SYSTEM_UNCERTAIN_LABEL, check_image_quality, ImageUngradableError
 except Exception:
     pass
 
@@ -1063,9 +1063,9 @@ class ScreeningPage(QWidget):
         # Previous DR stage dropdown
         self.prev_dr_stage = QComboBox()
         self.prev_dr_stage.setObjectName("prevDRStageDropdown")
-        self.prev_dr_stage.addItems(["", "No previous DR", "Mild NPDR", "Moderate NPDR", "Severe NPDR", "PDR (Proliferative)", "Unknown"])
+        self.prev_dr_stage.addItems(["", "Yes", "No", "Unknown"])
         self._apply_visible_dropdown_style(self.prev_dr_stage)
-        c2.addLayout(row2(field("Duration", self.diabetes_duration, "scr_label_duration"), field("Previous DR Stage", self.prev_dr_stage, "scr_label_prev_dr")))
+        c2.addLayout(row2(field("Duration", self.diabetes_duration, "scr_label_duration"), field("Family History of Diabetes", self.prev_dr_stage, "scr_label_prev_dr")))
 
         # Treatment regimen dropdown
         self.treatment_regimen = QComboBox()
@@ -1431,7 +1431,7 @@ class ScreeningPage(QWidget):
             "diabetes_diagnosis_date": self._get_diagnosis_date().toString("dd/MM/yyyy") if self._get_diagnosis_date().isValid() else None,
             "treatment_regimen": (self.treatment_regimen.currentText().strip() if hasattr(self, "treatment_regimen") else "") or None,
             "prev_dr_stage": (self.prev_dr_stage.currentText().strip() if hasattr(self, "prev_dr_stage") else "") or None,
-            "prev_treatment": "Yes" if bool(getattr(getattr(self, "prev_treatment", None), "isChecked", lambda: False)()) else "No",
+            "diabetes_type": self.diabetes_type.currentText(),
             "symptom_blurred_vision": 1 if getattr(self, "symptom_blurred", None) and self.symptom_blurred.isChecked() else 0,
             "symptom_floaters": 1 if getattr(self, "symptom_floaters", None) and self.symptom_floaters.isChecked() else 0,
             "symptom_flashes": 1 if getattr(self, "symptom_flashes", None) and self.symptom_flashes.isChecked() else 0,
@@ -2044,9 +2044,9 @@ class ScreeningPage(QWidget):
         clinical_form.addRow("Duration:", self.diabetes_duration)
 
         self.clinical_prev_dr_stage = QComboBox()
-        self.clinical_prev_dr_stage.addItems(["Select", "No previous DR", "Mild NPDR", "Moderate NPDR", "Severe NPDR", "PDR (Proliferative)", "Unknown"])
+        self.clinical_prev_dr_stage.addItems(["", "Yes", "No", "Unknown"])
         self._apply_visible_dropdown_style(self.clinical_prev_dr_stage)
-        clinical_form.addRow("Previous DR Stage:", self.clinical_prev_dr_stage)
+        clinical_form.addRow("Family History of Diabetes:", self.clinical_prev_dr_stage)
 
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(80)
@@ -2459,7 +2459,8 @@ class ScreeningPage(QWidget):
         # Editable in follow-up mode: height and weight only.
         _set_ro("height", False)
         _set_ro("weight", False)
-        _set_enabled("prev_dr_stage", False if is_follow_up_locked else True)
+        _set_enabled("prev_dr_stage", True)
+        _set_enabled("clinical_prev_dr_stage", True)
 
         # Identity and demographics
         _set_ro("p_first_name", is_follow_up_locked)
@@ -2485,8 +2486,6 @@ class ScreeningPage(QWidget):
         _set_ro("diabetes_diagnosis_date", False)
         # HbA1c removed from UI.
         _set_enabled("treatment_regimen", True)
-        if hasattr(self, "prev_treatment"):
-            self.prev_treatment.setEnabled(True)
 
         # Vitals, symptoms, notes
         _set_ro("va_left", is_follow_up_locked)
@@ -2571,8 +2570,6 @@ class ScreeningPage(QWidget):
             self.diabetes_diagnosis_date.clear()
         self.diabetes_duration.setValue(0)
         # HbA1c removed from UI.
-        if hasattr(self, "prev_treatment"):
-            self.prev_treatment.setChecked(False)
         if hasattr(self, "va_left"):
             self.va_left.clear()
         if hasattr(self, "va_right"):
@@ -2681,7 +2678,7 @@ class ScreeningPage(QWidget):
             # Use exact same query as generate_report's _fetch_full_record
             cur.execute("""
                 SELECT id, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
-                       diabetes_type, duration, hba1c, prev_treatment, notes,
+                       diabetes_type, duration, hba1c, notes,
                        result, confidence, screened_at,
                        ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
                        visual_acuity_left, visual_acuity_right,
@@ -2704,7 +2701,7 @@ class ScreeningPage(QWidget):
 
             # Map row tuple to values by position (matching query order)
             (id_val, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
-             diabetes_type, duration, hba1c, prev_treatment, notes,
+             diabetes_type, duration, hba1c, notes,
              result, confidence, screened_at,
              ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
              va_left, va_right,
@@ -2788,14 +2785,6 @@ class ScreeningPage(QWidget):
                 self.diabetes_duration.setValue(0)
 
             # HbA1c removed from UI.
-
-            # Safe prev_treatment boolean
-            try:
-                if hasattr(self, "prev_treatment"):
-                    self.prev_treatment.setChecked(bool(prev_treatment and str(prev_treatment).lower() in ("yes", "true", "1")))
-            except Exception:
-                if hasattr(self, "prev_treatment"):
-                    self.prev_treatment.setChecked(False)
 
             # Mapping for newly added fields
             try:
@@ -3281,6 +3270,13 @@ class ScreeningPage(QWidget):
         self._current_eye_saved = False
         eye_label = self.p_eye.currentText()
 
+        # Pre-check image quality to avoid the "page flicker" if the image is ungradable.
+        try:
+            check_image_quality(self.current_image)
+        except ImageUngradableError as exc:
+            self._on_image_ungradable(str(exc))
+            return
+
         # Show the results page immediately with a loading state
         self.results_page.set_results(
             self.p_name.text(),
@@ -3459,7 +3455,7 @@ class ScreeningPage(QWidget):
             "age":            self.p_age.value(),
             "hba1c":          0.0,
             "duration":       self.diabetes_duration.value(),
-            "prev_treatment": bool(getattr(getattr(self, "prev_treatment", None), "isChecked", lambda: False)()),
+            "prev_dr_stage": self.prev_dr_stage.currentText(),
             "diabetes_type":  self.diabetes_type.currentText(),
             "eye":            self.p_eye.currentText(),
             # Vital signs
@@ -3483,7 +3479,6 @@ class ScreeningPage(QWidget):
         return has_result and not self._current_eye_saved
 
     def _draft_payload(self) -> dict:
-        prev_treatment_checked = bool(getattr(getattr(self, "prev_treatment", None), "isChecked", lambda: False)())
         return {
             "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "patient_id": self.p_id.text().strip(),
@@ -3499,7 +3494,6 @@ class ScreeningPage(QWidget):
             "diagnosis_date": self._get_diagnosis_date().toString("dd/MM/yyyy") if self._get_diagnosis_date().isValid() else "",
             "duration": self.diabetes_duration.value(),
             "hba1c": 0.0,
-            "prev_treatment": prev_treatment_checked,
             "va_left": self.va_left.text().strip() if hasattr(self, "va_left") else "",
             "va_right": self.va_right.text().strip() if hasattr(self, "va_right") else "",
             "bp_systolic": self.bp_systolic.value() if hasattr(self, "bp_systolic") else 0,
@@ -3595,8 +3589,6 @@ class ScreeningPage(QWidget):
                 self.diabetes_diagnosis_date.setDate(self.min_diagnosis_date)
         self.diabetes_duration.setValue(int(data.get("duration") or 0))
         # HbA1c removed from UI.
-        if hasattr(self, "prev_treatment"):
-            self.prev_treatment.setChecked(bool(data.get("prev_treatment")))
 
         if hasattr(self, "va_left"):
             self.va_left.setText(str(data.get("va_left") or ""))
@@ -3816,7 +3808,7 @@ class ScreeningPage(QWidget):
                 """
                 UPDATE patient_records SET
                     patient_id = ?, name = ?, birthdate = ?, age = ?, sex = ?, contact = ?, phone = ?, email = ?, address = ?, eyes = ?,
-                    diabetes_type = ?, duration = ?, hba1c = ?, prev_treatment = ?, notes = ?,
+                    diabetes_type = ?, duration = ?, notes = ?,
                     result = ?, confidence = ?, screened_at = ?,
                     ai_classification = ?, doctor_classification = ?, decision_mode = ?, override_justification = ?,
                     final_diagnosis_icdr = ?, doctor_findings = ?, decision_by_username = ?, decision_at = ?,
@@ -3864,14 +3856,6 @@ class ScreeningPage(QWidget):
         # ------------------------------------------------------------------
         # EMR-backed clinician flow (Doctor Queue Mode)
         # ------------------------------------------------------------------
-        # When this ScreeningPage is launched from the EMR queue, the screening
-        # session and visit already exist in EMR tables. Saving must persist:
-        # - per-visit details into emr_visit_details (queue-scoped)
-        # - clinician decision into emr_screening_eyes/emr_screenings
-        # - mark the visit completed when allowed
-        # and must NOT touch legacy patient_records for clinical correctness.
-        # Doctor Queue Mode: ensure EMR screening session exists before saving so we
-        # never fall back to legacy patient_records inserts (which create duplicate cards).
         if bool(getattr(self, "_doctor_queue_mode", False)) and (
             getattr(self, "_emr_queue_entry_id", None) and getattr(self, "_emr_patient_pk", None)
         ):
@@ -3945,10 +3929,9 @@ class ScreeningPage(QWidget):
                 "diabetes_type": (self.diabetes_type.currentText().strip() if hasattr(self, "diabetes_type") else "") or None,
                 "dm_duration_years": float(self.diabetes_duration.value()) if hasattr(self, "diabetes_duration") and self.diabetes_duration.value() > 0 else None,
                 "hba1c": None,
-            "diabetes_diagnosis_date": self._get_diagnosis_date().toString("dd/MM/yyyy") if self._get_diagnosis_date().isValid() else None,
+                "diabetes_diagnosis_date": self._get_diagnosis_date().toString("dd/MM/yyyy") if self._get_diagnosis_date().isValid() else None,
                 "treatment_regimen": (self.treatment_regimen.currentText().strip() if hasattr(self, "treatment_regimen") else "") or None,
-            "prev_dr_stage": (self.clinical_prev_dr_stage.currentText().strip() if hasattr(self, "clinical_prev_dr_stage") else "") or None,
-
+                "prev_dr_stage": (self.clinical_prev_dr_stage.currentText().strip() if hasattr(self, "clinical_prev_dr_stage") else "") or None,
                 "symptom_blurred_vision": 1 if getattr(self, "symptom_blurred", None) and self.symptom_blurred.isChecked() else 0,
                 "symptom_floaters": 1 if getattr(self, "symptom_floaters", None) and self.symptom_floaters.isChecked() else 0,
                 "symptom_flashes": 1 if getattr(self, "symptom_flashes", None) and self.symptom_flashes.isChecked() else 0,
@@ -4026,8 +4009,7 @@ class ScreeningPage(QWidget):
             if not ok:
                 return {"status": "error", "error": "Could not save clinician decision to EMR."}
 
-            # Keep legacy Patient Records (patient_records.db) in sync so Patient Overview / Reports
-            # can immediately render the saved final classification + notes + images for this visit.
+            # Keep legacy Patient Records (patient_records.db) in sync
             try:
                 fundus_path = str(eye_row.get("fundus_image_path") or "")
             except Exception:
@@ -4059,10 +4041,8 @@ class ScreeningPage(QWidget):
             if can_done:
                 emr.set_queue_status(int(qid), "completed", int(uid))
             else:
-                # Non-fatal; decision saved, visit just remains open if pipeline not ready.
                 write_activity("WARNING", "VISIT_COMPLETE_BLOCKED", reason)
 
-            # Keep UI behaviour consistent with legacy path.
             self._current_eye_saved = True
             if hasattr(self, "results_page"):
                 self.results_page.mark_saved(self.p_name.text().strip(), self.p_eye.currentText() or "eye", self.last_result_class)
@@ -4074,7 +4054,6 @@ class ScreeningPage(QWidget):
         if not pid:
             pid = self.generate_patient_id()
         else:
-            # Keep UI aligned with the session ID to prevent "Assessment vs Records" mismatch.
             self._session_patient_code = pid
             with contextlib.suppress(Exception):
                 self.p_id.setText(pid)
@@ -4094,8 +4073,6 @@ class ScreeningPage(QWidget):
         eye = self.p_eye.currentText()
         diabetes_type = self.diabetes_type.currentText()
         duration = self.diabetes_duration.value()
-        hba1c = ""
-        prev_treatment = "Yes" if bool(getattr(getattr(self, "prev_treatment", None), "isChecked", lambda: False)()) else "No"
         notes = self.notes.toPlainText().strip()
         result = self.last_result_class
         confidence = self.last_result_conf
@@ -4169,8 +4146,6 @@ class ScreeningPage(QWidget):
             "diabetes_type": diabetes_type,
             "diag_date": diag_date_str,
             "duration": duration,
-            "hba1c": hba1c,
-            "prev_treatment": prev_treatment,
             "notes": notes,
             "result": result,
             "confidence": confidence,
@@ -4208,65 +4183,18 @@ class ScreeningPage(QWidget):
 
         replace_record_id = None
 
-        # Check if this is a rescreening request (from Reports page)
         if self._rescreen_replace_record_id is not None:
             replace_record_id = self._rescreen_replace_record_id
-            self._rescreen_replace_record_id = None  # Clear flag after use
+            self._rescreen_replace_record_id = None
         elif screening_type == "follow_up" and previous_screening_id:
             replace_record_id = None
         else:
-            # Standard duplicate detection
             existing_eye_record = self._find_existing_eye_record(pid, eye)
             if existing_eye_record:
-                # Saving from Screening Results should never warn/prompt to replace an existing
-                # record. Always save as a NEW session so prior visits remain immutable.
                 self._start_new_screening_session_for_current_patient()
 
-        pre_signature_payload = {
-            "pid": pid,
-            "name": name,
-            "dob": dob_str,
-            "age": age,
-            "sex": sex,
-            "contact": contact,
-            "phone": phone,
-            "email": email,
-            "address": address,
-            "eye": eye,
-            "diabetes_type": diabetes_type,
-            "diag_date": diag_date_str,
-            "duration": duration,
-            "hba1c": hba1c,
-            "prev_treatment": prev_treatment,
-            "notes": notes,
-            "result": result,
-            "confidence": confidence,
-            "ai_classification": ai_classification,
-            "doctor_classification": doctor_classification,
-            "decision_mode": decision_mode,
-            "override_justification": override_justification,
-            "final_diagnosis_icdr": final_diagnosis_icdr,
-            "doctor_findings": doctor_findings,
-            "va_left": va_left,
-            "va_right": va_right,
-            "bp_sys": bp_sys,
-            "bp_dia": bp_dia,
-            "fbs": fbs_val,
-            "rbs": rbs_val,
-            "symptom_blurred": symptom_blurred_flag,
-            "symptom_floaters": symptom_floaters_flag,
-            "symptom_flashes": symptom_flashes_flag,
-            "symptom_vision_loss": symptom_vision_loss_flag,
-            "image": str(self.current_image or ""),
-            "heatmap": str(getattr(self.results_page, "_current_heatmap_path", "") or ""),
-            "height": height_val,
-            "weight": weight_val,
-            "bmi": bmi_val,
-            "treatment_regimen": treatment_regimen,
-            "prev_dr_stage": prev_dr_stage,
-            "screening_type": screening_type,
-            "previous_screening_id": previous_screening_id,
-        }
+        pre_signature_payload = initial_signature_payload.copy()
+        pre_signature_payload["email"] = email
         pre_signature = hashlib.sha256(
             json.dumps(pre_signature_payload, ensure_ascii=True, sort_keys=True).encode("utf-8")
         ).hexdigest()
@@ -4281,8 +4209,6 @@ class ScreeningPage(QWidget):
             write_activity("ERROR", "SAVE_FAILED", str(exc))
             return {"status": "error", "error": str(exc)}
 
-        # Canonicalize to the persisted image path so subsequent saves don't point
-        # at stale temporary camera paths under stored_images/pending.
         app_root = os.path.dirname(os.path.abspath(__file__))
         persisted_source_abs = os.path.join(app_root, source_image_path)
         self.current_image = persisted_source_abs
@@ -4312,8 +4238,6 @@ class ScreeningPage(QWidget):
             eye,
             diabetes_type if diabetes_type != "Select" else "",
             duration,
-            hba1c,
-            prev_treatment,
             notes,
             result,
             confidence,
@@ -4556,7 +4480,7 @@ class ScreeningPage(QWidget):
                 """
                 INSERT INTO patient_records (
                     patient_id, name, birthdate, age, sex, contact, phone, email, address, eyes,
-                    diabetes_type, duration, hba1c, prev_treatment, notes,
+                    diabetes_type, duration, notes,
                     result, confidence, screened_at,
                     ai_classification, doctor_classification, decision_mode, override_justification,
                     final_diagnosis_icdr, doctor_findings, decision_by_username, decision_at,
@@ -4572,7 +4496,7 @@ class ScreeningPage(QWidget):
                     follow_up, followup_date, followup_label, screening_type, previous_screening_id,
                     screening_group_id,
                     original_screener_username, original_screener_name
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [*patient_data, screener_username, screener_name],
             )

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QCheckBox,
     QHeaderView,
+    QSizePolicy,
 )
 
 try:
@@ -33,7 +34,8 @@ class ReferralHospitalDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Medical Partner")
         self.setModal(True)
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(640)
+        self.setMinimumHeight(420)
 
         self._item = item or {}
 
@@ -346,7 +348,7 @@ class TrustedHospitalsPage(QWidget):
         self.referral_hospitals_table.setWordWrap(True)
         self.referral_hospitals_table.itemSelectionChanged.connect(self._sync_referral_action_buttons)
         self.referral_hospitals_table.itemDoubleClicked.connect(self._edit_selected_referral_hospital)
-        self.referral_hospitals_table.setMinimumHeight(200)
+        self.referral_hospitals_table.setMinimumHeight(500)
         self.referral_hospitals_table.setSortingEnabled(False)
         referral_layout.addWidget(self.referral_hospitals_table)
 

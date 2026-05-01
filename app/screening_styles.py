@@ -97,6 +97,28 @@ SCREENING_PAGE_STYLE = """
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {
         border: 1px solid #0d6efd;
     }
+    QComboBox QAbstractItemView {
+        background-color: #ffffff;
+        color: #212529;
+        selection-background-color: #0d6efd;
+        selection-color: #ffffff;
+        outline: 0px;
+        border: 1px solid #ced4da;
+    }
+    QComboBox QListView {
+        background-color: #ffffff;
+        color: #212529;
+        border: 1px solid #ced4da;
+    }
+    QComboBox QListView::item {
+        background-color: #ffffff;
+        color: #212529;
+        padding: 4px;
+    }
+    QComboBox QListView::item:selected {
+        background-color: #0d6efd;
+        color: #ffffff;
+    }
     QPushButton {
         border: 1px solid #ced4da;
         background: #e9ecef;

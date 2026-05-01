@@ -347,9 +347,9 @@ class ResultsWindow(QWidget):
         source_layout.addLayout(source_head)
         self.source_label = ClickableImageLabel("", "Source Image - Fundus")
         self.source_label.setObjectName("sourceImageSurface")
-        self.source_label.setMinimumHeight(300)
+        self.source_label.setFixedHeight(390)
+        self.source_label.setScaledContents(False)
         self.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.source_label.setWordWrap(True)
         source_layout.addWidget(self.source_label)
 
         heatmap_card = QGroupBox("")
@@ -369,9 +369,9 @@ class ResultsWindow(QWidget):
         heatmap_layout.addLayout(heatmap_head)
         self.heatmap_label = ClickableImageLabel("", "Grad-CAM++ Heatmap")
         self.heatmap_label.setObjectName("heatmapImageSurface")
-        self.heatmap_label.setMinimumHeight(300)
+        self.heatmap_label.setFixedHeight(390)
+        self.heatmap_label.setScaledContents(False)
         self.heatmap_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.heatmap_label.setWordWrap(True)
         heatmap_layout.addWidget(self.heatmap_label)
 
         image_row.addWidget(source_card, 1)
@@ -896,6 +896,40 @@ class ResultsWindow(QWidget):
             QTextEdit#overrideCommentBox:focus,
             QTextEdit#findingsCommentBox:focus {
                 border: 1px solid #60a5fa;
+            }
+            QComboBox {
+                background: #ffffff;
+                color: #1f2937;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                padding: 4px 10px;
+                min-height: 30px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 24px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #ffffff;
+                color: #1f2937;
+                selection-background-color: #eff6ff;
+                selection-color: #1d4ed8;
+                outline: 0px;
+                border: 1px solid #e5e7eb;
+            }
+            QComboBox QListView {
+                background-color: #ffffff;
+                color: #1f2937;
+                border: 1px solid #e5e7eb;
+            }
+            QComboBox QListView::item {
+                background-color: #ffffff;
+                color: #1f2937;
+                padding: 8px;
+            }
+            QComboBox QListView::item:selected {
+                background-color: #eff6ff;
+                color: #1d4ed8;
             }
             QFrame#uncertaintyPanel {
                 background: #fffbeb;
@@ -1444,14 +1478,14 @@ class ResultsWindow(QWidget):
         # Image and heatmap panels
         if image_path:
             source_pixmap = QPixmap(image_path)
-            self.source_label.set_viewable_pixmap(source_pixmap, 520, 390)
+            self.source_label.set_viewable_pixmap(source_pixmap, 500, 380)
             if is_loading:
                 self.heatmap_label.setText("Analyzing image...")
             elif is_system_uncertain:
                 self.heatmap_label.setText("No heatmap — specialist review required")
             elif heatmap_path:
                 heatmap_pixmap = QPixmap(heatmap_path)
-                self.heatmap_label.set_viewable_pixmap(heatmap_pixmap, 520, 390)
+                self.heatmap_label.set_viewable_pixmap(heatmap_pixmap, 500, 380)
             elif heatmap_pending:
                 self.heatmap_label.setText("Generating heatmap...")
             else:
@@ -1477,6 +1511,7 @@ class ResultsWindow(QWidget):
             p_type = pd.get("diabetes_type", "")
             p_duration = pd.get("duration", 0)
             p_hba1c = pd.get("hba1c", 0.0)
+            p_family_hx = pd.get("prev_dr_stage", "")
             
             profile_parts = [
                 f"<b>{p_name}</b>",
@@ -1502,6 +1537,11 @@ class ResultsWindow(QWidget):
                 history.append(f"{dur_str} duration")
             if p_hba1c: history.append(f"HbA1c {p_hba1c}%")
             history_txt = f" with a history of {', '.join(history)}" if history else " with no recorded diabetic history"
+            
+            if p_family_hx == "Yes":
+                history_txt += " and a positive family history of diabetes"
+            elif p_family_hx == "No":
+                history_txt += " and no known family history of diabetes"
             
             severity_desc = {
                 "No DR": "shows no signs of diabetic retinopathy",
@@ -2478,8 +2518,7 @@ img {{
 {field_row("Duration", duration_disp)}
 {field_row("HbA1c", esc_or_dash(hba1c_disp))}
 {field_row("Treatment Regimen", treatment_disp)}
-{field_row("Previous DR Stage", prev_dr_disp)}
-{field_row("Previous DR Treatment", esc(prev_tx), False)}
+{field_row("Family History of Diabetes", prev_dr_disp, False)}
 </table>
 
 <!-- Vital Signs -->
@@ -3004,7 +3043,7 @@ img {{
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Select Medical Partner")
-        dialog.setFixedSize(540, 180)
+        dialog.setFixedSize(650, 240)
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -3044,7 +3083,7 @@ img {{
         def _prompt_manual_destination() -> dict | None:
             manual_dialog = QDialog(dialog)
             manual_dialog.setWindowTitle("Manual Medical Partner Entry")
-            manual_dialog.setFixedSize(520, 260)
+            manual_dialog.setFixedSize(600, 380)
 
             manual_layout = QVBoxLayout(manual_dialog)
             manual_layout.setContentsMargins(16, 16, 16, 16)
