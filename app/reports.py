@@ -2239,14 +2239,14 @@ class ReportsPage(QWidget):
                 font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
             }
             QGroupBox {
-                background: palette(window);
-                border: 1px solid palette(mid);
+                background: #ffffff;
+                border: 1px solid #dbeafe;
                 border-radius: 12px;
             }
             QLineEdit, QComboBox {
                 background: palette(base);
                 color: palette(text);
-                border: 1px solid palette(mid);
+                border: 1px solid #cbd5e1;
                 border-radius: 10px;
                 padding: 8px 14px;
                 font-size: 14px;
@@ -2259,8 +2259,8 @@ class ReportsPage(QWidget):
                 padding: 7px 13px;
             }
             QTableWidget {
-                background: palette(base);
-                border: 1px solid palette(mid);
+                background: #ffffff;
+                border: 1px solid #dbeafe;
                 border-radius: 12px;
                 gridline-color: transparent;
                 selection-background-color: palette(highlight);
@@ -2268,47 +2268,48 @@ class ReportsPage(QWidget):
                 outline: none;
             }
             QTableWidget::item {
-                border-bottom: 1px solid palette(mid);
+                border-bottom: 1px solid #f1f5f9;
                 padding: 12px;
             }
             QTableWidget::item:selected {
-                background: palette(highlight);
-                color: palette(highlighted-text);
+                background: #eff6ff;
+                color: #1d4ed8;
             }
             QHeaderView::section {
-                background: palette(window);
-                color: #2563eb;
+                background: #f8fafc;
+                color: #1d4ed8;
                 font-weight: 700;
                 font-size: 12px;
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
                 border: none;
-                border-bottom: 2px solid palette(mid);
+                border-bottom: 2px solid #dbeafe;
                 padding: 12px 16px;
             }
             QPushButton {
-                background: palette(button);
-                border: 1px solid palette(mid);
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
                 border-radius: 8px;
                 padding: 8px 16px;
                 font-weight: 600;
                 font-size: 13px;
-                color: palette(button-text);
+                color: #334155;
             }
             QPushButton:hover {
-                background: palette(highlight);
-                border: 1px solid #cbd5e1;
+                background: #f8fafc;
+                border: 1px solid #3b82f6;
+                color: #1d4ed8;
             }
             QPushButton:pressed {
-                background: palette(mid);
+                background: #eff6ff;
             }
             QPushButton:disabled {
-                background: palette(window);
-                color: palette(disabled-text);
-                border: 1px solid palette(mid);
+                background: #f8fafc;
+                color: #94a3b8;
+                border: 1px solid #e2e8f0;
             }
             QLabel#statusLabel {
-                color: palette(placeholder-text);
+                color: #64748b;
                 font-size: 12px;
             }
         """)
@@ -2407,7 +2408,7 @@ class ReportsPage(QWidget):
 
         # ── Controls Section (Search + Filter) ────────
         self._controls_group = QGroupBox("")
-        self._controls_group.setStyleSheet("QGroupBox{border:1px solid #dbeafe; border-radius:12px; margin-top:0; padding:10px;}")
+        self._controls_group.setStyleSheet("QGroupBox{background: #ffffff; border:1px solid #dbeafe; border-radius:12px; margin-top:0; padding:10px;}")
         cl = QHBoxLayout(self._controls_group)
         cl.setContentsMargins(12, 8, 12, 8)
         cl.setSpacing(14)
@@ -2609,6 +2610,12 @@ class ReportsPage(QWidget):
             self.archived_records_dialog.reload_rows()
         self.status_label.setText("")
 
+    def apply_theme(self, theme: str):
+        """Hook to refresh the UI when theme changes."""
+        # Ensure the table and other components refresh their theme-aware colors
+        self.refresh_report()
+
+
     # NOTE: Archive state now comes from EMR (visit-level fields on emr_queue_entries).
 
     @staticmethod
@@ -2797,8 +2804,29 @@ class ReportsPage(QWidget):
             screened_at_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(i, 2, screened_at_item)
 
+            # Apply row colors manually for best contrast in both themes
+            # Use the table's own palette to detect darkness reliably
+            is_dark = self.results_table.palette().color(self.results_table.backgroundRole()).value() < 128
+            if is_dark:
+                bg = QColor("#2a3038") if i % 2 == 0 else QColor("#252b33")
+                fg = QColor("#d6dbe4")
+            else:
+                bg = QColor("#ffffff") if i % 2 == 0 else QColor("#f9fafb")
+                fg = QColor("#334155") # Dark gray for dates/screener
+
+            for col in range(3): # Handle first 3 columns already in table
+                item = self.results_table.item(i, col)
+                if item:
+                    item.setBackground(bg)
+                    if col >= 2: # Column 2 (Date) needs standard foreground
+                        item.setForeground(fg)
+                    # Column 1 (Risk) keeps its custom color set earlier
+                    # Column 0 (Patient) handled by delegate
+
             screened_by_item = QTableWidgetItem(str(row.get("screened_by") or "--"))
             screened_by_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            screened_by_item.setBackground(bg)
+            screened_by_item.setForeground(fg)
             self.results_table.setItem(i, 3, screened_by_item)
         self.results_table.setSortingEnabled(True)
         for row_idx in range(self.results_table.rowCount()):

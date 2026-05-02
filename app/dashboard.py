@@ -1274,6 +1274,9 @@ class EyeShieldApp(QMainWindow):
         if hasattr(self, "trusted_hospitals_page") and hasattr(self.trusted_hospitals_page, "apply_theme"):
             self.trusted_hospitals_page.apply_theme(theme)
 
+        if hasattr(self, "reports_page") and hasattr(self.reports_page, "apply_theme"):
+            self.reports_page.apply_theme(theme)
+
         self._update_nav_icon(self._dark_mode)
         self.refresh_dashboard()
 

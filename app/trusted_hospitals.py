@@ -167,19 +167,19 @@ class TrustedHospitalsPage(QWidget):
                 font-weight: 400;
             }
             QFrame#trustedHero {
-                background: palette(window);
-                border: 1px solid palette(mid);
+                background: #ffffff;
+                border: 1px solid #dbeafe;
                 border-radius: 12px;
             }
             QLabel#headerTitle {
-                color: #2563eb;
+                color: #1d4ed8;
                 font-size: 20px;
                 font-weight: 400;
                 background: transparent;
             }
             QGroupBox {
-                background: palette(window);
-                border: 1px solid palette(mid);
+                background: #ffffff;
+                border: 1px solid #dbeafe;
                 border-radius: 12px;
                 margin-top: 8px;
                 font-weight: 400;
@@ -190,7 +190,7 @@ class TrustedHospitalsPage(QWidget):
                 left: 14px;
                 padding: 0 8px;
                 background: transparent;
-                color: #2563eb;
+                color: #1d4ed8;
                 font-size: 12px;
                 font-weight: 400;
                 letter-spacing: 0.5px;
@@ -240,18 +240,18 @@ class TrustedHospitalsPage(QWidget):
                 background: #1d4ed8;
             }
             QTableWidget {
-                background: palette(base);
-                border: 1px solid palette(mid);
+                background: #ffffff;
+                border: 1px solid #dbeafe;
                 border-radius: 10px;
                 gridline-color: transparent;
             }
             QHeaderView::section {
-                background: palette(window);
-                color: #2563eb;
+                background: #f8fafc;
+                color: #1d4ed8;
                 border: none;
-                border-bottom: 1px solid palette(mid);
+                border-bottom: 1px solid #dbeafe;
                 font-size: 12px;
-                font-weight: 400;
+                font-weight: 700;
                 padding: 10px 16px;
             }
             QCheckBox {
@@ -331,7 +331,7 @@ class TrustedHospitalsPage(QWidget):
         hero_layout.addLayout(header_row)
         root.addWidget(hero)
 
-        self.referral_hospitals_group = QGroupBox("Medical Partners")
+        self.referral_hospitals_group = QGroupBox("")
         referral_layout = QVBoxLayout(self.referral_hospitals_group)
         referral_layout.setSpacing(6)
 
@@ -466,8 +466,8 @@ class TrustedHospitalsPage(QWidget):
                 bg_color = QColor("#2a3038") if row_index % 2 == 0 else QColor("#252b33")
                 text_color = QColor("#d6dbe4")
             else:
-                bg_color = QColor("#ffffff") if row_index % 2 == 0 else QColor("#f3f4f6")
-                text_color = QColor("#1a1a1a")
+                bg_color = QColor("#ffffff") if row_index % 2 == 0 else QColor("#f9fafb")
+                text_color = QColor("#0f172a")
 
             for col in range(5):
                 item_widget = self.referral_hospitals_table.item(row_index, col)
