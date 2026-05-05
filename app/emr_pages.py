@@ -11,7 +11,7 @@ import time
 from datetime import date, datetime
 
 from PySide6.QtCore import Qt, QDate, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -1085,11 +1085,11 @@ class EmrVisitsPage(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
         self.setStyleSheet(
-            "QWidget#emrRoot{background:#f8fafc;}"
+            "QWidget#emrRoot{background:#f0f4f8;}"
             + _input_style()
             + """
             QWidget {
-                background: #f8fafc;
+                background: transparent;
                 color: #0f172a;
                 font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             }
@@ -1107,7 +1107,7 @@ class EmrVisitsPage(QWidget):
                 padding: 12px 10px;
             }
             QHeaderView::section {
-                background: #f8fafc;
+                background: #ffffff;
                 color: #475569;
                 font-weight: 700;
                 font-size: 12px;
@@ -1117,10 +1117,14 @@ class EmrVisitsPage(QWidget):
                 border-bottom: 2px solid #e2e8f0;
                 padding: 12px 16px;
             }
-            QFrame#queueHeaderCard, QFrame#queueTableCard {
+            QWidget#emrPageContainer {
                 background: #ffffff;
                 border: 1px solid #e2e8f0;
-                border-radius: 12px;
+                border-radius: 16px;
+            }
+            QFrame#queueHeaderCard, QFrame#queueTableCard {
+                background: transparent;
+                border: none;
             }
             QLabel#queueTitle {
                 font-size: 20px;
@@ -1174,14 +1178,15 @@ class EmrVisitsPage(QWidget):
         qp_centering.addStretch(1)
 
         page_container = QWidget()
+        page_container.setObjectName("emrPageContainer")
         page_container.setMinimumWidth(1200)
         page_container.setMaximumWidth(1200)
         qp_centering.addWidget(page_container)
         qp_centering.addStretch(1)
 
         qp_layout = QVBoxLayout(page_container)
-        qp_layout.setContentsMargins(32, 32, 32, 32)
-        qp_layout.setSpacing(16)
+        qp_layout.setContentsMargins(32, 24, 32, 24)
+        qp_layout.setSpacing(4)
 
         content = QWidget()
         content.setStyleSheet("background: transparent;")
@@ -1197,7 +1202,7 @@ class EmrVisitsPage(QWidget):
         table_card = QFrame()
         table_card.setObjectName("queueTableCard")
         results_layout = QVBoxLayout(table_card)
-        results_layout.setContentsMargins(12, 12, 12, 10)
+        results_layout.setContentsMargins(12, 4, 12, 10)
         results_layout.setSpacing(8)
 
         # Columns:
@@ -1223,6 +1228,11 @@ class EmrVisitsPage(QWidget):
         self.table.setColumnHidden(5, True)
         self.table.setFocusPolicy(Qt.NoFocus)
 
+        _qp = self.table.palette()
+        _qp.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
+        _qp.setColor(QPalette.ColorRole.AlternateBase, QColor("#ffffff"))
+        self.table.setPalette(_qp)
+
         # Column sizing (aesthetic + scannable)
         hh = self.table.horizontalHeader()
         hh.setStretchLastSection(False)
@@ -1247,14 +1257,14 @@ class EmrVisitsPage(QWidget):
         queue_list_page = QWidget()
         qlp = QVBoxLayout(queue_list_page)
         qlp.setContentsMargins(0, 0, 0, 0)
-        qlp.setSpacing(10)
+        qlp.setSpacing(4)
 
         # ── Header card (Relocated here to hide it during review) ────────────
         self.header_card = QFrame()
         self.header_card.setObjectName("queueHeaderCard")
         header_l = QVBoxLayout(self.header_card)
-        header_l.setContentsMargins(14, 12, 14, 12)
-        header_l.setSpacing(10)
+        header_l.setContentsMargins(14, 12, 14, 4)
+        header_l.setSpacing(6)
 
         title_row = QHBoxLayout()
         title_row.setSpacing(10)
@@ -1312,13 +1322,13 @@ class EmrVisitsPage(QWidget):
 
         review_page = QWidget()
         review_page.setObjectName("EMRReviewPage")
-        review_page.setStyleSheet("QWidget#EMRReviewPage { background-color: #f1f5f9; }")
+        review_page.setStyleSheet("QWidget#EMRReviewPage { background-color: #ffffff; }")
         rlp = QVBoxLayout(review_page)
         rlp.setContentsMargins(0, 0, 0, 0)
         rlp.setSpacing(0)
         self._review_host = QWidget()
         self._review_host.setObjectName("EMRReviewHost")
-        self._review_host.setStyleSheet("QWidget#EMRReviewHost { background-color: #f1f5f9; }")
+        self._review_host.setStyleSheet("QWidget#EMRReviewHost { background-color: #ffffff; }")
         self._review_host_layout = QVBoxLayout(self._review_host)
         self._review_host_layout.setContentsMargins(0, 0, 0, 0)
         rlp.addWidget(self._review_host, 1)

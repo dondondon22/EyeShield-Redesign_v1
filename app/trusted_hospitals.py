@@ -185,10 +185,14 @@ class TrustedHospitalsPage(QWidget):
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 font-weight: 400;
             }
-            QFrame#trustedHero {
+            QWidget#trustedPageContainer {
                 background: #ffffff;
                 border: 1px solid #dbeafe;
-                border-radius: 12px;
+                border-radius: 16px;
+            }
+            QFrame#trustedHero {
+                background: transparent;
+                border: none;
             }
             QLabel#headerTitle {
                 color: #1d4ed8;
@@ -197,9 +201,8 @@ class TrustedHospitalsPage(QWidget):
                 background: transparent;
             }
             QGroupBox {
-                background: #ffffff;
-                border: 1px solid #dbeafe;
-                border-radius: 12px;
+                background: transparent;
+                border: none;
                 margin-top: 8px;
                 font-weight: 400;
                 padding: 10px;
@@ -333,26 +336,26 @@ class TrustedHospitalsPage(QWidget):
         root_layout.addStretch(1)
 
         page_container = QWidget()
+        page_container.setObjectName("trustedPageContainer")
         page_container.setMinimumWidth(1200)
         page_container.setMaximumWidth(1200)
         root_layout.addWidget(page_container)
         root_layout.addStretch(1)
 
         root = QVBoxLayout(page_container)
-        root.setContentsMargins(32, 32, 32, 32)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 24, 32, 24)
+        root.setSpacing(4)
 
         hero = QFrame()
         hero.setObjectName("trustedHero")
         hero.setStyleSheet("""
             QFrame#trustedHero {
-                background: #ffffff;
-                border: 1px solid #dbeafe;
-                border-radius: 12px;
+                background: transparent;
+                border: none;
             }
         """)
         hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(16, 12, 16, 12)
+        hero_layout.setContentsMargins(16, 16, 16, 4)
         hero_layout.setSpacing(12)
 
         header_row = QHBoxLayout()
@@ -374,6 +377,7 @@ class TrustedHospitalsPage(QWidget):
 
         self.referral_hospitals_group = QGroupBox("")
         referral_layout = QVBoxLayout(self.referral_hospitals_group)
+        referral_layout.setContentsMargins(16, 4, 16, 16)
         referral_layout.setSpacing(6)
 
         self.referral_hospitals_table = QTableWidget(0, 5)
@@ -472,6 +476,9 @@ class TrustedHospitalsPage(QWidget):
         self._reload_referral_hospitals()
 
     def _reload_referral_hospitals(self):
+        # Disable sorting while populating to prevent row indices from shifting
+        self.referral_hospitals_table.setSortingEnabled(False)
+        
         self._referral_hospital_rows = UserManager.list_referral_hospitals(active_only=False)
         self._referral_hospital_lookup = {
             int(item.get("id")): item
@@ -504,7 +511,7 @@ class TrustedHospitalsPage(QWidget):
             e_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.referral_hospitals_table.setItem(row_index, 4, e_item)
             
-            # Apply alternating row background colors (transparent page bg breaks palette-only checks)
+            # Apply alternating row background colors
             is_dark = self._is_dark_theme()
             if is_dark:
                 bg_color = QColor("#2a3038") if row_index % 2 == 0 else QColor("#252b33")
@@ -518,6 +525,9 @@ class TrustedHospitalsPage(QWidget):
                 if item_widget:
                     item_widget.setBackground(bg_color)
                     item_widget.setForeground(text_color)
+        
+        # Re-enable sorting after population
+        self.referral_hospitals_table.setSortingEnabled(True)
         self._sync_referral_action_buttons()
 
     def _selected_referral_hospital(self):

@@ -2597,13 +2597,14 @@ class EyeShieldApp(QMainWindow):
             patient = f"{r.get('first_name','')} {r.get('last_name','')}".strip()
             purpose_raw = str(r.get("screening_purpose") or "new")
             purpose = "follow-up" if purpose_raw == "follow_up" else purpose_raw.replace("_", "-")
-            status = str(r.get("status") or "")
+            status_raw = str(r.get("status") or "")
+            status = status_raw.replace("_", " ").upper()
             self._dash_queue_table.setItem(i, 0, QTableWidgetItem(qno))
             self._dash_queue_table.setItem(i, 1, QTableWidgetItem(patient))
             self._dash_queue_table.setItem(i, 2, QTableWidgetItem(purpose))
             self._dash_queue_table.setItem(i, 3, QTableWidgetItem(status))
 
-    def _dash_refresh_doctor_queue(self, text_primary, text_secondary, text_muted, dark) -> None:
+    def _dash_refresh_doctor_queue(self, text_primary, text_secondary, text_muted, border_color, dark) -> None:
         """Doctor Dashboard: populate the embedded patient queue list (matching Recent style)."""
         if not hasattr(self, "doctor_queue_list_layout"):
             return
@@ -2647,16 +2648,18 @@ class EyeShieldApp(QMainWindow):
             qno = str(r.get("queue_number") or "")
             patient = f"{r.get('first_name','')} {r.get('last_name','')}".strip()
             purpose_raw = str(r.get("screening_purpose") or "new")
-            purpose = "follow-up" if purpose_raw == "follow_up" else purpose_raw.replace("_", "-")
+            purpose = "follow-up" if purpose_raw == "follow_up" else purpose_raw.replace("_", " ")
             status = str(r.get("status") or "")
             
             item_w = QWidget()
+            # Remove explicit background and border to "remove the boxes"
+            # Instead, use a subtle bottom border as a divider
             item_w.setStyleSheet(
-                f"QWidget{{background:{'#13273a' if dark else '#f8fbff'};border-radius:12px;}}"
-                f"QWidget:hover{{background:{'#1a3550' if dark else '#eff6ff'};}}"
+                f"QWidget{{background:transparent;border:none;border-bottom:1px solid {border_color};}}"
+                f"QWidget:hover{{background:{'rgba(255,255,255,0.03)' if dark else 'rgba(0,0,0,0.02)'};}}"
             )
             item_l = QHBoxLayout(item_w)
-            item_l.setContentsMargins(16, 12, 16, 12)
+            item_l.setContentsMargins(16, 10, 16, 10)
             item_l.setSpacing(12)
 
             qno_lbl = QLabel(qno)
@@ -2668,12 +2671,18 @@ class EyeShieldApp(QMainWindow):
             purpose_lbl = QLabel(purpose.capitalize())
             purpose_lbl.setStyleSheet(f"font-size:12px;font-weight:600;color:{text_secondary};background:transparent;")
             
-            status_lbl = QLabel(status.upper())
+            # Remove underscore and fix color check for 'in_progress'
+            display_status = status.replace("_", " ").upper()
+            status_lbl = QLabel(display_status)
             status_col = text_muted
-            if status.lower() == "waiting": status_col = "#2563eb"
-            elif status.lower() == "in-progress": status_col = "#059669"
+            st_low = status.lower()
+            if st_low == "waiting": 
+                status_col = "#2563eb"
+            elif st_low in ("in_progress", "in-progress"): 
+                status_col = "#059669"
+            
             status_lbl.setStyleSheet(f"font-size:11px;font-weight:800;color:{status_col};background:transparent;")
-            status_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            status_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
             item_l.addWidget(qno_lbl, 1)
             item_l.addWidget(patient_lbl, 3)
@@ -3010,7 +3019,7 @@ class EyeShieldApp(QMainWindow):
             if hasattr(self, "_fd_stat_abnormal"): self._fd_stat_abnormal.setText(str(fd_abn))
         else:
             # Doctor specific updates
-            self._dash_refresh_doctor_queue(text_primary, text_secondary, text_muted, dark)
+            self._dash_refresh_doctor_queue(text_primary, text_secondary, text_muted, border_color, dark)
 
         # Recent list population
         if hasattr(self, "recent_list_layout"):

@@ -2240,10 +2240,14 @@ class ReportsPage(QWidget):
                 color: palette(text);
                 font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
             }
-            QGroupBox {
+            QWidget#reportsPageContainer {
                 background: #ffffff;
                 border: 1px solid #dbeafe;
-                border-radius: 12px;
+                border-radius: 16px;
+            }
+            QGroupBox {
+                background: transparent;
+                border: none;
             }
             QLineEdit, QComboBox {
                 background: palette(base);
@@ -2332,27 +2336,27 @@ class ReportsPage(QWidget):
         centering_layout.addStretch(1)
 
         page_container = QWidget()
+        page_container.setObjectName("reportsPageContainer")
         page_container.setMinimumWidth(1200)
         page_container.setMaximumWidth(1200)
         centering_layout.addWidget(page_container)
         centering_layout.addStretch(1)
 
         root = QVBoxLayout(page_container)
-        root.setContentsMargins(32, 32, 32, 32)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 24, 32, 24)
+        root.setSpacing(4)
 
         # ── Hero Section (Title + Main Buttons) ────────
         hero = QFrame()
         hero.setObjectName("reportsHero")
         hero.setStyleSheet("""
             QFrame#reportsHero {
-                background: #ffffff;
-                border: 1px solid #dbeafe;
-                border-radius: 12px;
+                background: transparent;
+                border: none;
             }
         """)
         hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(16, 12, 16, 12)
+        hero_layout.setContentsMargins(16, 16, 16, 8)
         
         header_row = QHBoxLayout()
         header_row.setSpacing(12)
@@ -2412,9 +2416,9 @@ class ReportsPage(QWidget):
 
         # ── Controls Section (Search + Filter) ────────
         self._controls_group = QGroupBox("")
-        self._controls_group.setStyleSheet("QGroupBox{background: #ffffff; border:1px solid #dbeafe; border-radius:12px; margin-top:0; padding:10px;}")
+        self._controls_group.setStyleSheet("QGroupBox{background: transparent; border:none; margin-top:0; padding:10px;}")
         cl = QHBoxLayout(self._controls_group)
-        cl.setContentsMargins(12, 8, 12, 8)
+        cl.setContentsMargins(16, 4, 16, 4)
         cl.setSpacing(14)
         
         self.search_input = QLineEdit()
@@ -2435,7 +2439,7 @@ class ReportsPage(QWidget):
 
         self._results_group = QGroupBox("")
         rl = QVBoxLayout(self._results_group)
-        rl.setContentsMargins(18, 16, 18, 18)
+        rl.setContentsMargins(16, 8, 16, 16)
         rl.setSpacing(14)
 
         class _PatientCellDelegate(QStyledItemDelegate):
