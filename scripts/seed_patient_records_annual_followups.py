@@ -117,7 +117,7 @@ def main() -> None:
                     if not (lf.endswith(".jpg") or lf.endswith(".jpeg") or lf.endswith(".png")):
                         continue
                     src_abs = os.path.join(root, f)
-                    # Skip pending/unlinked camera dumps to keep data clean.
+                    # Skip pending/unlinked image dumps to keep data clean.
                     if os.sep + "pending" + os.sep in src_abs.lower() or os.sep + "unlinked" + os.sep in src_abs.lower():
                         continue
                     base = lf.replace("_source.jpg", "").replace("_source.jpeg", "").replace("_source.png", "")

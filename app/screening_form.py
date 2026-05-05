@@ -3035,56 +3035,6 @@ class ScreeningPage(QWidget):
             self.btn_analyze.setEnabled(True)
             self._set_upload_error("")
 
-    def take_picture_for_screening(self):
-        QMessageBox.information(
-            self,
-            "Camera Removed",
-            "Camera capture has been removed from this build. Please use Upload Image to continue.",
-        )
-
-    def _on_camera_capture_return(self, capture_packet: dict):
-        image_path = str((capture_packet or {}).get("image_path") or "").strip()
-        if not image_path or not os.path.isfile(image_path):
-            QMessageBox.warning(
-                self,
-                "Capture Failed",
-                "Captured image could not be loaded. Please retake and save again.",
-            )
-            return
-
-        packet_patient_id = str((capture_packet or {}).get("patient_id") or "").strip()
-        current_patient_id = self.p_id.text().strip()
-        if packet_patient_id and current_patient_id and packet_patient_id != current_patient_id:
-            QMessageBox.critical(
-                self,
-                "Patient Mismatch",
-                "Captured image patient ID does not match the active Screening patient.\n\n"
-                "Please restart capture from the current patient record.",
-            )
-            write_activity(
-                "ERROR",
-                "CAMERA_CAPTURE_PATIENT_MISMATCH",
-                f"packet_patient_id={packet_patient_id}; current_patient_id={current_patient_id}; path={image_path}",
-            )
-            return
-
-        eye_label = str((capture_packet or {}).get("eye_label") or "").strip()
-        if eye_label in ("OD", "Right Eye"):
-            self.p_eye.setCurrentText("Right Eye")
-        elif eye_label in ("OS", "Left Eye"):
-            self.p_eye.setCurrentText("Left Eye")
-
-        self.current_image = image_path
-        if hasattr(self.image_label, "set_image"):
-            self.image_label.set_image(image_path)
-        else:
-            self._set_preview_image(image_path)
-        self.btn_analyze.setEnabled(True)
-        self._set_upload_error("")
-
-        main_window = self.window()
-        if main_window is not self and hasattr(main_window, "_navigate_to"):
-            main_window._navigate_to(1, nav_key="Screening")
 
     def _on_image_dropped(self, path: str):
         if self._guard_upload_permission():
@@ -3218,7 +3168,7 @@ class ScreeningPage(QWidget):
 
         image_path = str(getattr(self, "current_image", "") or "").strip()
         if not image_path or not os.path.isfile(image_path):
-            message = "Please upload image or take fundus image on camera."
+            message = "Please upload a fundus image to proceed."
             self._set_upload_error(message)
             QMessageBox.information(self, "Image Required", message)
             return
@@ -4542,7 +4492,6 @@ class ScreeningPage(QWidget):
                     label.setText(pack[key])
 
         self.btn_upload.setText(pack["scr_upload_btn"])
-        # Camera capture has been removed from this build.
         self.btn_clear.setText(pack["scr_clear_btn"])
         self.btn_analyze.setText(pack["scr_analyze_btn"])
         patient_labels = [

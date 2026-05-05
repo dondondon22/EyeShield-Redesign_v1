@@ -43,7 +43,6 @@ TRANSLATIONS = {
         # Nav labels
         "nav_dashboard": "Dashboard",
         "nav_screening": "Screening",
-        "nav_camera": "Camera",
         "nav_reports": "Reports",
         "nav_users": "Users",
         "nav_settings": "Settings",
@@ -70,18 +69,11 @@ TRANSLATIONS = {
         "dash_no_conf": "No confidence data yet",
         "dash_no_screenings": "No screenings yet. Run a new screening to see trends here.",
         "dash_insight_all_clear": "All screenings reviewed — no action needed. Continue routine monitoring.",
-        # Camera
-        "cam_title": "Camera Integration Sandbox",
-        "cam_subtitle": "Camera preview and diagnostics while fundus camera integration is in progress.",
-        "cam_stopped": "Camera is stopped.",
-        "cam_start": "Start Camera",
-        "cam_stop": "Stop Camera",
         # Screening form
         "scr_patient_info": "Patient Information",
         "scr_clinical_history": "Diabetic History",
         "scr_image_upload": "Fundus Image Upload",
         "scr_upload_btn": "Upload Image",
-        "scr_take_picture_btn": "Take Picture",
         "scr_clear_btn": "Clear",
         "scr_analyze_btn": "Analyze Image",
         "scr_label_pid": "Patient ID:",

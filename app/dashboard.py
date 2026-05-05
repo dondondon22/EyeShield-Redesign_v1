@@ -39,7 +39,6 @@ try:
     from .settings import SettingsPage, DARK_STYLESHEET
     from .help_support import HelpSupportPage
     from .trusted_hospitals import TrustedHospitalsPage
-    from .camera import CameraPage
     from .auth import UserManager
     from .app_paths import PATIENT_RECORDS_DB_PATH
     from .patient_timeline_dialog import PatientTimelineDialog
@@ -51,7 +50,6 @@ except Exception:  # pragma: no cover
     from settings import SettingsPage, DARK_STYLESHEET
     from help_support import HelpSupportPage
     from trusted_hospitals import TrustedHospitalsPage
-    from camera import CameraPage
     from auth import UserManager
     from app_paths import PATIENT_RECORDS_DB_PATH
     from patient_timeline_dialog import PatientTimelineDialog
@@ -1287,7 +1285,6 @@ class EyeShieldApp(QMainWindow):
         _nav_key_map = {
             "Dashboard": "nav_dashboard",
             "Screening": "nav_screening",
-            "Camera": "nav_camera",
             "Reports": "nav_reports",
             "Users": "nav_users",
             "Activity Log": "usr_log",
