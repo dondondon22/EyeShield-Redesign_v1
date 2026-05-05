@@ -14,9 +14,9 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    from .ui_feedback import confirm, apply_dialog_style
+    from .ui_feedback import confirm, apply_dialog_style, show_warning, show_error, show_success
 except Exception:
-    from ui_feedback import confirm, apply_dialog_style
+    from ui_feedback import confirm, apply_dialog_style, show_warning, show_error, show_success
 
 _APP_ROOT  = Path(__file__).resolve().parent
 _ICONS_DIR = _APP_ROOT / "icons"
@@ -476,8 +476,11 @@ class PatientTimelineDialog(QWidget):
         # An unparented or non-embedded QFrame becomes a stray top-level window when setVisible(True).
         if hasattr(self, "_card_actions"):
             embedded = bool(getattr(self, "_actions_card_embedded", False))
+            # In frontdesk mode, we always want the Follow-up button visible.
+            # In other modes, we only show it if comparison is possible.
+            show_card = embedded and (can_compare or self._frontdesk_mode)
             with contextlib.suppress(Exception):
-                self._card_actions.setVisible(embedded and can_compare)
+                self._card_actions.setVisible(show_card)
 
     def _build_screening_history_page(self) -> QWidget:
         page = QWidget()
@@ -982,7 +985,7 @@ class PatientTimelineDialog(QWidget):
         self._actions_has_buttons = False
         if self._frontdesk_mode:
             # Frontdesk mode: show only the follow-up screening button
-            self.btn_followup = self._action_btn("+ Follow-up screening", card, primary=True, large=True)
+            self.btn_followup = self._action_btn("Follow-up Screening", card, primary=True, large=True)
             self.btn_followup.clicked.connect(self._handle_follow_up)
             v.addWidget(self.btn_followup)
             self._actions_has_buttons = True
@@ -1057,12 +1060,7 @@ class PatientTimelineDialog(QWidget):
             idx = int(getattr(self, "_tab_index", {}).get(label, 0))
             self._tab_stack.setCurrentIndex(idx)
             return
-        msg = QMessageBox(self)
-        apply_dialog_style(msg)
-        msg.setWindowTitle("Coming Soon")
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setText(f"The {label} tab is not available yet.")
-        msg.exec()
+        show_success(self, "Coming Soon", f"The {label} tab is not available yet.")
         if "Overview" in self.tab_buttons:
             self.tab_buttons["Overview"].setChecked(True)
         if hasattr(self, "_tab_stack"):
@@ -1465,13 +1463,7 @@ class PatientTimelineDialog(QWidget):
         # Filter for completed screenings before passing to the comparison handler.
         completed = [r for r in (self.timeline_records or []) if _is_completed_visit(r)]
         if len(completed) < 2:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Compare Screenings")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("At least two completed screenings are required for comparison.")
-            if "apply_dialog_style" in globals() or "apply_dialog_style" in locals():
-                apply_dialog_style(msg)
-            msg.exec()
+            show_warning(self, "Compare Screenings", "At least two completed screenings are required for comparison.")
             return
         if callable(self._on_compare):
             self._on_compare(completed)

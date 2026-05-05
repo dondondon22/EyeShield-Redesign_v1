@@ -25,9 +25,11 @@ from PySide6.QtWidgets import (
 try:
     from .auth import UserManager
     from . import user_store
+    from .ui_feedback import apply_dialog_style, show_success, show_warning, confirm
 except Exception:  # pragma: no cover
     from auth import UserManager
     import user_store
+    from ui_feedback import apply_dialog_style, show_success, show_warning, confirm
 
 
 class ReferralHospitalDialog(QDialog):
@@ -46,7 +48,10 @@ class ReferralHospitalDialog(QDialog):
 
         title = QLabel("Add Medical Partner")
         title.setObjectName("headerTitle")
+        title.setStyleSheet("font-size:20px; font-weight:600; color:#1d4ed8; background:transparent;")
         layout.addWidget(title)
+
+        apply_dialog_style(self)
 
         form = QGridLayout()
         form.setHorizontalSpacing(8)
@@ -123,22 +128,20 @@ class ReferralHospitalDialog(QDialog):
     def save_data(self):
         vals = self.values()
         if not vals["contact_person"]:
-            QMessageBox.warning(self, "Validation Error", "Please enter a doctor's name.")
+            show_warning(self, "Validation Error", "Please enter a doctor's name.")
             return
         if not vals["hospital_name"]:
-            QMessageBox.warning(self, "Validation Error", "Please enter a hospital name.")
+            show_warning(self, "Validation Error", "Please enter a hospital name.")
             return
         if not vals["address"]:
-            QMessageBox.warning(self, "Validation Error", "Please enter an address.")
+            show_warning(self, "Validation Error", "Please enter an address.")
             return
 
-        reply = QMessageBox.question(
+        if confirm(
             self, 
             "Confirm Save", 
-            "Please make sure everything is correct. Do you want to proceed?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+            "Please make sure everything is correct. Do you want to proceed?"
+        ):
             self.accept()
 
     def values(self) -> dict:
@@ -499,23 +502,20 @@ class TrustedHospitalsPage(QWidget):
 
     def _delete_selected_referral_hospital(self):
         if self._active_role() not in {"clinician", "doctor"}:
-            QMessageBox.warning(self, "Medical Partners", "Only clinicians can manage medical partners.")
+            show_warning(self, "Medical Partners", "Only clinicians can manage medical partners.")
             return
 
         item = self._selected_referral_hospital()
         if not item:
-            QMessageBox.information(self, "Medical Partners", "Select a medical partner first.")
+            show_warning(self, "Medical Partners", "Select a medical partner first.")
             return
 
         hospital_label = str(item.get("hospital_name") or "this hospital")
-        reply = QMessageBox.question(
+        if not confirm(
             self,
             "Delete Medical Partner",
-            f"Delete {hospital_label} from the medical partners list?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+            f"Delete {hospital_label} from the medical partners list?"
+        ):
             return
 
         ok, message = UserManager.delete_referral_hospital(
@@ -523,7 +523,7 @@ class TrustedHospitalsPage(QWidget):
             acting_role=self._active_role(),
         )
         if not ok:
-            QMessageBox.warning(self, "Medical Partners", message)
+            show_warning(self, "Medical Partners", message)
             return
 
         self._log_referral_audit(
@@ -563,7 +563,7 @@ class TrustedHospitalsPage(QWidget):
 
     def _open_referral_dialog(self, item=None):
         if self._active_role() not in {"clinician", "doctor"}:
-            QMessageBox.warning(self, "Medical Partners", "Only clinicians can manage medical partners.")
+            show_warning(self, "Medical Partners", "Only clinicians can manage medical partners.")
             return
 
         dialog = ReferralHospitalDialog(self, item=item)
@@ -591,7 +591,7 @@ class TrustedHospitalsPage(QWidget):
         )
         
         if not ok:
-            QMessageBox.warning(self, "Error", f"Failed to save: {message}")
+            show_warning(self, "Error", f"Failed to save: {message}")
             return
 
         # Explicitly reload and refresh UI
@@ -611,7 +611,7 @@ class TrustedHospitalsPage(QWidget):
         self._log_referral_audit(event_type, f"{action_label} trusted referral: {hosp_name}", item=audit_item)
         
         self.status_label.setText(f"Success: {hosp_name} {action_label.lower()}")
-        QMessageBox.information(self, "Success", f"Medical partner was successfully {action_label.lower()} on the list: {hosp_name}")
+        show_success(self, "Success", f"Medical partner was successfully {action_label.lower()} on the list: {hosp_name}")
 
         # Try to highlight the new/updated row
         if hospital_id:

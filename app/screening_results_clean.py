@@ -371,10 +371,6 @@ class ResultsWindow(QWidget):
         actions_head.addStretch(1)
         actions_layout.addLayout(actions_head)
 
-        actions_hint = QLabel("Workflow shortcuts for save, reports, and navigation.")
-        actions_hint.setObjectName("metaText")
-        actions_hint.setWordWrap(True)
-        actions_layout.addWidget(actions_hint)
 
         self.save_note_label = QLabel("")
         self.save_note_label.setObjectName("metaText")
@@ -2846,15 +2842,16 @@ img {{
         hospitals = UserManager.list_referral_hospitals(active_only=True)
 
         dialog = QDialog(self)
+        apply_dialog_style(dialog)
         dialog.setWindowTitle("Select Medical Partner")
-        dialog.setFixedSize(540, 180)
+        dialog.setFixedSize(560, 220)
 
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
 
-        hospital_label = QLabel("Please select a trusted medical partner")
-        hospital_label.setStyleSheet("font-size:12px;font-weight:700;color:#1e293b;")
+        hospital_label = QLabel("Select Trusted Medical Partner")
+        hospital_label.setStyleSheet("font-size:18px; font-weight:700; color:#1d4ed8; background:transparent; margin-bottom:4px;")
         
         hospital_combo = QComboBox()
         hospital_combo.setMinimumHeight(36)
@@ -2886,12 +2883,13 @@ img {{
 
         def _prompt_manual_destination() -> dict | None:
             manual_dialog = QDialog(dialog)
+            apply_dialog_style(manual_dialog)
             manual_dialog.setWindowTitle("Manual Medical Partner Entry")
-            manual_dialog.setFixedSize(520, 260)
+            manual_dialog.setFixedSize(540, 320)
 
             manual_layout = QVBoxLayout(manual_dialog)
-            manual_layout.setContentsMargins(16, 16, 16, 16)
-            manual_layout.setSpacing(10)
+            manual_layout.setContentsMargins(24, 24, 24, 24)
+            manual_layout.setSpacing(12)
 
             doc_input = QLineEdit()
             doc_input.setPlaceholderText("Doctor Name")

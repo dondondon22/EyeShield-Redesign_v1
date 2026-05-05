@@ -33,13 +33,13 @@ try:
     from .app_paths import PATIENT_RECORDS_DB_PATH
     from .patient_record_groups import group_patient_record_rows
     from . import emr_service as emr
-    from .ui_feedback import apply_dialog_style
+    from .ui_feedback import apply_dialog_style, show_success, show_error, show_warning, confirm
 except Exception:  # pragma: no cover
     from auth import UserManager
     from app_paths import PATIENT_RECORDS_DB_PATH
     from patient_record_groups import group_patient_record_rows
     import emr_service as emr
-    from ui_feedback import apply_dialog_style
+    from ui_feedback import apply_dialog_style, show_success, show_error, show_warning, confirm
 try:
     from .screening_widgets import ClickableImageLabel
 except Exception:
@@ -1992,14 +1992,16 @@ class ArchivedRecordsDialog(QDialog):
         layout.setSpacing(12)
 
         title = QLabel("Archived Patient Records")
-        title.setStyleSheet("font-size:22px;font-weight:700;color:#007bff;")
+        title.setStyleSheet("font-size:20px; font-weight:600; color:#1d4ed8; background:transparent;")
         title.setAlignment(Qt.AlignCenter)
         subtitle = QLabel("Review archived screenings and restore them back into the active dashboard and reports.")
-        subtitle.setStyleSheet("font-size:13px;color:#6c757d;")
+        subtitle.setStyleSheet("font-size:14px; color:#475569; background:transparent;")
         subtitle.setWordWrap(True)
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         layout.addWidget(subtitle)
+
+        apply_dialog_style(self)
 
         controls = QHBoxLayout()
         controls.setSpacing(8)
@@ -2032,11 +2034,6 @@ class ArchivedRecordsDialog(QDialog):
         actions.addStretch(1)
         self.delete_btn = QPushButton("Delete Selected")
         self.delete_btn.setEnabled(False)
-        self.delete_btn.setStyleSheet(
-            "QPushButton{background:#dc3545;color:#fff;border:1px solid #bb2d3b;}"
-            "QPushButton:hover{background:#c82333;}"
-            "QPushButton:disabled{background:#f1aeb5;color:#fff;border:1px solid #ea868f;}"
-        )
         self.delete_btn.clicked.connect(self.delete_selected_record)
         actions.addWidget(self.delete_btn)
         self.restore_btn = QPushButton("Restore Selected")
@@ -2162,15 +2159,21 @@ class ArchivedRecordsDialog(QDialog):
     def restore_selected_record(self):
         record = self._get_selected_record()
         if not record:
-            QMessageBox.information(self, "Restore Record", "Select an archived patient record to restore.")
+            show_warning(self, "Restore Record", "Select an archived patient record to restore.")
             return
         if not self.reports_page._can_archive_record(record):
             owner = self.reports_page._record_owner_label(record)
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "Restore Restricted",
                 f"Only the original screening doctor ({owner}) can restore this archived record.",
             )
+            return
+        if not confirm(
+            self,
+            "Restore Record",
+            f"Restore the selected archived patient ({record.get('name', 'Unknown')}) to the active dashboard?"
+        ):
             return
         if not self.reports_page.restore_record(record):
             return
@@ -2180,28 +2183,27 @@ class ArchivedRecordsDialog(QDialog):
     def delete_selected_record(self):
         record = self._get_selected_record()
         if not record:
-            QMessageBox.information(self, "Delete Record", "Select an archived patient record to delete.")
+            show_warning(self, "Delete Record", "Select an archived patient record to delete.")
             return
         if not self.reports_page._can_archive_record(record):
             owner = self.reports_page._record_owner_label(record)
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "Delete Restricted",
                 f"Only the original screening doctor ({owner}) can delete this archived record.",
             )
             return
         label = f"{record['name'] or 'Unknown Patient'} ({record['patient_id'] or 'No ID'})"
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Delete Archived Record")
-        box.setText(f"Permanently delete {label}?")
-        box.setInformativeText("This action cannot be undone.")
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        if box.exec() != QMessageBox.StandardButton.Yes:
+        if not confirm(
+            self,
+            "Delete Archived Record",
+            f"Are you sure you want to PERMANENTLY delete the archived records for {label}?\n\nThis action cannot be undone.",
+            yes_text="Yes, Delete Permanently",
+            no_text="Cancel"
+        ):
             return
         if not self.reports_page.delete_archived_record(record):
-            QMessageBox.warning(self, "Delete Record", "Unable to permanently delete the selected record.")
+            show_warning(self, "Delete Record", "Unable to permanently delete the selected record.")
             return
         self.reports_page.refresh_report()
         self.reload_rows()
@@ -2385,19 +2387,21 @@ class ReportsPage(QWidget):
         self.referral_btn.setEnabled(False)
         self.referral_btn.clicked.connect(self.start_referral_flow)
         
+        self.rescreen_btn = QPushButton("Follow-up Screening")
+        self.rescreen_btn.setEnabled(False)
+        self.rescreen_btn.clicked.connect(self.start_frontdesk_followup if self.is_frontdesk else self.rescreen_patient)
+
         if not getattr(self, "is_frontdesk", False):
             header_row.addWidget(self.report_btn)
             header_row.addWidget(self.referral_btn)
+            self.rescreen_btn.hide()
         else:
             header_row.addWidget(self.export_btn)
+            header_row.addWidget(self.rescreen_btn)
+            self.rescreen_btn.show()
             
         hero_layout.addLayout(header_row)
         root.addWidget(hero)
-
-        self.rescreen_btn = QPushButton("Add Follow-Up Screening")
-        self.rescreen_btn.setEnabled(False)
-        self.rescreen_btn.clicked.connect(self.start_frontdesk_followup if self.is_frontdesk else self.rescreen_patient)
-        self.rescreen_btn.hide()
 
         self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
@@ -2914,6 +2918,9 @@ class ReportsPage(QWidget):
             generate_action = menu.addAction("Generate Report")
             referral_action = menu.addAction("Generate Referral")
         rescreen_action = None
+        if getattr(self, "is_frontdesk", False):
+            rescreen_action = menu.addAction("Follow-up Screening")
+
         archive_action = None
         if self.archive_btn is not None:
             archive_action = menu.addAction("Archive Record")
@@ -2987,21 +2994,16 @@ class ReportsPage(QWidget):
         """Front desk shortcut: start follow-up without per-eye prompt (use latest record in visit)."""
         record = self._get_selected_record()
         if not record:
-            QMessageBox.information(self, "New Follow-up Screening", "Select a patient record first.")
+            show_warning(self, "New Follow-up Screening", "Select a patient record first.")
             return
 
         label = f"{record.get('name') or 'Unknown Patient'} ({record.get('patient_id') or record.get('patient_code') or 'No ID'})"
-        if (
-            QMessageBox.question(
-                self,
-                "New Follow-up Screening",
-                f"Start a new follow-up screening for {label}?\n\n"
-                "This will open the follow-up form with the patient's information prefilled.\n"
-                'After reviewing/editing, click "Save & Queue Patient" to queue them again.',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
+        if not confirm(
+            self,
+            "New Follow-up Screening",
+            f"Start a new follow-up screening for {label}?\n\n"
+            "This will open the follow-up form with the patient's information prefilled.\n"
+            'After reviewing/editing, click "Save & Queue Patient" to queue them again.'
         ):
             return
 
@@ -3151,17 +3153,12 @@ class ReportsPage(QWidget):
             return
 
         label = f"{record.get('name') or 'Unknown Patient'} ({record.get('patient_id') or record.get('patient_code') or 'No ID'})"
-        if (
-            QMessageBox.question(
-                self,
-                "New Follow-up Screening",
-                f"Start a new follow-up screening for {label}?\n\n"
-                "This will open the follow-up form with the patient's information prefilled.\n"
-                'After reviewing/editing, click "Save & Queue Patient" to queue them again.',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
+        if not confirm(
+            self,
+            "New Follow-up Screening",
+            f"Start a new follow-up screening for {label}?\n\n"
+            "This will open the follow-up form with the patient's information prefilled.\n"
+            'After reviewing/editing, click "Save & Queue Patient" to queue them again.'
         ):
             return
 
@@ -3488,28 +3485,26 @@ class ReportsPage(QWidget):
     def archive_selected_record(self):
         record = self._get_selected_record()
         if not record:
-            QMessageBox.information(self, "Archive Record", "Select a patient record to archive.")
+            show_warning(self, "Archive Record", "Select a patient record to archive.")
             return
         if not self._can_archive_record(record):
             owner_text = self._record_owner_label(record)
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "Archive Restricted",
                 f"Only the original screening doctor ({owner_text}) can archive this record.",
             )
             return
         if record["archived_at"]:
-            QMessageBox.information(self, "Archive Record", "The selected patient record is already archived.")
+            show_warning(self, "Archive Record", "The selected patient record is already archived.")
             return
         label = f"{record['name'] or 'Unknown Patient'} ({record['patient_id'] or 'No ID'})"
-        if QMessageBox.question(
+        if not confirm(
             self,
             "Archive Patient Record",
-            (
-                "Archiving this patient will archive the entire record, including the complete screening history.\n\n"
-                "Are you sure you want to proceed?"
-            ),
-                                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            "Archiving this patient will archive the entire record, including the complete screening history.\n\n"
+            "Are you sure you want to proceed?"
+        ):
             return
         patient_code = str(record.get("patient_id") or record.get("patient_code") or "").strip()
         patient = emr.get_patient_by_code(patient_code) if patient_code else None
@@ -3548,7 +3543,7 @@ class ReportsPage(QWidget):
 
         actual_record_id = int(action_record.get("id") or 0)
         if actual_record_id <= 0:
-            QMessageBox.warning(self, "Add Follow-Up Screening", "Unable to identify patient record ID.")
+            show_warning(self, "Add Follow-Up Screening", "Unable to identify patient record ID.")
             return
 
         label = f"{record['name'] or 'Unknown Patient'} ({record['patient_id'] or 'No ID'})"
@@ -3562,6 +3557,7 @@ class ReportsPage(QWidget):
         replace_btn = box.addButton("Replace Previous Record", QMessageBox.ButtonRole.ActionRole)
         cancel_btn = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(cancel_btn)
+        apply_dialog_style(box)
         box.exec()
 
         chosen = box.clickedButton()
@@ -3651,14 +3647,11 @@ class ReportsPage(QWidget):
         if not self._filtered_rows:
             self.status_label.setText("No visible report data to export")
             return
-        confirm = QMessageBox.question(
+        if not confirm(
             self,
             "Export Reports",
-            f"Export {len(self._filtered_rows)} visible report row(s) to CSV?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
+            f"Export {len(self._filtered_rows)} visible report row(s) to CSV?"
+        ):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Export DR Screening Results", "", "CSV Files (*.csv)")
         if not path:
@@ -3794,7 +3787,9 @@ class ReportsPage(QWidget):
         layout.setSpacing(10)
 
         hospital_label = QLabel("Please select a trusted medical partner")
-        hospital_label.setStyleSheet("font-size:12px;font-weight:700;color:#1e293b;")
+        hospital_label.setStyleSheet("font-size:14px; font-weight:600; color:#1d4ed8;")
+        
+        apply_dialog_style(dialog)
         
         hospital_combo = QComboBox()
         hospital_combo.setMinimumHeight(36)
@@ -3830,8 +3825,10 @@ class ReportsPage(QWidget):
             manual_dialog.setFixedSize(520, 260)
 
             manual_layout = QVBoxLayout(manual_dialog)
-            manual_layout.setContentsMargins(16, 16, 16, 16)
-            manual_layout.setSpacing(10)
+            manual_layout.setContentsMargins(24, 24, 24, 24)
+            manual_layout.setSpacing(12)
+            
+            apply_dialog_style(manual_dialog)
 
             doc_input = QLineEdit()
             doc_input.setPlaceholderText("Doctor Name")
@@ -3984,14 +3981,11 @@ class ReportsPage(QWidget):
         result_raw = pick_worst_grade(bilateral_grades) or str(full.get("result") or "").strip()
 
         if result_raw in ("No DR", "Mild DR"):
-            confirm = QMessageBox.question(
+            if not confirm(
                 self,
                 "Generate Referral",
-                "This result is usually not urgent for specialist referral. Generate referral letter anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if confirm != QMessageBox.StandardButton.Yes:
+                "This result is usually not urgent for specialist referral. Generate referral letter anyway?"
+            ):
                 return
 
         selected_destination = self._prompt_referral_destination()
