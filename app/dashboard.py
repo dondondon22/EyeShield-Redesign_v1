@@ -81,7 +81,7 @@ class DashboardWeeklyGraph(QWidget):
         self.data = [0] * 7
         self.labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         self.accent_color = "#3b82f6"
-        self.setMinimumHeight(100)
+        self.setMinimumHeight(80)
         self._dark_mode = False
 
     def set_dark_mode(self, enabled: bool):
@@ -1676,13 +1676,13 @@ class EyeShieldApp(QMainWindow):
         page.setStyleSheet("QWidget#dashboardPage { background: #f0f4f8; }")
 
         outer = QVBoxLayout(page)
-        outer.setContentsMargins(28, 24, 28, 24)
-        outer.setSpacing(20)
+        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setSpacing(12)
 
         # ── Hero card ─────────────────────────────────────────────────────────
         hero = QWidget()
         hero.setObjectName("heroCard")
-        hero.setMinimumHeight(120)
+        hero.setMinimumHeight(100)
         hero_h = QHBoxLayout(hero)
         hero_h.setContentsMargins(28, 22, 28, 22)
         hero_h.setSpacing(0)
@@ -2005,7 +2005,7 @@ class EyeShieldApp(QMainWindow):
             # 1. Patient Queue Card
             queue_card = QWidget()
             queue_card.setObjectName("doctorQueueCard")
-            queue_card.setMinimumHeight(320)
+            queue_card.setMinimumHeight(200)
             queue_card.setStyleSheet(
                 "QWidget#doctorQueueCard{background:#ffffff;border-radius:16px;border:1px solid #e2e8f0;}"
                 "QTableWidget{background:#ffffff;color:#334155;border:none;}"
@@ -2066,7 +2066,7 @@ class EyeShieldApp(QMainWindow):
             # 2. Recent Screenings Card
             rec_card = QWidget()
             rec_card.setObjectName("recentCard")
-            rec_card.setMinimumHeight(320)
+            rec_card.setMinimumHeight(200)
             rec_card.setStyleSheet(
                 "QWidget#recentCard{background:#ffffff;border-radius:16px;border:1px solid #e2e8f0;}"
             )
@@ -2284,10 +2284,15 @@ class EyeShieldApp(QMainWindow):
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         scroll_area.setStyleSheet("QScrollArea#dashboardScroll { background: #f0f4f8; border: none; }")
         
-        # Give the inner page a minimum width so texts don't get scrambled when resolution is reduced
-        page.setMinimumWidth(850)
-        
         scroll_area.setWidget(page)
+
+        # If doctor, make it even more responsive by letting it shrink further
+        if role_l in {"doctor", "clinician"}:
+            page.setMinimumWidth(0)
+            page.setMinimumHeight(0)
+            # We still return the scroll area for safety, but with the compact settings above,
+            # it should not show scrollbars on most laptop screens.
+
         return scroll_area
 
     def _dash_load_frontdesk_patient_records(self, query: str) -> None:

@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QHeaderView,
     QSizePolicy,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
 )
 
 try:
@@ -157,6 +159,20 @@ class ReferralHospitalDialog(QDialog):
         }
 
 
+class PaddingDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        # Add 12px padding to the left and right
+        opt.rect = opt.rect.adjusted(12, 0, -12, 0)
+        super().paint(painter, opt, index)
+
+    def sizeHint(self, option, index):
+        hint = super().sizeHint(option, index)
+        hint.setHeight(max(hint.height(), 44))
+        return hint
+
+
 class TrustedHospitalsPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -186,7 +202,7 @@ class TrustedHospitalsPage(QWidget):
                 border-radius: 12px;
                 margin-top: 8px;
                 font-weight: 400;
-                padding: 12px;
+                padding: 10px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -223,39 +239,53 @@ class TrustedHospitalsPage(QWidget):
                 border: 1px solid #60a5fa;
             }
             QPushButton {
-                background: palette(button);
-                color: palette(button-text);
-                border: 1px solid palette(mid);
-                border-radius: 8px;
-                padding: 7px 12px;
-                font-weight: 400;
+                background: #f8fafc;
+                color: #334155;
+                border: 1px solid #cbd5e1;
+                border-radius: 10px;
+                padding: 9px 18px;
+                font-weight: 600;
             }
             QPushButton:hover {
-                background: palette(highlight);
+                background: #f1f5f9;
+                border-color: #94a3b8;
             }
             QPushButton#primaryAction {
-                background: #2563eb;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2563eb, stop:1 #1d4ed8);
                 color: #ffffff;
-                border: 1px solid #1d4ed8;
-                font-weight: 400;
+                border: none;
+                font-weight: 700;
             }
             QPushButton#primaryAction:hover {
-                background: #1d4ed8;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1d4ed8, stop:1 #1e3a8a);
             }
             QTableWidget {
                 background: #ffffff;
                 border: 1px solid #dbeafe;
-                border-radius: 10px;
+                border-radius: 12px;
                 gridline-color: transparent;
+                selection-background-color: palette(highlight);
+                selection-color: palette(highlighted-text);
+                outline: none;
+            }
+            QTableWidget::item {
+                border-bottom: 1px solid #f1f5f9;
+                padding: 12px;
+            }
+            QTableWidget::item:selected {
+                background: #eff6ff;
+                color: #1d4ed8;
             }
             QHeaderView::section {
                 background: #f8fafc;
                 color: #1d4ed8;
-                border: none;
-                border-bottom: 1px solid #dbeafe;
-                font-size: 12px;
                 font-weight: 700;
-                padding: 10px 16px;
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                border: none;
+                border-bottom: 2px solid #dbeafe;
+                padding: 12px 16px;
             }
             QCheckBox {
                 spacing: 8px;
@@ -284,14 +314,15 @@ class TrustedHospitalsPage(QWidget):
                 background: transparent;
             }
             QPushButton#ghostAction {
-                background: palette(button);
-                border: 1px solid palette(mid);
-                color: palette(button-text);
-                font-weight: 400;
-                padding: 8px 12px;
+                background: #ffffff;
+                border: 1.5px solid #dbeafe;
+                color: #1d4ed8;
+                font-weight: 700;
+                border-radius: 10px;
             }
             QPushButton#ghostAction:hover {
-                background: palette(highlight);
+                background: #eff6ff;
+                border-color: #3b82f6;
             }
             """
         )
@@ -313,9 +344,16 @@ class TrustedHospitalsPage(QWidget):
 
         hero = QFrame()
         hero.setObjectName("trustedHero")
+        hero.setStyleSheet("""
+            QFrame#trustedHero {
+                background: #ffffff;
+                border: 1px solid #dbeafe;
+                border-radius: 12px;
+            }
+        """)
         hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(12, 10, 12, 10)
-        hero_layout.setSpacing(2)
+        hero_layout.setContentsMargins(16, 12, 16, 12)
+        hero_layout.setSpacing(12)
 
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
@@ -339,21 +377,24 @@ class TrustedHospitalsPage(QWidget):
         referral_layout.setSpacing(6)
 
         self.referral_hospitals_table = QTableWidget(0, 5)
+        self.referral_hospitals_table.setObjectName("medicalPartnersTable")
         self.referral_hospitals_table.setHorizontalHeaderLabels(["Doctor's Name", "Hospital", "Address", "Phone", "Email"])
         self.referral_hospitals_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.referral_hospitals_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.referral_hospitals_table.setSelectionMode(QTableWidget.SingleSelection)
         self.referral_hospitals_table.verticalHeader().setVisible(False)
+        self.referral_hospitals_table.verticalHeader().setDefaultSectionSize(44)
         self.referral_hospitals_table.setShowGrid(False)
-        self.referral_hospitals_table.setAlternatingRowColors(False)
-        self.referral_hospitals_table.horizontalHeader().setStretchLastSection(False)
+        self.referral_hospitals_table.setAlternatingRowColors(True)
+        self.referral_hospitals_table.horizontalHeader().setStretchLastSection(True)
         self.referral_hospitals_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.referral_hospitals_table.horizontalHeader().setMinimumSectionSize(90)
-        self.referral_hospitals_table.setWordWrap(True)
+        self.referral_hospitals_table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.referral_hospitals_table.setWordWrap(False)
         self.referral_hospitals_table.itemSelectionChanged.connect(self._sync_referral_action_buttons)
         self.referral_hospitals_table.itemDoubleClicked.connect(self._edit_selected_referral_hospital)
-        self.referral_hospitals_table.setMinimumHeight(500)
-        self.referral_hospitals_table.setSortingEnabled(False)
+        self.referral_hospitals_table.setMinimumHeight(420)
+        self.referral_hospitals_table.setSortingEnabled(True)
+        self.referral_hospitals_table.setItemDelegate(PaddingDelegate(self.referral_hospitals_table))
         referral_layout.addWidget(self.referral_hospitals_table)
 
         action_row = QHBoxLayout()
@@ -444,23 +485,23 @@ class TrustedHospitalsPage(QWidget):
 
             contact_item = QTableWidgetItem(str(item.get("contact_person") or ""))
             contact_item.setData(Qt.UserRole, int(item.get("id") or 0))
-            contact_item.setTextAlignment(Qt.AlignCenter)
+            contact_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.referral_hospitals_table.setItem(row_index, 0, contact_item)
             
             h_item = QTableWidgetItem(str(item.get("hospital_name") or ""))
-            h_item.setTextAlignment(Qt.AlignCenter)
+            h_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.referral_hospitals_table.setItem(row_index, 1, h_item)
             
             a_item = QTableWidgetItem(str(item.get("address") or ""))
-            a_item.setTextAlignment(Qt.AlignCenter)
+            a_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.referral_hospitals_table.setItem(row_index, 2, a_item)
             
             p_item = QTableWidgetItem(str(item.get("phone") or ""))
-            p_item.setTextAlignment(Qt.AlignCenter)
+            p_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.referral_hospitals_table.setItem(row_index, 3, p_item)
             
             e_item = QTableWidgetItem(str(item.get("email") or ""))
-            e_item.setTextAlignment(Qt.AlignCenter)
+            e_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.referral_hospitals_table.setItem(row_index, 4, e_item)
             
             # Apply alternating row background colors (transparent page bg breaks palette-only checks)
