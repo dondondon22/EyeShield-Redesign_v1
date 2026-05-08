@@ -6,10 +6,10 @@ import json
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QLineEdit,
     QVBoxLayout, QHBoxLayout, QCheckBox, QMessageBox, QDialog, QFrame,
-    QScrollArea
+    QScrollArea, QStackedWidget, QGraphicsDropShadowEffect, QGraphicsBlurEffect
 )
-from PySide6.QtGui import QAction, QIcon, QDesktopServices, QPixmap
-from PySide6.QtCore import Qt, QUrl, QSize, QTimer
+from PySide6.QtGui import QAction, QIcon, QDesktopServices, QPixmap, QColor, QFont
+from PySide6.QtCore import Qt, QUrl, QSize, QTimer, QPropertyAnimation, QEasingCurve
 
 try:
     from user_auth import verify_user, get_user_profile
@@ -45,6 +45,11 @@ def _add_eye_toggle(field):
 
     action.toggled.connect(_toggle)
     field.addAction(action, QLineEdit.TrailingPosition)
+    
+    # Style the action icon
+    field.setStyleSheet(field.styleSheet() + """
+        QLineEdit { padding-right: 36px; }
+    """)
 
 
 class ContactAdminDialog(QDialog):
@@ -57,7 +62,7 @@ class ContactAdminDialog(QDialog):
         self.setModal(True)
         self.setStyleSheet("""
             QDialog {
-                background-color: #0d1b2a;
+                background-color: #12355b;
             }
         """)
 
@@ -218,243 +223,408 @@ class LoginWindow(QWidget):
         self.failed_attempts = 0
         self.lockout_remaining_seconds = 0
         self._allow_close_without_prompt = False
+        self.current_selected_role = None
+        
         self.lockout_timer = QTimer(self)
         self.lockout_timer.setInterval(1000)
         self.lockout_timer.timeout.connect(self._update_lockout_countdown)
 
-        self.setWindowTitle("EyeShield - Login")
-        self.setFixedSize(500, 580)
+        self.setWindowTitle("EyeShield - Secure Login")
+        self.setFixedSize(1000, 650)
+        self.setObjectName("LoginWindow")
         self.setStyleSheet("""
             QWidget#LoginWindow {
-                background-color: #f4f8fc;
+                background-color: #ffffff;
             }
         """)
-        self.setObjectName("LoginWindow")
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(48, 44, 48, 40)
-        layout.setSpacing(0)
+        # Main Layout
+        self.main_layout = QHBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
 
-        # --- Header block (title above logo) ---
-        header_col = QVBoxLayout()
-        header_col.setSpacing(8)
-        header_col.setAlignment(Qt.AlignHCenter)
+        # --- Left Pane (Branding) ---
+        self.left_pane = QFrame()
+        self.left_pane.setFixedWidth(450)
+        self.left_pane.setObjectName("leftPane")
+        self.left_pane.setStyleSheet("QFrame#leftPane { border: none; background-color: #12355b; }")
+        
+        # --- Background Image with Blur ---
+        self.left_bg_label = QLabel(self.left_pane)
+        self.left_bg_label.setFixedSize(450, 650)
+        
+        hero_img_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "login images", "Gemini_Generated_Image_v3651sv3651sv365.png")
+        if os.path.isfile(hero_img_path):
+            full_pix = QPixmap(hero_img_path)
+            # Scale to fill width/height while maintaining aspect ratio
+            scaled_pix = full_pix.scaled(450, 650, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            
+            # Crop the center 450x650 part
+            x = (scaled_pix.width() - 450) // 2
+            y = (scaled_pix.height() - 650) // 2
+            center_pix = scaled_pix.copy(x, y, 450, 650)
+            
+            self.left_bg_label.setPixmap(center_pix)
+            
+            # Apply Blur Effect
+            blur = QGraphicsBlurEffect()
+            blur.setBlurRadius(8)  # "Blur it a little bit"
+            self.left_bg_label.setGraphicsEffect(blur)
+        
+        # --- Blue Gradient Overlay ---
+        self.left_overlay = QFrame(self.left_pane)
+        self.left_overlay.setFixedSize(450, 650)
+        self.left_overlay.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(18, 53, 91, 0.85), 
+                    stop:1 rgba(47, 118, 191, 0.75));
+                border: none;
+            }
+        """)
+        
+        # --- Branding Content ---
+        # We use a container to ensure content is above the background and overlay
+        self.left_content = QFrame(self.left_pane)
+        self.left_content.setFixedSize(450, 650)
+        self.left_content.setStyleSheet("background: transparent; border: none;")
+        
+        left_layout = QVBoxLayout(self.left_content)
+        left_layout.setContentsMargins(60, 80, 60, 60)
+        left_layout.setSpacing(20)
 
+        # Logo & Title
         icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
         logo_path = os.path.join(icon_dir, "Logo.png")
-        title_path = os.path.join(icon_dir, "title.png")
-
-        logo_box = QLabel("👁")
-        logo_box.setFixedSize(64, 64)
-        logo_box.setAlignment(Qt.AlignCenter)
-        logo_box.setStyleSheet("""
-            QLabel {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #cbe6ff, stop:1 #b7f0df);
-                border-radius: 18px;
-                border: 1px solid #b5d6f5;
-                font-size: 24px;
-            }
-        """)
+        
+        logo_label = QLabel()
         if os.path.isfile(logo_path):
-            logo_pixmap = QPixmap(logo_path).scaled(QSize(54, 54), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            if not logo_pixmap.isNull():
-                logo_box.setText("")
-                logo_box.setPixmap(logo_pixmap)
-                logo_box.setStyleSheet("QLabel { background: transparent; border: none; }")
+            pix = QPixmap(logo_path).scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_label.setPixmap(pix)
+        else:
+            logo_label.setText("👁")
+            logo_label.setStyleSheet("color: white; font-size: 60px;")
+        
+        app_title = QLabel("Eye<span style='color:#6fb1fc;'>Shield</span>")
+        app_title.setTextFormat(Qt.RichText)
+        app_title.setStyleSheet("color: white; font-size: 36px; font-weight: 800; background: transparent;")
+        
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFixedWidth(50)
+        divider.setStyleSheet("background-color: #6fb1fc; max-height: 4px; border: none; border-radius: 2px;")
+        
+        mission_text = QLabel("A Diabetic Retinopathy Screening &<br/>Diagnostic Support Platform")
+        mission_text.setTextFormat(Qt.RichText)
+        mission_text.setWordWrap(True)
+        mission_text.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 16px; line-height: 1.4; background: transparent;")
+        
+        left_layout.addWidget(logo_label)
+        left_layout.addWidget(app_title)
+        left_layout.addWidget(divider)
+        left_layout.addWidget(mission_text)
+        left_layout.addStretch()
+        
+        # Ensure branding is on top
+        self.left_content.raise_()
+        
+        footer_note = QLabel("© 2026 EyeShield AI Systems\nSecure Clinical Environment")
+        footer_note.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 11px; background: transparent;")
+        left_layout.addWidget(footer_note)
 
-        title = QLabel("Eye<span style='color:#378ADD;'>Shield</span>")
-        title.setTextFormat(Qt.RichText)
-        title.setAlignment(Qt.AlignHCenter)
-        title.setStyleSheet("""
-            QLabel {
-                color: #12355b;
-                font-size: 28px;
-                font-weight: 700;
-                background: transparent;
+        # --- Right Pane (Interaction) ---
+        self.right_pane = QFrame()
+        self.right_pane.setStyleSheet("background-color: #f8fafc; border: none;")
+        right_layout = QVBoxLayout(self.right_pane)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.stack = QStackedWidget()
+        
+        # --- Page 1: Role Selection ---
+        self.role_page = QWidget()
+        role_layout = QVBoxLayout(self.role_page)
+        role_layout.setContentsMargins(60, 40, 60, 40)
+        role_layout.setSpacing(0)
+        
+        role_header = QLabel("Choose Your Portal")
+        role_header.setStyleSheet("color: #0f172a; font-size: 28px; font-weight: 700; margin-bottom: 8px;")
+        
+        role_sub = QLabel("Access the specific dashboard for your clinical role")
+        role_sub.setStyleSheet("color: #64748b; font-size: 14px; margin-bottom: 40px;")
+        
+        role_layout.addWidget(role_header)
+        role_layout.addWidget(role_sub)
+        
+        cards_container = QVBoxLayout()
+        cards_container.setSpacing(16)
+        
+        self.front_desk_card = self._create_role_card(
+            "Front Desk Portal", "Manage patient profiling, follow-up screening, and registration.", "frontdesk_avatar.png"
+        )
+        self.doctor_card = self._create_role_card(
+            "Doctor's Console", "Review screenings, diagnostic results, and clinical reports.", "doctor_avatar.jpg"
+        )
+        self.admin_card = self._create_role_card(
+            "System Administrator", "User management, system configuration, and audit logs.", "admin_avatar.png"
+        )
+        
+        self.front_desk_card.clicked.connect(lambda: self._select_role("Front Desk"))
+        self.doctor_card.clicked.connect(lambda: self._select_role("Doctor"))
+        self.admin_card.clicked.connect(lambda: self._select_role("Admin"))
+        
+        cards_container.addWidget(self.front_desk_card)
+        cards_container.addWidget(self.doctor_card)
+        cards_container.addWidget(self.admin_card)
+        
+        role_layout.addLayout(cards_container)
+        role_layout.addStretch()
+        
+        # Centered Help Footer
+        footer_role = QHBoxLayout()
+        footer_role.setAlignment(Qt.AlignCenter)
+        
+        help_text = QLabel("Forgot password or need an account?")
+        help_text.setStyleSheet("color: #64748b; font-size: 13px; background: transparent;")
+        
+        contact_btn = QPushButton("Contact Admin")
+        contact_btn.setStyleSheet("color: #378ADD; font-size: 13px; font-weight: 600; background: transparent; border: none; padding: 0;")
+        contact_btn.setCursor(Qt.PointingHandCursor)
+        contact_btn.clicked.connect(self.show_contact_dialog)
+        
+        footer_role.addWidget(help_text)
+        footer_role.addSpacing(4)
+        footer_role.addWidget(contact_btn)
+        
+        role_layout.addLayout(footer_role)
+        role_layout.addSpacing(20)
+        
+        # --- Page 2: Login Form ---
+        self.login_page = QWidget()
+        login_layout = QVBoxLayout(self.login_page)
+        login_layout.setContentsMargins(60, 40, 60, 40)
+        
+        back_btn = QPushButton("← Back to Portals")
+        back_btn.setStyleSheet("""
+            QPushButton {
+                color: #64748b; font-size: 13px; font-weight: 600; 
+                background: transparent; border: none; padding: 0; text-align: left;
+                margin-bottom: 24px;
             }
+            QPushButton:hover { color: #378ADD; }
         """)
-        if os.path.isfile(title_path):
-            title_pixmap = QPixmap(title_path).scaled(QSize(220, 52), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            if not title_pixmap.isNull():
-                title.setText("")
-                title.setPixmap(title_pixmap)
-
-        header_col.addWidget(title, 0, Qt.AlignHCenter)
-        header_col.addWidget(logo_box, 0, Qt.AlignHCenter)
-
-
-        # --- Field label style ---
-        field_label_style = """
-            QLabel {
-                color: #5d7590;
-                font-size: 10px;
-                font-weight: 600;
-                letter-spacing: 1px;
-                background: transparent;
-                margin-bottom: 2px;
-            }
-        """
-
-        # --- Input style ---
+        back_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        
+        self.form_header = QLabel("Sign In")
+        self.form_header.setStyleSheet("color: #0f172a; font-size: 28px; font-weight: 700; margin-bottom: 8px;")
+        
+        self.form_sub = QLabel("Please enter your credentials for the Front Desk portal")
+        self.form_sub.setStyleSheet("color: #64748b; font-size: 14px; margin-bottom: 32px;")
+        
+        # Fields
+        field_label_style = "color: #475569; font-size: 11px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;"
         input_style = """
             QLineEdit {
                 background-color: #ffffff;
-                border: 1px solid #cfe0f2;
-                border-radius: 12px;
-                padding: 10px 14px;
+                border: 1px solid #e2e8f0;
+                border-radius: 10px;
+                padding: 12px 16px;
                 font-size: 14px;
-                color: #102a43;
-                min-height: 28px;
+                color: #1e293b;
             }
             QLineEdit:focus {
-                border: 1px solid #3d8fd6;
-                background-color: #f4faff;
+                border: 1px solid #378ADD;
+                background-color: #f1f5f9;
             }
         """
-
-        # Username
-        username_label = QLabel("USERNAME")
-        username_label.setStyleSheet(field_label_style)
-
+        
+        u_label = QLabel("Username")
+        u_label.setStyleSheet(field_label_style)
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter your username")
-        self.username_input.setMinimumHeight(48)
+        self.username_input.setPlaceholderText("")
         self.username_input.setStyleSheet(input_style)
-
-        # Password
-        password_label = QLabel("PASSWORD")
-        password_label.setStyleSheet(field_label_style)
-
+        self.username_input.setMinimumHeight(48)
+        
+        p_label = QLabel("Password")
+        p_label.setStyleSheet(field_label_style)
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter your password")
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setMinimumHeight(48)
+        self.password_input.setPlaceholderText("")
         self.password_input.setStyleSheet(input_style)
-  
-        # --- Sign In button ---
-        btn = QPushButton("Sign In")
-        btn.setMinimumHeight(50)
-        btn.setStyleSheet("""
+        self.password_input.setMinimumHeight(48)
+        _add_eye_toggle(self.password_input)
+        
+        self.sign_in_btn = QPushButton("Sign In to Portal")
+        self.sign_in_btn.setMinimumHeight(52)
+        self.sign_in_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #4394dc, stop:1 #2f76bf);
+                background-color: #378ADD;
                 color: white;
                 border: none;
-                border-radius: 12px;
+                border-radius: 10px;
                 font-size: 15px;
                 font-weight: 600;
-                letter-spacing: 0.3px;
+                margin-top: 10px;
             }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #57a4ea, stop:1 #3785d1);
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2f76bf, stop:1 #245f9a);
-            }
+            QPushButton:hover { background-color: #2b6cb0; }
+            QPushButton:pressed { background-color: #1e4e8c; }
+            QPushButton:disabled { background-color: #cbd5e1; }
         """)
-        btn.clicked.connect(self.handle_login)
-        self.sign_in_btn = btn
-
-        # Quick sign-in buttons are useful for demos/testing. If you want to hide them for
-        # a production-like run, set EYESHIELD_DEV_MODE=0 explicitly.
-        dev_mode = os.environ.get("EYESHIELD_DEV_MODE") != "0"
-        quick_row_1 = QHBoxLayout()
-        quick_row_1.setSpacing(10)
-        quick_row_2 = QHBoxLayout()
-        quick_row_2.setSpacing(10)
-        if dev_mode:
-            quick_frontdesk_btn = QPushButton("Sign in: Frontdesk")
-            quick_frontdesk_btn.setMinimumHeight(38)
-            quick_frontdesk_btn.setStyleSheet(
-                "QPushButton{background:#ffffff;color:#2f76bf;border:1px solid #cfe0f2;border-radius:10px;font-size:12px;font-weight:600;}"
-                "QPushButton:hover{background:#f4faff;border-color:#9bc3ea;}"
-            )
-            quick_frontdesk_btn.clicked.connect(
-                lambda: self._quick_sign_in("Jayson07", "Jayson0717??")
-            )
-            quick_doctor_btn = QPushButton("Sign in: Doctor")
-            quick_doctor_btn.setMinimumHeight(38)
-            quick_doctor_btn.setStyleSheet(
-                "QPushButton{background:#ffffff;color:#2f76bf;border:1px solid #cfe0f2;border-radius:10px;font-size:12px;font-weight:600;}"
-                "QPushButton:hover{background:#f4faff;border-color:#9bc3ea;}"
-            )
-            quick_doctor_btn.clicked.connect(
-                lambda: self._quick_sign_in("Macky0717", "Macarilay07?")
-            )
-            quick_row_1.addWidget(quick_frontdesk_btn, 1)
-            quick_row_1.addWidget(quick_doctor_btn, 1)
-
-            quick_admin_btn = QPushButton("Sign in: Admin")
-            quick_admin_btn.setMinimumHeight(38)
-            quick_admin_btn.setStyleSheet(
-                "QPushButton{background:#ffffff;color:#2f76bf;border:1px solid #cfe0f2;border-radius:10px;font-size:12px;font-weight:600;}"
-                "QPushButton:hover{background:#f4faff;border-color:#9bc3ea;}"
-            )
-            quick_admin_btn.clicked.connect(
-                lambda: self._quick_sign_in("qw", "qw")
-            )
-            quick_row_2.addWidget(quick_admin_btn, 1)
-
+        self.sign_in_btn.clicked.connect(self.handle_login)
+        
         self.login_feedback = QLabel("")
-        self.login_feedback.setAlignment(Qt.AlignHCenter)
-        self.login_feedback.setStyleSheet("color: #7d93ab; font-size: 12px; background: transparent;")
+        self.login_feedback.setAlignment(Qt.AlignCenter)
+        self.login_feedback.setStyleSheet("color: #ef4444; font-size: 12px; margin-top: 12px;")
+        
+        login_layout.addWidget(back_btn)
+        login_layout.addWidget(self.form_header)
+        login_layout.addWidget(self.form_sub)
+        login_layout.addWidget(u_label)
+        login_layout.addWidget(self.username_input)
+        login_layout.addSpacing(16)
+        login_layout.addWidget(p_label)
+        login_layout.addWidget(self.password_input)
+        login_layout.addSpacing(24)
+        login_layout.addWidget(self.sign_in_btn)
+        login_layout.addWidget(self.login_feedback)
+        
+        # Dev Quick Sign-in (Restyled)
+        dev_mode = os.environ.get("EYESHIELD_DEV_MODE") != "0"
+        if dev_mode:
+            login_layout.addSpacing(20)
+            dev_label = QLabel("DEVELOPER QUICK ACCESS")
+            dev_label.setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: 800; text-align: center;")
+            dev_label.setAlignment(Qt.AlignCenter)
+            login_layout.addWidget(dev_label)
+            
+            quick_row = QHBoxLayout()
+            quick_row.setSpacing(8)
+            
+            for name, u, p in [("FD", "Jayson07", "Jayson0717??"), ("DOC", "Macky0717", "Macarilay07?"), ("ADM", "qw", "qw")]:
+                q_btn = QPushButton(name)
+                q_btn.setToolTip(f"Sign in as {u}")
+                q_btn.setStyleSheet("""
+                    QPushButton { 
+                        background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; 
+                        border-radius: 6px; font-size: 10px; font-weight: 700; padding: 6px;
+                    }
+                    QPushButton:hover { background: #e2e8f0; color: #0f172a; }
+                """)
+                q_btn.clicked.connect(lambda checked, _u=u, _p=p: self._quick_sign_in(_u, _p))
+                quick_row.addWidget(q_btn)
+            login_layout.addLayout(quick_row)
+            
+        login_layout.addStretch()
+        
+        footer_help = QHBoxLayout()
+        footer_help.setAlignment(Qt.AlignCenter)
+        help_lbl = QLabel("Need help?")
+        help_lbl.setStyleSheet("color: #64748b; font-size: 13px;")
+        contact_admin = QPushButton("Contact Admin")
+        contact_admin.setStyleSheet("color: #378ADD; font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        contact_admin.setCursor(Qt.PointingHandCursor)
+        contact_admin.clicked.connect(self.show_contact_dialog)
+        footer_help.addWidget(help_lbl)
+        footer_help.addWidget(contact_admin)
+        login_layout.addLayout(footer_help)
+        
+        self.stack.addWidget(self.role_page)
+        self.stack.addWidget(self.login_page)
+        
+        right_layout.addWidget(self.stack)
+        
+        self.main_layout.addWidget(self.left_pane)
+        self.main_layout.addWidget(self.right_pane)
 
-        # --- Footer ---
-        footer_row = QHBoxLayout()
-        footer_row.setAlignment(Qt.AlignCenter)
-
-        footer = QLabel("Forgot password or need a new account?")
-        footer.setStyleSheet("color: #7d93ab; font-size: 12px; background: transparent;")
-
-        contact_btn = QPushButton("Contact admin")
-        contact_btn.setCursor(Qt.PointingHandCursor)
-        contact_btn.setFlat(True)
-        contact_btn.setStyleSheet("""
-            QPushButton {
-                color: #2f76bf;
-                font-size: 12px;
-                background: transparent;
-                border: none;
-                padding: 0;
-                margin-left: 4px;
-            }
-            QPushButton:hover {
-                color: #4294dd;
-                text-decoration: underline;
-            }
-        """)
-        contact_btn.clicked.connect(self.show_contact_dialog)
-
-        footer_row.addWidget(footer)
-        footer_row.addWidget(contact_btn)
-
-        # --- Key bindings ---
+        # Key bindings
         self.username_input.returnPressed.connect(self.password_input.setFocus)
         self.password_input.returnPressed.connect(self.handle_login)
-        _add_eye_toggle(self.password_input)
 
-        # --- Assemble layout ---
-        layout.addLayout(header_col)
-        layout.addWidget(username_label)
-        layout.addWidget(self.username_input)
-        layout.addSpacing(14)
-        layout.addWidget(password_label)
-        layout.addWidget(self.password_input)
-        layout.addSpacing(14)
-        layout.addSpacing(24)
-        layout.addWidget(btn)
-        layout.addSpacing(10)
-        if dev_mode:
-            layout.addLayout(quick_row_1)
-            layout.addLayout(quick_row_2)
-        layout.addSpacing(8)
-        layout.addWidget(self.login_feedback)
-        layout.addSpacing(16)
-        layout.addLayout(footer_row)
-        layout.addStretch()
+    def _create_role_card(self, title, description, avatar_name):
+        """Helper to create a styled role selection card with a circular avatar."""
+        card = QPushButton()
+        card.setMinimumHeight(90)
+        card.setCursor(Qt.PointingHandCursor)
+        
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(20, 16, 20, 16)
+        card_layout.setSpacing(16)
+        
+        avatar_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "avatars")
+        avatar_path = os.path.join(avatar_dir, avatar_name)
+        
+        icon_box = QLabel()
+        icon_box.setFixedSize(44, 44)
+        icon_box.setStyleSheet("background: transparent;")
+        icon_box.setAlignment(Qt.AlignCenter)
+        
+        if os.path.isfile(avatar_path):
+            src = QPixmap(avatar_path)
+            if not src.isNull():
+                size = 44
+                from PySide6.QtGui import QImage, QPainter, QPainterPath
+                out_img = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
+                out_img.fill(Qt.transparent)
+                
+                painter = QPainter(out_img)
+                painter.setRenderHint(QPainter.Antialiasing)
+                
+                path = QPainterPath()
+                path.addEllipse(0, 0, size, size)
+                painter.setClipPath(path)
+                
+                scaled_src = src.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                painter.drawPixmap(0, 0, size, size, scaled_src)
+                painter.end()
+                
+                icon_box.setPixmap(QPixmap.fromImage(out_img))
+        
+        text_container = QVBoxLayout()
+        text_container.setSpacing(2)
+        
+        t_label = QLabel(title)
+        t_label.setStyleSheet("color: #1e293b; font-size: 15px; font-weight: 700; background: transparent;")
+        
+        d_label = QLabel(description)
+        d_label.setStyleSheet("color: #64748b; font-size: 12px; background: transparent;")
+        d_label.setWordWrap(True)
+        
+        text_container.addWidget(t_label)
+        text_container.addWidget(d_label)
+        
+        card_layout.addWidget(icon_box)
+        card_layout.addLayout(text_container)
+        card_layout.addStretch()
+        
+        card.setStyleSheet("""
+            QPushButton {
+                background-color: #ffffff;
+                border: 1px solid #e2e8f0;
+                border-radius: 12px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                border: 1px solid #378ADD;
+                background-color: #f1faff;
+            }
+        """)
+        
+        # Add shadow
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 15))
+        card.setGraphicsEffect(shadow)
+        
+        return card
+
+    def _select_role(self, role_name):
+        """Transition to login page with pre-filled context."""
+        self.current_selected_role = role_name
+        self.form_sub.setText(f"Please enter your credentials for the {role_name} portal")
+        self.sign_in_btn.setText(f"Sign In to {role_name} Portal")
+        self.stack.setCurrentIndex(1)
+        self.username_input.setFocus()
 
     def show_contact_dialog(self):
         """Open the Contact Administrator dialog."""
@@ -470,9 +640,9 @@ class LoginWindow(QWidget):
     def handle_login(self):
         """Handle login button click"""
         try:
-            from .dashboard import EyeShieldApp
-        except Exception:  # pragma: no cover
             from dashboard import EyeShieldApp
+        except ImportError:
+            from .dashboard import EyeShieldApp
 
         if self.lockout_remaining_seconds > 0:
             QMessageBox.warning(
@@ -488,7 +658,27 @@ class LoginWindow(QWidget):
             self.password_input.text()
         )
 
+        # Enforce Role-Based Portal Access
         if role:
+            role_map = {
+                "Front Desk": {"frontdesk"},
+                "Doctor": {"clinician", "doctor"},
+                "Admin": {"admin"}
+            }
+            allowed_roles = role_map.get(getattr(self, "current_selected_role", ""), set())
+            if role not in allowed_roles:
+                QMessageBox.warning(
+                    self,
+                    "Access Denied",
+                    f"This account is not authorized for the {getattr(self, 'current_selected_role', 'selected')} portal.\n\n"
+                    "Please select the correct portal that matches your account's role."
+                )
+                # Clear credentials for security/retry
+                self.username_input.clear()
+                self.password_input.clear()
+                self.username_input.setFocus()
+                return
+
             self.failed_attempts = 0
             self.login_feedback.setText("")
             profile = get_user_profile(username) or {}

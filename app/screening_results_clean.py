@@ -147,7 +147,7 @@ class ResultsWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_page = parent
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(600, 500)
         self._icons_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 
         # Report generation state  updated by set_results()
@@ -173,19 +173,23 @@ class ResultsWindow(QWidget):
         layout.setSpacing(12)
 
         # --- Main Split Layout ---
-        main_content_layout = QHBoxLayout()
-        main_content_layout.setSpacing(24)
-        layout.addLayout(main_content_layout)
+        self.main_content_layout = QHBoxLayout()
+        self.main_content_layout.setSpacing(24)
+        layout.addLayout(self.main_content_layout)
 
         # Left Column: Visual Data & Summary
-        left_col = QVBoxLayout()
-        left_col.setSpacing(20)
-        main_content_layout.addLayout(left_col, 65)
+        self.left_col_container = QWidget()
+        self.left_col = QVBoxLayout(self.left_col_container)
+        self.left_col.setContentsMargins(0, 0, 0, 0)
+        self.left_col.setSpacing(20)
+        self.main_content_layout.addWidget(self.left_col_container, 65)
 
         # Right Column: Analysis, Assessment & Actions
-        right_col = QVBoxLayout()
-        right_col.setSpacing(20)
-        main_content_layout.addLayout(right_col, 35)
+        self.right_col_container = QWidget()
+        self.right_col = QVBoxLayout(self.right_col_container)
+        self.right_col.setContentsMargins(0, 0, 0, 0)
+        self.right_col.setSpacing(20)
+        self.main_content_layout.addWidget(self.right_col_container, 35)
 
         # --- Define UI Components ---
         heading_col = QVBoxLayout()
@@ -301,8 +305,8 @@ class ResultsWindow(QWidget):
         prog_layout.addWidget(self.progression_trend)
 
         # --- Populate Columns ---
-        left_col.addLayout(heading_col)
-        left_col.addWidget(self.progression_panel)
+        self.left_col.addLayout(heading_col)
+        self.left_col.addWidget(self.progression_panel)
 
         # -- Visual Data Cards --
         image_row = QHBoxLayout()
@@ -325,7 +329,7 @@ class ResultsWindow(QWidget):
         source_layout.addLayout(source_head)
         self.source_label = ClickableImageLabel("", "Source Image - Fundus")
         self.source_label.setObjectName("sourceImageSurface")
-        self.source_label.setMinimumHeight(300)
+        self.source_label.setMinimumHeight(280)
         self.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.source_label.setWordWrap(True)
         source_layout.addWidget(self.source_label)
@@ -347,14 +351,14 @@ class ResultsWindow(QWidget):
         heatmap_layout.addLayout(heatmap_head)
         self.heatmap_label = ClickableImageLabel("", "Grad-CAM++ Heatmap")
         self.heatmap_label.setObjectName("heatmapImageSurface")
-        self.heatmap_label.setMinimumHeight(300)
+        self.heatmap_label.setMinimumHeight(280)
         self.heatmap_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.heatmap_label.setWordWrap(True)
         heatmap_layout.addWidget(self.heatmap_label)
 
         image_row.addWidget(source_card, 1)
         image_row.addWidget(heatmap_card, 1)
-        left_col.addLayout(image_row)
+        self.left_col.addLayout(image_row)
 
         # -- Actions Card (Right Sidebar) --
         actions_card = QGroupBox("")
@@ -388,7 +392,7 @@ class ResultsWindow(QWidget):
         actions_grid.setColumnStretch(0, 1)
         actions_layout.addLayout(actions_grid)
         actions_layout.addStretch(1)
-        actions_card.setMinimumWidth(300)
+        actions_card.setMinimumWidth(220)
 
         class_card = QFrame()
         class_card.setObjectName("resultStatCard")
@@ -648,22 +652,22 @@ class ResultsWindow(QWidget):
         self.footer_label.setWordWrap(True)
 
         # --- Final Layout Placement ---
-        left_col.addWidget(class_card)
+        self.left_col.addWidget(class_card)
         
         summary_reco_row = QHBoxLayout()
         summary_reco_row.setSpacing(12)
         summary_reco_row.addWidget(explanation_group, 6)
         summary_reco_row.addWidget(reco_card, 4)
-        left_col.addLayout(summary_reco_row)
+        self.left_col.addLayout(summary_reco_row)
         
-        left_col.addWidget(self.ai_disclaimer_label)
-        left_col.addStretch(1)
+        self.left_col.addWidget(self.ai_disclaimer_label)
+        self.left_col.addStretch(1)
 
         # --- Populate Right Column ---
-        right_col.addWidget(decision_group)
-        right_col.addWidget(actions_card)
-        right_col.addWidget(self.bilateral_frame)
-        right_col.addStretch(1)
+        self.right_col.addWidget(decision_group)
+        self.right_col.addWidget(actions_card)
+        self.right_col.addWidget(self.bilateral_frame)
+        self.right_col.addStretch(1)
 
         layout.addWidget(self.footer_label)
 
@@ -1064,12 +1068,17 @@ class ResultsWindow(QWidget):
         return icon
 
     def _apply_action_icons(self):
+        if not hasattr(self, "btn_save") or not hasattr(self, "btn_report"):
+            return
         self.btn_save.setIcon(self._build_action_icon("save_patient.svg", QStyle.StandardPixmap.SP_DialogSaveButton))
         self.btn_report.setIcon(self._build_action_icon("generate.svg", QStyle.StandardPixmap.SP_ArrowDown))
         self.btn_referral.setIcon(self._build_action_icon("refer.svg", QStyle.StandardPixmap.SP_CommandLink))
         self.btn_back.setIcon(self._build_action_icon("back_to_screening.svg", QStyle.StandardPixmap.SP_ArrowBack))
-        self.accept_ai_btn.setIcon(self._build_action_icon("accep_ai_result.svg", QStyle.StandardPixmap.SP_DialogApplyButton))
-        self.override_ai_btn.setIcon(self._build_action_icon("override_ai result.svg", QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        
+        if hasattr(self, "accept_ai_btn"):
+            self.accept_ai_btn.setIcon(self._build_action_icon("accep_ai_result.svg", QStyle.StandardPixmap.SP_DialogApplyButton))
+        if hasattr(self, "override_ai_btn"):
+            self.override_ai_btn.setIcon(self._build_action_icon("override_ai result.svg", QStyle.StandardPixmap.SP_FileDialogDetailedView))
 
     def _resolve_actor_username(self) -> str:
         raw_username = str(
@@ -1083,6 +1092,30 @@ class ResultsWindow(QWidget):
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
             self._apply_action_icons()
         super().changeEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
+    def _apply_responsive_layout(self):
+        if not hasattr(self, "main_content_layout"):
+            return
+        width = self.width()
+        is_narrow = width < 950
+        
+        # Adjust main layout orientation
+        if is_narrow:
+            if self.main_content_layout.direction() != QHBoxLayout.Direction.TopToBottom:
+                self.main_content_layout.setDirection(QHBoxLayout.Direction.TopToBottom)
+                self.main_content_layout.setStretch(0, 0)
+                self.main_content_layout.setStretch(1, 0)
+                self.main_content_layout.setSpacing(12)
+        else:
+            if self.main_content_layout.direction() != QHBoxLayout.Direction.LeftToRight:
+                self.main_content_layout.setDirection(QHBoxLayout.Direction.LeftToRight)
+                self.main_content_layout.setStretch(0, 65)
+                self.main_content_layout.setStretch(1, 35)
+                self.main_content_layout.setSpacing(24)
 
     def _create_stat_card(self, title_text):
         card = QFrame()
@@ -1436,12 +1469,14 @@ class ResultsWindow(QWidget):
         # Image and heatmap panels
         if image_path:
             source_pixmap = QPixmap(image_path)
-            self.source_label.set_viewable_pixmap(source_pixmap, 520, 390)
+            self.source_label.set_viewable_pixmap(source_pixmap)
             if is_loading:
                 self.heatmap_label.setText("Analyzing image...")
+            elif is_system_uncertain:
+                self.heatmap_label.setText("No heatmap — specialist review required")
             elif heatmap_path:
                 heatmap_pixmap = QPixmap(heatmap_path)
-                self.heatmap_label.set_viewable_pixmap(heatmap_pixmap, 520, 390)
+                self.heatmap_label.set_viewable_pixmap(heatmap_pixmap)
             elif heatmap_pending:
                 self.heatmap_label.setText("Generating heatmap...")
             else:

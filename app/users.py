@@ -1577,8 +1577,9 @@ class UsersPage(QWidget):
 
         page_container = QWidget()
         page_container.setObjectName("usrActivityContainer")
-        # Standardize on 1200px centered layout (matches Patient Records/EMR pages).
-        page_container.setMaximumWidth(1200)
+        # Standardize on 1400px centered layout for Admin dashboard.
+        page_container.setMinimumWidth(1400)
+        page_container.setMaximumWidth(1400)
         root_layout.addWidget(page_container)
         root_layout.addStretch(1)
 
@@ -2649,7 +2650,8 @@ class ActivityLogPage(QWidget):
 
         page_container = QWidget()
         page_container.setObjectName("usrActivityContainer")
-        page_container.setMaximumWidth(1200)
+        page_container.setMinimumWidth(1400)
+        page_container.setMaximumWidth(1400)
         root_layout.addWidget(page_container)
         root_layout.addStretch(1)
 

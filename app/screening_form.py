@@ -382,6 +382,11 @@ class ScreeningPage(QWidget):
         self._followup_restricted_mode = False
         self._flow_guard = ScreeningFlowGuard(self)
         self._duplicate_detector = DuplicateDetector()
+        self._duplicate_check_timer = QTimer(self)
+        self._duplicate_check_timer.setInterval(1000)
+        self._duplicate_check_timer.setSingleShot(True)
+        self._duplicate_check_timer.timeout.connect(self._perform_live_duplicate_check)
+        self._disregarded_duplicates = set()
         self._doctor_results_dialog = None
         self._draft_path = get_autosave_draft_path()
         self._autosave_timer = QTimer(self)
@@ -837,9 +842,12 @@ class ScreeningPage(QWidget):
         self.p_name.setPlaceholderText("Full name")
         self.p_name.hide()
 
-        self.p_first_name.textChanged.connect(lambda *_: self._sync_full_name_from_parts())
-        self.p_middle_name.textChanged.connect(lambda *_: self._sync_full_name_from_parts())
-        self.p_last_name.textChanged.connect(lambda *_: self._sync_full_name_from_parts())
+        self.p_first_name.textChanged.connect(self._sync_full_name_from_parts)
+        self.p_first_name.textChanged.connect(self._on_patient_info_changed)
+        self.p_middle_name.textChanged.connect(self._sync_full_name_from_parts)
+        self.p_middle_name.textChanged.connect(self._on_patient_info_changed)
+        self.p_last_name.textChanged.connect(self._sync_full_name_from_parts)
+        self.p_last_name.textChanged.connect(self._on_patient_info_changed)
         dob_arrow_icon = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "icons",
@@ -849,6 +857,7 @@ class ScreeningPage(QWidget):
         self._dob_default_style = ""
         self._dob_invalid_style = ""
         self.p_dob.dateChanged.connect(self._on_dob_date_changed)
+        self.p_dob.dateChanged.connect(lambda *_: self._on_patient_info_changed())
         cal = self.p_dob.calendarWidget()
         if cal is not None:
             cal.clicked.connect(self._on_dob_calendar_selected)
@@ -2618,6 +2627,7 @@ class ScreeningPage(QWidget):
         self._current_followup_label = ""
         self._current_screening_group_id = ""
         self._flow_guard.reset()
+        self._disregarded_duplicates.clear()
         self._set_navigation_locked(False)
         self.btn_analyze.setEnabled(False)
         self._set_upload_error("")
@@ -2663,6 +2673,206 @@ class ScreeningPage(QWidget):
             self.stacked_widget.setCurrentIndex(1)
         return True
 
+    def _profile_name_match_key(self, name: str) -> str:
+        return re.sub(r"\s+", " ", (name or "").strip().lower())
+
+    def _profile_dob_match_values(self, birthdate_raw: str) -> list[str]:
+        """Birthdate variants as they may appear in patient_records (TEXT)."""
+        raw = str(birthdate_raw or "").strip()
+        vals: list[str] = []
+        if raw:
+            vals.append(raw)
+        qd = QDate()
+        sample = raw[:10] if len(raw) >= 10 else raw
+        for fmt in ("yyyy-MM-dd", "dd/MM/yyyy", "MM/dd/yyyy"):
+            parsed = QDate.fromString(sample, fmt)
+            if parsed.isValid():
+                qd = parsed
+                break
+        if qd.isValid():
+            for s in (qd.toString("yyyy-MM-dd"), qd.toString("dd/MM/yyyy"), qd.toString("MM/dd/yyyy")):
+                if s not in vals:
+                    vals.append(s)
+        return vals
+
+    def _merge_profile_from_prior_visits(
+        self,
+        cur,
+        patient_id,
+        patient_name,
+        birthdate_raw,
+        height_val,
+        weight_val,
+        bmi_val,
+        diag_date,
+        email_val,
+        treat_reg,
+        prev_dr_val,
+    ):
+        """Backfill profiling fields from prior visits: same patient_id, then same name+DOB."""
+        def _vital_missing(v):
+            if v is None:
+                return True
+            s = str(v).strip()
+            if not s:
+                return True
+            try:
+                return float(s) <= 0
+            except (ValueError, TypeError):
+                return False
+
+        def _diag_missing(v):
+            return not str(v or "").strip()
+
+        def _text_missing(v):
+            return not str(v or "").strip()
+
+        def _consume_rows(rows, named: bool):
+            nonlocal height_val, weight_val, bmi_val, diag_date, email_val, treat_reg, prev_dr_val
+            nonlocal need_h, need_w, need_b, need_d, need_e, need_tr, need_pr
+            for row in rows:
+                if named:
+                    h, w, b, dd, em, tr, pr, rname = row
+                    if self._profile_name_match_key(rname) != name_key:
+                        continue
+                else:
+                    h, w, b, dd, em, tr, pr = row
+                if need_h and not _vital_missing(h):
+                    height_val = h
+                    need_h = False
+                if need_w and not _vital_missing(w):
+                    weight_val = w
+                    need_w = False
+                if need_b and not _vital_missing(b):
+                    bmi_val = b
+                    need_b = False
+                if need_d and not _diag_missing(dd):
+                    diag_date = dd
+                    need_d = False
+                if need_e and not _text_missing(em):
+                    email_val = em
+                    need_e = False
+                if need_tr and not _text_missing(tr):
+                    treat_reg = tr
+                    need_tr = False
+                if need_pr and not _text_missing(pr):
+                    prev_dr_val = pr
+                    need_pr = False
+                if not (need_h or need_w or need_b or need_d or need_e or need_tr or need_pr):
+                    break
+
+        need_h = _vital_missing(height_val)
+        need_w = _vital_missing(weight_val)
+        need_b = _vital_missing(bmi_val)
+        need_d = _diag_missing(diag_date)
+        need_e = _text_missing(email_val)
+        need_tr = _text_missing(treat_reg)
+        need_pr = _text_missing(prev_dr_val)
+        name_key = self._profile_name_match_key(patient_name)
+
+        if not (need_h or need_w or need_b or need_d or need_e or need_tr or need_pr):
+            return height_val, weight_val, bmi_val, diag_date, email_val, treat_reg, prev_dr_val
+
+        pid = str(patient_id or "").strip()
+        if pid:
+            cur.execute(
+                """
+                SELECT height, weight, bmi, diabetes_diagnosis_date,
+                       email, treatment_regimen, prev_dr_stage
+                FROM patient_records
+                WHERE CAST(COALESCE(patient_id, '') AS TEXT) = ?
+                  AND (archived_at IS NULL OR archived_at = '')
+                ORDER BY id DESC
+                """,
+                (pid,),
+            )
+            _consume_rows(cur.fetchall(), named=False)
+
+        if (need_h or need_w or need_b or need_d or need_e or need_tr or need_pr) and name_key:
+            dob_opts = self._profile_dob_match_values(birthdate_raw)
+            if dob_opts:
+                ph = ",".join("?" * len(dob_opts))
+                cur.execute(
+                    f"""
+                    SELECT height, weight, bmi, diabetes_diagnosis_date,
+                           email, treatment_regimen, prev_dr_stage, name
+                    FROM patient_records
+                    WHERE (archived_at IS NULL OR archived_at = '')
+                      AND birthdate IN ({ph})
+                    ORDER BY id DESC
+                    """,
+                    dob_opts,
+                )
+                _consume_rows(cur.fetchall(), named=True)
+
+        return height_val, weight_val, bmi_val, diag_date, email_val, treat_reg, prev_dr_val
+
+    def _apply_emr_profile_fallback(
+        self,
+        patient_code: str,
+        height_val,
+        weight_val,
+        bmi_val,
+        diag_date,
+        email_val,
+        treat_reg,
+        prev_dr_val,
+    ):
+        """When legacy DB rows lack profiling fields, use EMR patient master + visit details."""
+        code = str(patient_code or "").strip()
+        if not code:
+            return height_val, weight_val, bmi_val, diag_date, email_val, treat_reg, prev_dr_val
+
+        def _vital_missing(v):
+            if v is None:
+                return True
+            s = str(v).strip()
+            if not s:
+                return True
+            try:
+                return float(s) <= 0
+            except (ValueError, TypeError):
+                return False
+
+        def _diag_missing(v):
+            return not str(v or "").strip()
+
+        def _text_missing(v):
+            return not str(v or "").strip()
+
+        if not (
+            _vital_missing(height_val)
+            or _vital_missing(weight_val)
+            or _vital_missing(bmi_val)
+            or _diag_missing(diag_date)
+            or _text_missing(email_val)
+            or _text_missing(treat_reg)
+            or _text_missing(prev_dr_val)
+        ):
+            return height_val, weight_val, bmi_val, diag_date, email_val, treat_reg, prev_dr_val
+
+        try:
+            snap = emr.get_latest_clinical_profile_from_emr(code)
+        except Exception:
+            return height_val, weight_val, bmi_val, diag_date, email_val, treat_reg, prev_dr_val
+
+        if _vital_missing(height_val) and str(snap.get("height") or "").strip():
+            height_val = snap["height"]
+        if _vital_missing(weight_val) and str(snap.get("weight") or "").strip():
+            weight_val = snap["weight"]
+        if _vital_missing(bmi_val) and str(snap.get("bmi") or "").strip():
+            bmi_val = snap["bmi"]
+        if _diag_missing(diag_date) and str(snap.get("diabetes_diagnosis_date") or "").strip():
+            diag_date = snap["diabetes_diagnosis_date"]
+        if _text_missing(email_val) and str(snap.get("email") or "").strip():
+            email_val = snap["email"]
+        if _text_missing(treat_reg) and str(snap.get("treatment_regimen") or "").strip():
+            treat_reg = snap["treatment_regimen"]
+        if _text_missing(prev_dr_val) and str(snap.get("prev_dr_stage") or "").strip():
+            prev_dr_val = snap["prev_dr_stage"]
+
+        return height_val, weight_val, bmi_val, diag_date, email_val, treat_reg, prev_dr_val
+
     def load_patient_for_rescreen(self, record_id: int, replace_mode: bool = False):
         """Load a patient from database for rescreening.
 
@@ -2673,46 +2883,89 @@ class ScreeningPage(QWidget):
         try:
             record_id = int(record_id)  # Ensure it's an integer
             conn = sqlite3.connect(DB_FILE)
-            cur = conn.cursor()
+            try:
+                cur = conn.cursor()
 
-            # Use exact same query as generate_report's _fetch_full_record
-            cur.execute("""
-                SELECT id, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
-                       diabetes_type, duration, hba1c, notes,
-                       result, confidence, screened_at,
-                       ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
-                       visual_acuity_left, visual_acuity_right,
-                       blood_pressure_systolic, blood_pressure_diastolic,
-                       fasting_blood_sugar, random_blood_sugar,
-                       symptom_blurred_vision, symptom_floaters,
-                       symptom_flashes, symptom_vision_loss,
-                       source_image_path, heatmap_image_path,
-                       image_sha256, image_saved_at,
-                       height, weight, bmi, treatment_regimen, prev_dr_stage, diabetes_diagnosis_date,
-                       follow_up, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id
-                FROM patient_records WHERE id = ?
-            """, (record_id,))
-            row = cur.fetchone()
-            conn.close()
+                # Use exact same query as generate_report's _fetch_full_record
+                cur.execute("""
+                    SELECT id, patient_id, name, birthdate, age, sex, contact, phone, email, address, eyes,
+                           diabetes_type, duration, hba1c, notes,
+                           result, confidence, screened_at,
+                           ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
+                           visual_acuity_left, visual_acuity_right,
+                           blood_pressure_systolic, blood_pressure_diastolic,
+                           fasting_blood_sugar, random_blood_sugar,
+                           symptom_blurred_vision, symptom_floaters,
+                           symptom_flashes, symptom_vision_loss,
+                           source_image_path, heatmap_image_path,
+                           image_sha256, image_saved_at,
+                           height, weight, bmi, treatment_regimen, prev_dr_stage, diabetes_diagnosis_date,
+                           follow_up, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id
+                    FROM patient_records WHERE id = ?
+                """, (record_id,))
+                row = cur.fetchone()
 
-            if not row:
-                write_activity("ERROR", "LOAD_RESCREEN_FAILED", f"No record found in DB for id={record_id}")
-                return False
+                if not row:
+                    write_activity("ERROR", "LOAD_RESCREEN_FAILED", f"No record found in DB for id={record_id}")
+                    return False
 
-            # Map row tuple to values by position (matching query order)
-            (id_val, patient_id, name, birthdate, age, sex, contact, phone, address, eyes,
-             diabetes_type, duration, hba1c, notes,
-             result, confidence, screened_at,
-             ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
-             va_left, va_right,
-             bp_sys, bp_dia,
-             fbs, rbs,
-             symptom_blurred, symptom_floaters,
-             symptom_flashes, symptom_vision_loss,
-             source_image_path, heatmap_image_path,
-             image_sha256, image_saved_at,
-             height_val, weight_val, bmi_val, treat_reg, prev_dr, diag_date,
-             follow_up_flag, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id) = row
+                # Map row tuple to values by position (matching query order)
+                (id_val, patient_id, name, birthdate, age, sex, contact, phone, row_email, address, eyes,
+                 diabetes_type, duration, hba1c, notes,
+                 result, confidence, screened_at,
+                 ai_classification, doctor_classification, decision_mode, override_justification, final_diagnosis_icdr, doctor_findings,
+                 va_left, va_right,
+                 bp_sys, bp_dia,
+                 fbs, rbs,
+                 symptom_blurred, symptom_floaters,
+                 symptom_flashes, symptom_vision_loss,
+                 source_image_path, heatmap_image_path,
+                 image_sha256, image_saved_at,
+                 height_val, weight_val, bmi_val, treat_reg, prev_dr, diag_date,
+                 follow_up_flag, followup_date, followup_label, screening_type, previous_screening_id, screening_group_id) = row
+
+                (
+                    height_val,
+                    weight_val,
+                    bmi_val,
+                    diag_date,
+                    email_val,
+                    treat_reg,
+                    prev_dr,
+                ) = self._merge_profile_from_prior_visits(
+                    cur,
+                    patient_id,
+                    name,
+                    birthdate,
+                    height_val,
+                    weight_val,
+                    bmi_val,
+                    diag_date,
+                    str(row_email or "").strip(),
+                    treat_reg,
+                    prev_dr,
+                )
+            finally:
+                conn.close()
+
+            (
+                height_val,
+                weight_val,
+                bmi_val,
+                diag_date,
+                email_val,
+                treat_reg,
+                prev_dr,
+            ) = self._apply_emr_profile_fallback(
+                str(patient_id or "").strip(),
+                height_val,
+                weight_val,
+                bmi_val,
+                diag_date,
+                email_val,
+                treat_reg,
+                prev_dr,
+            )
 
             # Load data from record with safe type conversion
             self.p_id.setText(str(patient_id or ""))
@@ -2747,6 +3000,10 @@ class ScreeningPage(QWidget):
                 self.p_age.setValue(age_val)
             except (ValueError, TypeError):
                 self.p_age.setValue(0)
+            if self.p_age.value() <= 0 and isinstance(self.p_dob, QDateEdit):
+                _dobchk = self._get_dob_date()
+                if _dobchk.isValid():
+                    self.update_age_from_dob(_dobchk)
 
             # Safe sex setting
             sex_str = str(sex or "").strip()
@@ -2757,13 +3014,26 @@ class ScreeningPage(QWidget):
 
             self.p_contact.setText(str(contact or ""))
             if hasattr(self, "p_phone") and hasattr(self, "p_email"):
-                contact_str = str(phone or contact or "").strip()
-                if "@" in contact_str and "." in contact_str:
-                    self.p_email.setText(contact_str)
-                    self.p_phone.setText("")
+                em = str(email_val or "").strip()
+                ph = str(phone or "").strip()
+                ct = str(contact or "").strip()
+                if em:
+                    self.p_email.setText(em)
+                    if ph and "@" not in ph:
+                        self.p_phone.setText(ph)
+                    elif ct and "@" not in ct:
+                        self.p_phone.setText(ct)
+                    else:
+                        self.p_phone.setText("")
                 else:
-                    self.p_phone.setText(contact_str)
-                    self.p_email.setText("")
+                    contact_str = str(ph or ct or "").strip()
+                    if "@" in contact_str and "." in contact_str:
+                        self.p_email.setText(contact_str)
+                        self.p_phone.setText("")
+                    else:
+                        self.p_phone.setText(contact_str)
+                        self.p_email.setText("")
+                self.p_contact.setText(self.p_phone.text().strip() or self.p_email.text().strip())
             if hasattr(self, "p_address"):
                 self.p_address.setText(str(address or ""))
 
@@ -2819,17 +3089,24 @@ class ScreeningPage(QWidget):
 
                 # Height, Weight, BMI
                 try:
-                    self.height.setValue(float(str(height_val or 0.0)))
+                    h_val = float(str(height_val or 0.0))
+                    w_val = float(str(weight_val or 0.0))
+                    self.height.setValue(h_val)
+                    self.weight.setValue(w_val)
+                    # Trigger BMI calculation to ensure consistency
+                    if hasattr(self, "_calculate_bmi"):
+                        self._calculate_bmi()
                 except (ValueError, TypeError):
                     self.height.setValue(0.0)
-                try:
-                    self.weight.setValue(float(str(weight_val or 0.0)))
-                except (ValueError, TypeError):
                     self.weight.setValue(0.0)
+
+                # Overwrite BMI if valid value exists in DB
                 try:
-                    self.bmi.setValue(float(str(bmi_val or 0.0)))
+                    b_val = float(str(bmi_val or 0.0))
+                    if b_val > 0:
+                        self.bmi.setValue(b_val)
                 except (ValueError, TypeError):
-                    self.bmi.setValue(0.0)
+                    pass
                 
                 # Treatment regimen
                 treat_str = str(treat_reg or "").strip()
@@ -2845,14 +3122,23 @@ class ScreeningPage(QWidget):
                 else:
                     self.prev_dr_stage.setCurrentIndex(0)
                 
-                # Diagnosis Date
-                qd = QDate.fromString(str(diag_date or ""), "dd/MM/yyyy")
-                if qd.isValid():
-                    self.diabetes_diagnosis_date.setDate(qd)
+                # Diagnosis Date - Robust parsing
+                diag_text = str(diag_date or "").strip()
+                diag_qdate = QDate()
+                if diag_text:
+                    for fmt in ("yyyy-MM-dd", "dd/MM/yyyy", "MM/dd/yyyy"):
+                        parsed = QDate.fromString(diag_text, fmt)
+                        if parsed.isValid():
+                            diag_qdate = parsed
+                            break
+                
+                if diag_qdate.isValid():
+                    self.diabetes_diagnosis_date.setDate(diag_qdate)
                 else:
                     self.diabetes_diagnosis_date.setDate(self.min_diagnosis_date)
 
             except Exception as e:
+                print(f"[ScreeningForm] Clinical mapping error: {e}")
                 write_activity("WARNING", "LOAD_RESCREEN_MAPPING_PARTIAL", f"Error mapping clinical fields: {str(e)}")
 
             self.notes.setPlainText(str(notes or ""))
@@ -3275,11 +3561,56 @@ class ScreeningPage(QWidget):
         if current_id != matched_id:
             decision = DuplicateDialog(match, self).exec()
             if decision == DuplicateDialog.USE_EXISTING:
-                self._session_patient_code = matched_id
-                self.p_id.setText(matched_id)
-                write_activity("INFO", "DUPLICATE_PATIENT", f"Reused existing patient_id={matched_id}")
+                self.load_patient_for_followup(int(match["id"]))
+                write_activity("INFO", "DUPLICATE_PATIENT_FOLLOWUP", f"Auto-switched to follow-up for patient_id={matched_id}")
             else:
                 write_activity("INFO", "DUPLICATE_PATIENT", "User kept new patient ID")
+
+    def _on_patient_info_changed(self, *args):
+        """Triggered on name/DOB changes to schedule a live duplicate check."""
+        # Don't check if we've already locked the context (e.g. follow-up mode)
+        if getattr(self, "_rescreen_replace_record_id", None) or getattr(self, "_emr_patient_pk", None):
+            return
+        self._duplicate_check_timer.start()
+
+    def _perform_live_duplicate_check(self):
+        """Debounced check for existing patients to prevent duplicates as user types."""
+        first = self.p_first_name.text().strip() if hasattr(self, "p_first_name") else ""
+        last = self.p_last_name.text().strip() if hasattr(self, "p_last_name") else ""
+        dob_date = self._get_dob_date()
+
+        # Only check if we have the minimum identifying info (First and Last name)
+        if not first or not last:
+            return
+
+        full_name = self._compose_full_name()
+        dob_str = dob_date.toString("yyyy-MM-dd")
+        contact = self.p_contact.text().strip() if hasattr(self, "p_contact") else ""
+
+        match = self._duplicate_detector.find_duplicate(
+            name=full_name,
+            dob=dob_str,
+            contact=contact,
+        )
+
+        if not match or not match.get("patient_id"):
+            return
+
+        matched_id = str(match["patient_id"]).strip()
+        
+        # Avoid re-prompting if already confirmed as "not same" or if it's the current ID
+        if matched_id in self._disregarded_duplicates or matched_id == self.p_id.text().strip():
+            return
+
+        # Show the duplicate dialog
+        decision = DuplicateDialog(match, self).exec()
+        if decision == DuplicateDialog.USE_EXISTING:
+            self.load_patient_for_followup(int(match["id"]))
+            write_activity("INFO", "LIVE_DUPLICATE_FOLLOWUP", f"Auto-switched to follow-up for patient_id={matched_id}")
+        else:
+            # Mark as disregarded so we don't prompt again for this specific ID during this entry
+            self._disregarded_duplicates.add(matched_id)
+            write_activity("INFO", "LIVE_DUPLICATE_DISREGARD", f"User disregarded possible duplicate patient_id={matched_id}")
 
     def _on_prediction_ready(self, label: str, conf: str, eye_label: str, patient_data: dict | None = None):
         self.last_result_class = label

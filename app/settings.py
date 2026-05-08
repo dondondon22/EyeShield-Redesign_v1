@@ -516,8 +516,8 @@ class SettingsPage(QWidget):
         panel.setObjectName("settingsPanel")
         # Patient Records table card is wide; make Settings match by default
         # (min width encourages expansion, max prevents ultra-wide on big screens).
-        panel.setMinimumWidth(1120)
-        panel.setMaximumWidth(1320)
+        panel.setMinimumWidth(1400)
+        panel.setMaximumWidth(1400)
         panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         panel.setStyleSheet(
             "QFrame#settingsPanel{background:#ffffff;border:1px solid #dbe7f5;border-radius:14px;}"
@@ -736,7 +736,7 @@ class SettingsPage(QWidget):
         ):
             if card is not None:
                 card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-                card.setMaximumWidth(1320)
+                card.setMaximumWidth(1400)
 
         # Section layout (requested):
         # Preferences → Session Settings → (admin-only) Support/Admin Details → My Account → Buttons

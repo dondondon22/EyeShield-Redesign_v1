@@ -45,6 +45,12 @@ class ModernCalendarDateEdit(QDateEdit):
         self.apply_theme(False)
 
     def _setup_year_dropdown(self):
+        try:
+            # Check if C++ object is still valid
+            if self.objectName() is None: pass
+        except RuntimeError:
+            return
+
         cal = self.calendarWidget()
         if not cal:
             return
@@ -600,21 +606,33 @@ class ClickableImageLabel(QLabel):
         )
         self.open_badge.hide()
 
-    def set_viewable_pixmap(self, pixmap, max_width, max_height):
+    def set_viewable_pixmap(self, pixmap, max_width=None, max_height=None):
         self.full_pixmap = pixmap
-        scaled = pixmap.scaled(
-            max_width,
-            max_height,
+        if not self.full_pixmap.isNull():
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setToolTip("Click to open and zoom")
+            self.open_badge.show()
+            self.open_badge.raise_()
+        else:
+            self.open_badge.hide()
+        self._refresh_scaled_pixmap()
+        self._position_badge()
+
+    def _refresh_scaled_pixmap(self):
+        if self.full_pixmap.isNull():
+            return
+        
+        # Scale to fit current label size minus some padding
+        w = max(10, self.width() - 4)
+        h = max(10, self.height() - 4)
+        
+        scaled = self.full_pixmap.scaled(
+            w, h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
         self.setPixmap(scaled)
         self.setText("")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Click to open and zoom")
-        self.open_badge.show()
-        self.open_badge.raise_()
-        self._position_badge()
 
     def clear_view(self, text):
         self.full_pixmap = QPixmap()
@@ -626,6 +644,7 @@ class ClickableImageLabel(QLabel):
 
     def resizeEvent(self, event):
         self._position_badge()
+        self._refresh_scaled_pixmap()
         super().resizeEvent(event)
 
     def _position_badge(self):

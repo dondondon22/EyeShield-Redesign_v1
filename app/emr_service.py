@@ -951,6 +951,134 @@ def get_latest_diabetes_diagnosis_date(patient_id: int) -> str:
         conn.close()
 
 
+def get_latest_clinical_profile_from_emr(patient_code: str) -> dict[str, str]:
+    """
+    Return best-effort clinical profile fields for a patient code.
+
+    Includes height, weight, BMI, diabetes_diagnosis_date, email, treatment_regimen,
+    and prev_dr_stage (family history in the screening UI).
+
+    Sources (in order): emr_patients row, then newest-first emr_visit_detail rows,
+    then get_latest_diabetes_diagnosis_date() if the diagnosis date is still missing.
+
+    Values are plain strings compatible with legacy patient_records fields.
+    """
+    code = str(patient_code or "").strip()
+    empty: dict[str, str] = {
+        "height": "",
+        "weight": "",
+        "bmi": "",
+        "diabetes_diagnosis_date": "",
+        "email": "",
+        "treatment_regimen": "",
+        "prev_dr_stage": "",
+    }
+    if not code:
+        return empty
+
+    def _vital_ok(v: Any) -> bool:
+        if v is None:
+            return False
+        try:
+            return float(v) > 0
+        except (TypeError, ValueError):
+            return False
+
+    def _s(v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v).strip()
+
+    patient = get_patient_by_code(code)
+    if not patient:
+        return empty
+
+    height_s = ""
+    weight_s = ""
+    bmi_s = ""
+    diag_s = ""
+    email_s = ""
+    treat_s = ""
+    prev_s = ""
+    if _vital_ok(patient.get("height_cm")):
+        height_s = _s(patient.get("height_cm"))
+    if _vital_ok(patient.get("weight_kg")):
+        weight_s = _s(patient.get("weight_kg"))
+    if _vital_ok(patient.get("bmi")):
+        bmi_s = _s(patient.get("bmi"))
+    dtmp = _s(patient.get("diabetes_diagnosis_date"))
+    if dtmp:
+        diag_s = dtmp
+    if _s(patient.get("email")):
+        email_s = _s(patient.get("email"))
+    if _s(patient.get("treatment_regimen")):
+        treat_s = _s(patient.get("treatment_regimen"))
+    if _s(patient.get("prev_dr_stage")):
+        prev_s = _s(patient.get("prev_dr_stage"))
+
+    need_h = not height_s
+    need_w = not weight_s
+    need_b = not bmi_s
+    need_d = not diag_s
+    need_e = not email_s
+    need_tr = not treat_s
+    need_pr = not prev_s
+
+    emr_pid = int(patient.get("patient_id") or 0)
+    if emr_pid and (need_h or need_w or need_b or need_d or need_tr or need_pr):
+        conn = _open_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT height_cm, weight_kg, bmi, diabetes_diagnosis_date,
+                       treatment_regimen, prev_dr_stage
+                FROM emr_visit_details
+                WHERE patient_id = ?
+                ORDER BY visit_detail_id DESC
+                """,
+                (emr_pid,),
+            )
+            for h, w, b, dd, tr, pr in cur.fetchall():
+                if need_h and _vital_ok(h):
+                    height_s = _s(h)
+                    need_h = False
+                if need_w and _vital_ok(w):
+                    weight_s = _s(w)
+                    need_w = False
+                if need_b and _vital_ok(b):
+                    bmi_s = _s(b)
+                    need_b = False
+                if need_d and _s(dd):
+                    diag_s = _s(dd)
+                    need_d = False
+                if need_tr and _s(tr):
+                    treat_s = _s(tr)
+                    need_tr = False
+                if need_pr and _s(pr):
+                    prev_s = _s(pr)
+                    need_pr = False
+                if not (need_h or need_w or need_b or need_d or need_tr or need_pr):
+                    break
+        finally:
+            conn.close()
+
+    if need_d and emr_pid:
+        last_dd = get_latest_diabetes_diagnosis_date(emr_pid)
+        if last_dd:
+            diag_s = last_dd
+
+    return {
+        "height": height_s,
+        "weight": weight_s,
+        "bmi": bmi_s,
+        "diabetes_diagnosis_date": diag_s,
+        "email": email_s,
+        "treatment_regimen": treat_s,
+        "prev_dr_stage": prev_s,
+    }
+
+
 def log_open_patient_record(user_id: Optional[int], queue_id: int, patient_id: int) -> None:
     log_emr_action(
         user_id,

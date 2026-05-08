@@ -5,6 +5,7 @@ import sqlite3
 from difflib import SequenceMatcher
 from typing import Optional
 
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -87,13 +88,20 @@ class DuplicateDetector:
 
     SIMILARITY_THRESHOLD = 0.82
 
-    def find_duplicate(self, name: str, dob: str, contact: str = "") -> Optional[dict]:
-        if not name or not dob:
+    def find_duplicate(self, name: str, dob: str = "", contact: str = "") -> Optional[dict]:
+        if not name:
             return None
 
-        candidates = self._fetch_by_dob(dob)
+        candidates = []
+        if dob:
+            candidates = self._fetch_by_dob(dob)
+        
+        if not candidates and name:
+            candidates = self._fetch_by_name(name)
+
         if not candidates and contact:
             candidates = self._fetch_by_contact(contact)
+
         if not candidates:
             return None
 
@@ -102,6 +110,11 @@ class DuplicateDetector:
 
         for row in candidates:
             score = self._name_similarity(name, row.get("name", ""))
+            
+            # Boost score if DOB matches exactly
+            if dob and row.get("birthdate") == dob:
+                score = min(1.0, score + 0.15)
+                
             if contact and row.get("contact") and self._contacts_match(contact, row["contact"]):
                 score = min(1.0, score + 0.1)
 
@@ -109,12 +122,37 @@ class DuplicateDetector:
                 best_score = score
                 best_match = row
 
-        return best_match if best_score >= self.SIMILARITY_THRESHOLD else None
+        # Use a slightly lower threshold if we have DOB or contact match, 
+        # otherwise stick to a strict threshold for name-only matches.
+        threshold = self.SIMILARITY_THRESHOLD
+        if best_match and ((dob and best_match.get("birthdate") == dob) or 
+                           (contact and best_match.get("contact") == contact)):
+            threshold = 0.75
+            
+        return best_match if best_score >= threshold else None
+
+    @staticmethod
+    def _fetch_by_name(name: str) -> list[dict]:
+        # Search for patients with similar names (first word match as pre-filter)
+        first_word = name.split()[0] if name.strip() else ""
+        if not first_word:
+            return []
+            
+        query = """
+            SELECT id, patient_id, name, birthdate, contact, result,
+                   COALESCE(screened_at, '') AS screened_at
+            FROM patient_records
+            WHERE name LIKE ?
+              AND (archived_at IS NULL OR archived_at = '')
+            ORDER BY id DESC
+            LIMIT 50
+        """
+        return DuplicateDetector._fetch_rows(query, (f"{first_word}%",))
 
     @staticmethod
     def _fetch_by_dob(dob: str) -> list[dict]:
         query = """
-            SELECT patient_id, name, birthdate, contact, result,
+            SELECT id, patient_id, name, birthdate, contact, result,
                    COALESCE(screened_at, '') AS screened_at
             FROM patient_records
             WHERE birthdate = ?
@@ -126,7 +164,7 @@ class DuplicateDetector:
     @staticmethod
     def _fetch_by_contact(contact: str) -> list[dict]:
         query = """
-            SELECT patient_id, name, birthdate, contact, result,
+            SELECT id, patient_id, name, birthdate, contact, result,
                    COALESCE(screened_at, '') AS screened_at
             FROM patient_records
             WHERE contact = ?
@@ -169,87 +207,152 @@ class DuplicateDialog(QDialog):
     SAVE_NEW = QDialog.DialogCode.Rejected
 
     _STYLE = """
-    QDialog  { background:#ffffff; }
-    QLabel   { color:#0f172a; font-size:13px; }
+    QDialog { 
+        background-color: #ffffff; 
+        border-radius: 12px;
+    }
+    QLabel { 
+        font-family: "Segoe UI", "Inter", sans-serif;
+    }
+    QLabel#title { 
+        font-size: 18px; 
+        font-weight: 700; 
+        color: #0f172a; 
+    }
+    QLabel#subtitle { 
+        font-size: 13px; 
+        color: #64748b; 
+        line-height: 1.5;
+    }
     QFrame#card {
-        background:#f0f4f9; border:1px solid #dde6f0;
-        border-radius:10px;
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+    }
+    QLabel#infoLabel {
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    QLabel#infoValue {
+        color: #1e293b;
+        font-size: 13px;
+        font-weight: 600;
     }
     QPushButton {
-        border-radius:6px; padding:8px 18px;
-        font-weight:600; font-size:13px;
+        padding: 10px 20px;
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 8px;
+        outline: none;
     }
     QPushButton#btnUse {
-        background:#2563eb; color:#fff; border:none;
+        background-color: #2563eb;
+        color: #ffffff;
+        border: 1px solid #2563eb;
     }
-    QPushButton#btnUse:hover  { background:#1d4ed8; }
+    QPushButton#btnUse:hover {
+        background-color: #1d4ed8;
+        border-color: #1d4ed8;
+    }
     QPushButton#btnNew {
-        background:#fef2f2; color:#ef4444;
-        border:1.5px solid #fecaca;
+        background-color: #ffffff;
+        color: #475569;
+        border: 1px solid #e2e8f0;
     }
-    QPushButton#btnNew:hover  { background:#fee2e2; }
+    QPushButton#btnNew:hover {
+        background-color: #f1f5f9;
+        border-color: #cbd5e1;
+    }
     """
 
     def __init__(self, match: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Possible Duplicate Patient")
-        self.setFixedWidth(440)
+        self.setWindowTitle("Patient Verification")
+        self.setFixedWidth(460)
         self.setStyleSheet(self._STYLE)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(28, 28, 28, 28)
+        layout.setSpacing(20)
 
-        title = QLabel("Possible existing patient found")
-        title.setStyleSheet("font-size:15px;font-weight:700;color:#0f172a;")
-        layout.addWidget(title)
+        # Header Section
+        header = QVBoxLayout()
+        header.setSpacing(6)
+        
+        title = QLabel("Possible Duplicate Detected")
+        title.setObjectName("title")
+        header.addWidget(title)
 
         sub = QLabel(
-            "A similar patient profile already exists.\n"
-            "Would you like to add this screening to the existing patient?"
+            "An existing patient profile with similar details was found. "
+            "Please verify if this is the same person."
         )
+        sub.setObjectName("subtitle")
         sub.setWordWrap(True)
-        sub.setStyleSheet("color:#475569;font-size:12px;")
-        layout.addWidget(sub)
+        header.addWidget(sub)
+        
+        layout.addLayout(header)
 
+        # Info Card
         card = QFrame()
         card.setObjectName("card")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 14, 16, 14)
-        card_layout.setSpacing(6)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setSpacing(12)
 
         def info_row(label: str, value: str):
             row = QHBoxLayout()
+            row.setSpacing(12)
             lbl = QLabel(label)
-            lbl.setStyleSheet("color:#64748b;font-size:11px;min-width:110px;")
-            val = QLabel(value or "-")
-            val.setStyleSheet("color:#0f172a;font-size:12px;font-weight:500;")
+            lbl.setObjectName("infoLabel")
+            lbl.setFixedWidth(100)
+            val = QLabel(value or "N/A")
+            val.setObjectName("infoValue")
+            val.setWordWrap(True)
             row.addWidget(lbl)
             row.addWidget(val, 1)
             card_layout.addLayout(row)
 
+        def _pretty_date(date_str: str) -> str:
+            if not date_str:
+                return "N/A"
+            for fmt in ("yyyy-MM-dd", "dd/MM/yyyy", "MM/dd/yyyy"):
+                qd = QDate.fromString(date_str[:10], fmt)
+                if qd.isValid():
+                    return qd.toString("MMMM dd, yyyy")
+            return date_str
+
         info_row("Patient ID", match.get("patient_id", ""))
         info_row("Name", match.get("name", ""))
-        info_row("Date of Birth", match.get("birthdate", ""))
+        info_row("Date of Birth", _pretty_date(match.get("birthdate", "")))
         info_row("Contact", match.get("contact", ""))
-        info_row("Last Result", match.get("result", ""))
+        
+        # Last Screened date only
         screened = match.get("screened_at", "")
-        info_row("Last Screened", screened[:10] if screened else "")
+        if screened:
+            info_row("Last Visit", _pretty_date(screened))
 
         layout.addWidget(card)
 
+        # Action Buttons
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        btn_row.setSpacing(12)
 
-        btn_use = QPushButton("Use Existing Patient")
-        btn_use.setObjectName("btnUse")
-        btn_use.clicked.connect(self.accept)
-
-        btn_new = QPushButton("Save as New Patient")
+        btn_new = QPushButton("Create New Patient")
         btn_new.setObjectName("btnNew")
+        btn_new.setCursor(Qt.PointingHandCursor)
         btn_new.clicked.connect(self.reject)
 
-        btn_row.addWidget(btn_use, 1)
+        btn_use = QPushButton("Use Existing Profile")
+        btn_use.setObjectName("btnUse")
+        btn_use.setCursor(Qt.PointingHandCursor)
+        btn_use.clicked.connect(self.accept)
+
+        # Swap order: Primary action on the right is standard for modern UI
         btn_row.addWidget(btn_new, 1)
+        btn_row.addWidget(btn_use, 1)
         layout.addLayout(btn_row)

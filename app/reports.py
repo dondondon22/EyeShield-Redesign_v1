@@ -208,7 +208,7 @@ def generate_unified_patient_report(parent, patient_record, eye_records, usernam
             return f'<img src="{b64}" style="width:100%;max-width:340px;border:1px solid #cbd5e1;border-radius:6px;" />'
 
         return f"""
-        <div style="page-break-inside:avoid;margin-bottom:24px;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;">
+        <div style="page-break-inside:avoid;margin-bottom:0;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;">
             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:15px;">
                 <tr>
                     <td style="font-size:12pt;font-weight:700;color:#1e3a8a;">{esc(eye_label)}</td>
@@ -250,11 +250,29 @@ def generate_unified_patient_report(parent, patient_record, eye_records, usernam
     .content {{ padding: 30px 40px; }}
     .footer {{ padding: 20px 40px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8; }}
     .page-break {{ page-break-before: always; }}
-    .section-title {{ margin:20px 0 10px; padding-bottom:8px; border-bottom:2px solid #334155; }}
+    .section-title {{ margin:0; padding:0 0 8px 0; border-bottom:2px solid #334155; line-height:1; }}
     .section-label {{ font-size:10pt; font-weight:800; color:#1e293b; letter-spacing:1px; text-transform:uppercase; }}
 </style>
 </head><body>
-    <!-- PAGE 1: IDENTITY & HISTORY -->
+    <!-- PAGE 1: HOSPITAL HEADER -->
+    <div style="background:#ffffff;border-bottom:2px solid #1e3a8a;padding:20px 40px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td width="80" align="center" valign="middle">
+                    <div style="width:80px;height:80px;background:#e8eef7;border:2px solid #1e3a8a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:32pt;color:#1e3a8a;font-weight:800;">H</div>
+                </td>
+                <td style="padding-left:20px;" valign="middle">
+                    <div style="font-size:20pt;font-weight:800;color:#1e3a8a;margin-bottom:4px;">Healthcare Vision Center</div>
+                    <div style="font-size:9pt;color:#64748b;line-height:1.4;">
+                        <div><b>Tel:</b> +1 (555) 123-4567 | <b>Email:</b> info@healthcarevision.com</div>
+                        <div style="margin-top:2px;">456 Medical Plaza, Suite 200, Healthcare City, HC 12345</div>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- PATIENT SCREENING HEADER -->
     <div class="header">
         <div style="font-size:24pt;font-weight:800;letter-spacing:-0.5px;margin-bottom:5px;">Patient Screening Report</div>
         <div style="margin-top:10px;font-size:10pt;opacity:0.9;">
@@ -263,40 +281,49 @@ def generate_unified_patient_report(parent, patient_record, eye_records, usernam
     </div>
     
     <div class="content">
-        <div class="section-title"><span class="section-label">Patient Identity</span></div>
-        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:20px;">
-            {field_row("Full Name", esc(patient_record.get('name')))}
-            {field_row("Date of Birth", esc(patient_record.get('birthdate')))}
-            {field_row("Age", esc(patient_record.get('age')))}
-            {field_row("Sex", esc(patient_record.get('sex')))}
-            {field_row("Contact Number", esc(patient_record.get('phone')))}
-            {field_row("Email Address", esc(patient_record.get('email')))}
-            {field_row("Residential Address", esc(patient_record.get('address')))}
+        <table width="100%" cellpadding="0" cellspacing="12" style="margin-bottom:20px;">
+            <tr>
+                <!-- LEFT COLUMN: Patient Identity -->
+                <td width="50%" valign="top">
+                    <div class="section-title"><span class="section-label">Patient Identity</span></div>
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+                        {field_row("Full Name", esc(patient_record.get('name')))}
+                        {field_row("Date of Birth", esc(patient_record.get('birthdate')))}
+                        {field_row("Age", esc(patient_record.get('age')))}
+                        {field_row("Sex", esc(patient_record.get('sex')))}
+                        {field_row("Contact Number", esc(patient_record.get('phone')))}
+                        {field_row("Email Address", esc(patient_record.get('email')))}
+                        {field_row("Residential Address", esc(patient_record.get('address')))}
+                    </table>
+                </td>
+                <!-- RIGHT COLUMN: Diabetic History -->
+                <td width="50%" valign="top">
+                    <div class="section-title"><span class="section-label">Diabetic History</span></div>
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+                        {field_row("Diabetes Type", esc(patient_record.get('diabetes_type')))}
+                        {field_row("Diagnosis Date", esc(patient_record.get('diag_date')))}
+                        {field_row("Duration", f"{esc(patient_record.get('duration'))} years" if patient_record.get('duration') else "—")}
+                        {field_row("Treatment Regimen", esc(patient_record.get('treatment_regimen')))}
+                    </table>
+                </td>
+            </tr>
         </table>
 
-        <div class="section-title"><span class="section-label">Diabetic History</span></div>
-        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:20px;">
-            {field_row("Diabetes Type", esc(patient_record.get('diabetes_type')))}
-            {field_row("Diagnosis Date", esc(patient_record.get('diag_date')))}
-            {field_row("Duration", f"{esc(patient_record.get('duration'))} years" if patient_record.get('duration') else "—")}
-            {field_row("Treatment Regimen", esc(patient_record.get('treatment_regimen')))}
-        </table>
-    </div>
-
-    <!-- PAGE 2: SUMMARY & RIGHT EYE -->
-    <div class="page-break content">
         <div class="section-title"><span class="section-label">Screening Summary</span></div>
         <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
             {diagnosis_by_eye_html}
             {field_row("Reviewer Comments", esc(eye_records[-1].get('doctor_findings') if eye_records else ""))}
         </table>
+    </div>
 
+    <!-- PAGE 2: RIGHT EYE ANALYSIS -->
+    <div class="page-break content">
         {"<!-- Right Eye Analysis -->" if right_eye_record else ""}
         {f'<div class="section-title"><span class="section-label">Right Eye Analysis</span></div>' if right_eye_record else ""}
         {eye_result_block(right_eye_record) if right_eye_record else ""}
     </div>
 
-    <!-- PAGE 3: LEFT EYE -->
+    <!-- PAGE 3: LEFT EYE ANALYSIS -->
     {f'<div class="page-break content">' if left_eye_record else ""}
         {f'<div class="section-title"><span class="section-label">Left Eye Analysis</span></div>' if left_eye_record else ""}
         {eye_result_block(left_eye_record) if left_eye_record else ""}
@@ -3466,11 +3493,13 @@ class ReportsPage(QWidget):
             return
 
         self.status_label.setText(f"Exported patient history for {patient_name} to {path}")
-        QMessageBox.information(
-            self,
-            "Export Successful",
-            f"The CSV file has been successfully created and saved in:\n{path}"
-        )
+        box = QMessageBox(self)
+        apply_dialog_style(box)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Export Successful")
+        box.setText(f"The CSV file has been successfully created and saved in:\n{path}")
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     def _fetch_full_patient_record(self, record_id: int) -> dict:
         """Fetch complete patient record from database."""
@@ -3677,11 +3706,13 @@ class ReportsPage(QWidget):
                 self.username,
                 f"REPORT_EXPORT_CSV rows={len(self._filtered_rows)}; path={os.path.basename(path)}",
             )
-            QMessageBox.information(
-                self,
-                "Export Successful",
-                f"The CSV file has been successfully created and saved in:\n{path}"
-            )
+            box = QMessageBox(self)
+            apply_dialog_style(box)
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setWindowTitle("Export Successful")
+            box.setText(f"The CSV file has been successfully created and saved in:\n{path}")
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.exec()
         except OSError as err:
             QMessageBox.warning(self, "Export", f"Failed to export summary: {err}")
 
@@ -3934,7 +3965,13 @@ class ReportsPage(QWidget):
                 self.username,
                 f"REPORT_GENERATED patient_id={full.get('patient_id')}; record_id={full.get('id')}",
             )
-            QMessageBox.information(self, "Report Saved", "Patient report has been generated successfully.")
+            box = QMessageBox(self)
+            apply_dialog_style(box)
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setWindowTitle("Report Saved")
+            box.setText("Patient report has been generated successfully.")
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.exec()
 
 
     def generate_referral(self):
@@ -4306,4 +4343,10 @@ class ReportsPage(QWidget):
                 f"file={os.path.basename(path)}"
             ),
         )
-        QMessageBox.information(self, "Referral Saved", f"Referral letter saved to:\n{path}")
+        box = QMessageBox(self)
+        apply_dialog_style(box)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Referral Saved")
+        box.setText(f"Referral letter saved to:\n{path}")
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()

@@ -209,8 +209,8 @@ class EyeShieldApp(QMainWindow):
         screen = QGuiApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
-            target_width = min(1400, max(1024, int(available.width() * 0.95)))
-            target_height = min(860, max(620, int(available.height() * 0.92)))
+            target_width = min(1660, max(1024, int(available.width() * 0.95)))
+            target_height = min(900, max(620, int(available.height() * 0.92)))
             self.resize(target_width, target_height)
         else:
             self.resize(1280, 720)
@@ -1338,9 +1338,11 @@ class EyeShieldApp(QMainWindow):
             event.ignore()
             return
 
-        # Formal queue check on exit.
-        wait_n = self._get_waiting_patient_count()
-        if wait_n > 0:
+        # Formal queue check on exit (Clinician/Doctor only).
+        is_doctor = self.role in {"clinician", "doctor"}
+        wait_n = self._get_waiting_patient_count() if is_doctor else 0
+        
+        if is_doctor and wait_n > 0:
             reply = QMessageBox.warning(
                 self,
                 "Pending Clinical Assessments",
@@ -1366,9 +1368,11 @@ class EyeShieldApp(QMainWindow):
         if self._confirm_quit_during_screening():
             return
 
-        # Formal queue check on logout.
-        wait_n = self._get_waiting_patient_count()
-        if wait_n > 0:
+        # Formal queue check on logout (Clinician/Doctor only).
+        is_doctor = self.role in {"clinician", "doctor"}
+        wait_n = self._get_waiting_patient_count() if is_doctor else 0
+
+        if is_doctor and wait_n > 0:
             reply = QMessageBox.warning(
                 self,
                 "Active Patient Queue",
@@ -3052,6 +3056,7 @@ class EyeShieldApp(QMainWindow):
                 h_name = QLabel("Name")
                 h_phone = QLabel("Phone number")
                 h_date = QLabel("Screening date")
+                h_date.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 for h in (h_name, h_phone, h_date):
                     h.setStyleSheet(f"color:{text_muted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;")
                 
