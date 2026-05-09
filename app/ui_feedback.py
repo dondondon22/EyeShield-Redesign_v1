@@ -17,6 +17,7 @@ QMessageBox, QDialog {
 }
 QMessageBox QLabel {
     color: #111827;
+    background: transparent;
     font-size: 15px;
     font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
     padding: 10px 16px 10px 16px;

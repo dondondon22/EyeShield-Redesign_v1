@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLineEdit, QComboBox, QHeaderView,
     QFileDialog, QDialog, QMessageBox, QMenu, QScrollArea, QFrame,
     QTextEdit, QProgressBar, QStackedWidget, QStyledItemDelegate,
-    QApplication, QStyle, QStyleOptionViewItem,
+    QApplication, QStyle, QStyleOptionViewItem, QSizePolicy, QBoxLayout,
 )
 from PySide6.QtCore import Qt, QSize, QRect, QMarginsF, QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QFont, QImage, QPdfWriter, QPageSize, QPageLayout, QTextDocument
@@ -40,10 +40,10 @@ except Exception:  # pragma: no cover
     from patient_record_groups import group_patient_record_rows
     import emr_service as emr
     from ui_feedback import apply_dialog_style, show_success, show_error, show_warning, confirm
-try:
-    from .screening_widgets import ClickableImageLabel
-except Exception:
-    from screening_widgets import ClickableImageLabel
+    try:
+        from .screening_widgets import ClickableImageLabel, DurationWidget
+    except Exception:
+        from screening_widgets import ClickableImageLabel, DurationWidget
 
 DB_FILE = str(PATIENT_RECORDS_DB_PATH)
 
@@ -262,10 +262,10 @@ def generate_unified_patient_report(parent, patient_record, eye_records, usernam
                     <div style="width:80px;height:80px;background:#e8eef7;border:2px solid #1e3a8a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:32pt;color:#1e3a8a;font-weight:800;">H</div>
                 </td>
                 <td style="padding-left:20px;" valign="middle">
-                    <div style="font-size:20pt;font-weight:800;color:#1e3a8a;margin-bottom:4px;">Healthcare Vision Center</div>
+                    <div style="font-size:20pt;font-weight:800;color:#1e3a8a;margin-bottom:4px;">EyeShield Vision Center</div>
                     <div style="font-size:9pt;color:#64748b;line-height:1.4;">
-                        <div><b>Tel:</b> +1 (555) 123-4567 | <b>Email:</b> info@healthcarevision.com</div>
-                        <div style="margin-top:2px;">456 Medical Plaza, Suite 200, Healthcare City, HC 12345</div>
+                        <div><b>Tel:</b> +63 090 343 4322 | <b>Email:</b> info@eyeshield.com</div>
+                        <div style="margin-top:2px;">67 San Isidro, Tarlac City, CCS 001 </div>
                     </div>
                 </td>
             </tr>
@@ -302,7 +302,7 @@ def generate_unified_patient_report(parent, patient_record, eye_records, usernam
                     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
                         {field_row("Diabetes Type", esc(patient_record.get('diabetes_type')))}
                         {field_row("Diagnosis Date", esc(patient_record.get('diag_date')))}
-                        {field_row("Duration", f"{esc(patient_record.get('duration'))} years" if patient_record.get('duration') else "—")}
+                        {field_row("Duration", esc(DurationWidget.format_days(int(float(patient_record.get('duration')) * 365))) if patient_record.get('duration') else "—")}
                         {field_row("Treatment Regimen", esc(patient_record.get('treatment_regimen')))}
                     </table>
                 </td>
@@ -444,17 +444,25 @@ class ScreeningComparisonDialog(QDialog):
         
         if not self.all_records:
             # Fallback if no completed records found (should be caught by caller)
-            self.latest_record = {}
-            self.previous_record = {}
+            self.left_record = {}
+            self.right_record = {}
         else:
-            # We always compare against the LATEST COMPLETED screening.
-            self.latest_record = self.all_records[-1]
-            # Initially, we compare against the one immediately before it.
-            self.previous_record = self.all_records[-2] if len(self.all_records) >= 2 else self.latest_record
+            # Ordered newest to oldest for the selectors
+            self._display_records = list(self.all_records)
+            self._display_records.reverse()
+            
+            # Default: Compare Latest (Index 0) with Previous (Index 1)
+            self.left_record = self._display_records[0]
+            self.right_record = self._display_records[1] if len(self._display_records) >= 2 else self._display_records[0]
         
         self.setWindowTitle("Compare Screenings")
-        self.resize(1320, 960)
-        self.setMinimumSize(1024, 600)
+        # Allow the dialog to be resized by the user and respond to parent size
+        if root:
+            # Start at a reasonable percentage of parent instead of a hardcoded massive resolution
+            self.resize(int(root.width() * 0.85), int(root.height() * 0.85))
+        else:
+            self.resize(1024, 768)
+        self.setMinimumSize(400, 400)
 
         self._root = QVBoxLayout(self)
         self._root.setContentsMargins(18, 16, 18, 16)
@@ -466,24 +474,33 @@ class ScreeningComparisonDialog(QDialog):
         header.addWidget(title)
         header.addStretch(1)
         
-        header.addWidget(QLabel("Compare latest with:"), 0, Qt.AlignVCenter)
-        self._prev_selector = QComboBox()
-        self._prev_selector.setFixedWidth(240)
-        self._prev_selector.setStyleSheet(
-            "QComboBox{background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:4px 12px;font-weight:600;}"
-            "QComboBox::drop-down{border:none;}"
-            "QComboBox QAbstractItemView{background:#ffffff;border:1px solid #cbd5e1;selection-background-color:#dbeafe;}"
-        )
+        header.addWidget(QLabel("Compare"), 0, Qt.AlignVCenter)
         
-        # Populate selector with historical dates (excluding the latest one)
-        history = self.all_records[:-1]
-        history.reverse() # Newest first
-        for rec in history:
-            dt = _format_screening_datetime_label(rec.get("screened_at"))
-            self._prev_selector.addItem(dt, rec)
+        def _make_selector():
+            cb = QComboBox()
+            cb.setFixedWidth(200)
+            cb.setStyleSheet(
+                "QComboBox{background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:4px 12px;font-weight:600;}"
+                "QComboBox::drop-down{border:none;}"
+                "QComboBox QAbstractItemView{background:#ffffff;border:1px solid #cbd5e1;selection-background-color:#dbeafe;}"
+            )
+            for rec in self._display_records:
+                dt = _format_screening_datetime_label(rec.get("screened_at"))
+                cb.addItem(dt, rec)
+            return cb
+
+        self._left_selector = _make_selector()
+        self._right_selector = _make_selector()
         
-        self._prev_selector.currentIndexChanged.connect(self._on_previous_changed)
-        header.addWidget(self._prev_selector)
+        if self._right_selector.count() >= 2:
+            self._right_selector.setCurrentIndex(1)
+            
+        self._left_selector.currentIndexChanged.connect(self._on_left_changed)
+        self._right_selector.currentIndexChanged.connect(self._on_right_changed)
+        
+        header.addWidget(self._left_selector)
+        header.addWidget(QLabel("with"), 0, Qt.AlignVCenter)
+        header.addWidget(self._right_selector)
         self._root.addLayout(header)
 
         self._summary = QLabel("")
@@ -535,6 +552,7 @@ class ScreeningComparisonDialog(QDialog):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setWidget(self._content)
         self._root.addWidget(self._scroll, 1)
 
@@ -543,8 +561,8 @@ class ScreeningComparisonDialog(QDialog):
         self._root.addWidget(close_btn, 0, Qt.AlignRight)
 
         # Resolve maps and default
-        self._eye_map_latest = self._build_eye_map(self.latest_record)
-        self._eye_map_prev = self._build_eye_map(self.previous_record)
+        self._eye_map_left = self._build_eye_map(self.left_record)
+        self._eye_map_right = self._build_eye_map(self.right_record)
 
         # Setup toggle enabling: enable if eye exists ANYWHERE in history
         available_sides = set()
@@ -561,10 +579,16 @@ class ScreeningComparisonDialog(QDialog):
         self._active_side = "od" if has_od else ("os" if has_os else "od")
         self._set_mode(self._active_side)
 
-    def _on_previous_changed(self, index: int):
+    def _on_left_changed(self, index: int):
         if index < 0: return
-        self.previous_record = self._prev_selector.itemData(index)
-        self._eye_map_prev = self._build_eye_map(self.previous_record)
+        self.left_record = self._left_selector.itemData(index)
+        self._eye_map_left = self._build_eye_map(self.left_record)
+        self._set_mode(self._active_side)
+
+    def _on_right_changed(self, index: int):
+        if index < 0: return
+        self.right_record = self._right_selector.itemData(index)
+        self._eye_map_right = self._build_eye_map(self.right_record)
         self._set_mode(self._active_side)
 
     @staticmethod
@@ -659,22 +683,22 @@ class ScreeningComparisonDialog(QDialog):
         self._active_side = mode
         self._clear_content()
         side = mode
-        prev_eye = self._eye_map_prev.get(side) or {}
-        latest_eye = self._eye_map_latest.get(side) or {}
+        left_eye = self._eye_map_left.get(side) or {}
+        right_eye = self._eye_map_right.get(side) or {}
         # When a side is missing in one record, show a placeholder card for that side.
-        prev_payload = self._merge_group_with_eye(
-            self.previous_record,
-            prev_eye,
+        left_payload = self._merge_group_with_eye(
+            self.left_record,
+            left_eye,
             fallback_eye_label=("Right (OD)" if side == "od" else "Left (OS)"),
         )
-        latest_payload = self._merge_group_with_eye(
-            self.latest_record,
-            latest_eye,
+        right_payload = self._merge_group_with_eye(
+            self.right_record,
+            right_eye,
             fallback_eye_label=("Right (OD)" if side == "od" else "Left (OS)"),
         )
         self._render_single(
-            prev_payload,
-            latest_payload,
+            left_payload,
+            right_payload,
             eye_label_override=("Right (OD)" if side == "od" else "Left (OS)"),
         )
 
@@ -689,39 +713,59 @@ class ScreeningComparisonDialog(QDialog):
 
     # NOTE: intentionally no "Both eyes" view — OD/OS comparison is handled via the toggle.
 
-    def _render_single(self, previous_payload: dict, latest_payload: dict, *, eye_label_override: str | None) -> None:
-        has_prev = self._has_real_eye_payload(previous_payload)
-        has_latest = self._has_real_eye_payload(latest_payload)
+    def _render_single(self, left_payload: dict, right_payload: dict, *, eye_label_override: str | None) -> None:
+        has_left = self._has_real_eye_payload(left_payload)
+        has_right = self._has_real_eye_payload(right_payload)
         eye_part = f" ({escape(eye_label_override)})" if eye_label_override else ""
 
-        if not has_prev or not has_latest:
-            missing_date = _format_screening_datetime_label(previous_payload.get('screened_at') if not has_prev else latest_payload.get('screened_at'))
+        if not has_left or not has_right:
+            missing_date = _format_screening_datetime_label(left_payload.get('screened_at') if not has_left else right_payload.get('screened_at'))
             self._summary.setText(
                 f"Comparison unavailable for {escape(eye_label_override or 'this eye')} | "
                 f"<span style='color:#64748b;'>Not screened on {escape(missing_date)}</span>"
             )
         else:
-            prev_sev = _display_severity(previous_payload)
-            latest_sev = _display_severity(latest_payload)
-            trend_text, trend_color = self._trend_label(prev_sev, latest_sev)
+            left_sev = _display_severity(left_payload)
+            right_sev = _display_severity(right_payload)
+            trend_text, trend_color = self._trend_label(left_sev, right_sev)
             self._summary.setText(
-                f"Severity change{eye_part}: <b>{escape(prev_sev)}</b> -> <b>{escape(latest_sev)}</b> | "
+                f"Severity change{eye_part}: <b>{escape(left_sev)}</b> -> <b>{escape(right_sev)}</b> | "
                 f"<span style='color:{trend_color};font-weight:700;'>{escape(trend_text)}</span>"
             )
 
-        columns = QHBoxLayout()
-        columns.setSpacing(20)
+        self._active_columns_layout = QHBoxLayout()
+        self._active_columns_layout.setSpacing(20)
+        
+        # Responsive orientation based on current width
+        if self.width() < 1000:
+            self._active_columns_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            
         host = QWidget()
         host.setStyleSheet("background:transparent;")
-        host.setLayout(columns)
-        columns.addWidget(self._build_eye_card(previous_payload, heading="Previous Screening"), 1)
-        columns.addWidget(self._build_eye_card(latest_payload, heading="Latest Screening"), 1)
+        host.setLayout(self._active_columns_layout)
+        
+        left_date = _format_screening_datetime_label(left_payload.get("screened_at"))
+        right_date = _format_screening_datetime_label(right_payload.get("screened_at"))
+        
+        self._active_columns_layout.addWidget(self._build_eye_card(left_payload, heading=f"Screening: {left_date}"), 1)
+        self._active_columns_layout.addWidget(self._build_eye_card(right_payload, heading=f"Screening: {right_date}"), 1)
+        # Ensure cards stretch to fill the layout width
+        host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._content_layout.addWidget(host, 1)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Dynamic layout stacking based on width threshold
+        if hasattr(self, "_active_columns_layout"):
+            is_narrow = self.width() < 1000
+            target_dir = QBoxLayout.Direction.TopToBottom if is_narrow else QBoxLayout.Direction.LeftToRight
+            if self._active_columns_layout.direction() != target_dir:
+                self._active_columns_layout.setDirection(target_dir)
 
     def _build_eye_card(self, record: dict, *, heading: str) -> QGroupBox:
         has_data = self._has_real_eye_payload(record)
         card = QGroupBox(heading)
-        card.setMinimumWidth(480)
+        card.setMinimumWidth(280)
         card.setStyleSheet(
             "QGroupBox{font-weight:700;padding-top:24px;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;color:#1e293b;}"
             "QGroupBox::title{subcontrol-origin:margin;left:12px;padding:0 8px;color:#64748b;}"
@@ -773,8 +817,7 @@ class ScreeningComparisonDialog(QDialog):
             if img_path:
                 pixmap = QPixmap(img_path)
                 if not pixmap.isNull():
-                    img.setPixmap(pixmap.scaled(360, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                    img.full_pixmap = pixmap # Required for zoom dialog
+                    img.set_viewable_pixmap(pixmap)
             card_layout.addWidget(img)
 
         final_result = (
@@ -999,7 +1042,18 @@ class ScreeningComparisonDialog(QDialog):
         vl.addWidget(self._section_header("📋  DIABETIC HISTORY"))
         vl.addWidget(self._info_row("Diabetes Type", pt.get("diabetes_type")))
         vl.addWidget(self._info_row("Diagnosed", pt.get("diabetes_diagnosis_date")))
-        vl.addWidget(self._info_row("Duration", pt.get("duration")))
+        dur_val = pt.get("duration")
+        dur_txt = "-"
+        if dur_val:
+            try:
+                fv = float(dur_val)
+                if fv > 0:
+                    dur_txt = DurationWidget.format_days(int(fv * 365))
+                else:
+                    dur_txt = "-"
+            except (TypeError, ValueError):
+                dur_txt = str(dur_val)
+        vl.addWidget(self._info_row("Duration", dur_txt))
         vl.addWidget(self._info_row("HbA1c", f"{pt.get('hba1c')}%" if pt.get("hba1c") else None))
         vl.addWidget(self._info_row("Treatment", pt.get("treatment_regimen")))
         vl.addWidget(self._info_row("Family History of Diabetes", pt.get("prev_dr_stage")))
@@ -1778,7 +1832,20 @@ class PatientDetailsDialog(QDialog):
         add_section("Diabetic History")
         add_field("Diabetes Type", str(patient_record.get("diabetes_type") or "N/A"))
         add_field("Diagnosed Date", str(patient_record.get("diabetes_diagnosis_date") or "N/A"))
-        add_field("Duration", str(patient_record.get("duration") or "N/A"))
+        
+        dur_val = patient_record.get("duration")
+        dur_txt = "N/A"
+        if dur_val:
+            try:
+                fv = float(dur_val)
+                if fv > 0:
+                    dur_txt = DurationWidget.format_days(int(fv * 365))
+                else:
+                    dur_txt = "N/A"
+            except (TypeError, ValueError):
+                dur_txt = str(dur_val)
+        add_field("Duration", dur_txt)
+        
         add_field("Treatment Regimen", str(patient_record.get("treatment_regimen") or "N/A"))
         add_field("Family History of Diabetes", str(patient_record.get("prev_dr_stage") or "N/A"))
         
@@ -1889,7 +1956,20 @@ class ReferralDetailDialog(QDialog):
 
         add_section("Diabetic History")
         add_field("Diabetes Type", str(patient_record.get("diabetes_type") or "N/A"))
-        add_field("Duration", str(patient_record.get("duration") or "N/A"))
+        
+        dur_val = patient_record.get("duration")
+        dur_txt = "N/A"
+        if dur_val:
+            try:
+                fv = float(dur_val)
+                if fv > 0:
+                    dur_txt = DurationWidget.format_days(int(fv * 365))
+                else:
+                    dur_txt = "N/A"
+            except (TypeError, ValueError):
+                dur_txt = str(dur_val)
+        add_field("Duration", dur_txt)
+        
         add_field("Diagnosed Date", str(patient_record.get("diabetes_diagnosis_date") or "N/A"))
         add_field("Treatment Regimen", str(patient_record.get("treatment_regimen") or "N/A"))
         add_field("Family History of Diabetes", str(patient_record.get("prev_dr_stage") or "N/A"))
@@ -3459,7 +3539,6 @@ class ReportsPage(QWidget):
         dialog = ScreeningComparisonDialog(ordered, self)
         from ui_feedback import apply_dialog_style
         apply_dialog_style(dialog)
-        dialog.resize(max(dialog.width(), 1320), max(dialog.height(), 960))
         dialog.exec()
 
     def _export_patient_history(self, timeline_records: list[dict]):

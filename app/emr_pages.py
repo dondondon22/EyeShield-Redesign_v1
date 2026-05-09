@@ -112,9 +112,14 @@ def _label_style() -> str:
 
 
 def _input_style() -> str:
+    arrow_svg = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwZDZlZmQiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtNiA5IDYgNiA2LTYiLz48L3N2Zz4="
     return (
         "QLineEdit,QComboBox,QTextEdit,QDateEdit,QDoubleSpinBox{"
         "background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;font-size:13px;}"
+        "QComboBox,QDateEdit{padding-right:34px;}"
+        "QComboBox::drop-down,QDateEdit::drop-down{"
+        "subcontrol-origin:padding;subcontrol-position:top right;width:32px;border-left:1px solid #cbd5e1;background:#f8fafc;}"
+        f"QComboBox::down-arrow,QDateEdit::down-arrow{{image:url({arrow_svg});width:14px;height:14px;}}"
     )
 
 
@@ -447,6 +452,7 @@ class PatientVisitDialog(QDialog):
         self.f_first = QLineEdit(str(self._patient.get("first_name") or ""))
         self.f_dob = QDateEdit()
         self.f_dob.setCalendarPopup(True)
+        self.f_dob.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.f_dob.setDisplayFormat("yyyy-MM-dd")
         dstr = str(self._patient.get("date_of_birth") or "")[:10]
         qd = QDate.fromString(dstr, "yyyy-MM-dd")
@@ -1884,7 +1890,6 @@ class EmrVisitsPage(QWidget):
         
         dialog = ScreeningComparisonDialog(completed, self.window() if hasattr(self, "window") else self)
         apply_dialog_style(dialog)
-        dialog.resize(max(dialog.width(), 1320), max(dialog.height(), 960))
         dialog.exec()
 
     def _start_diagnosis_from_review(self) -> None:

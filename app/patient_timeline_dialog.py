@@ -14,9 +14,14 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    from .ui_feedback import confirm, apply_dialog_style, show_warning, show_error, show_success
+    from ui_feedback import confirm, apply_dialog_style, show_warning, show_error, show_success
+    from screening_widgets import DurationWidget
 except Exception:
     from ui_feedback import confirm, apply_dialog_style, show_warning, show_error, show_success
+    try:
+        from .screening_widgets import DurationWidget
+    except Exception:
+        from screening_widgets import DurationWidget
 
 _APP_ROOT  = Path(__file__).resolve().parent
 _ICONS_DIR = _APP_ROOT / "icons"
@@ -1246,14 +1251,14 @@ class PatientTimelineDialog(QWidget):
             or ps.get("dm_duration_years")
             or ""
         ).strip()
-        dur_formatted = dur_raw
+        dur_formatted = "-"
         if dur_raw:
             try:
-                months = int(float(dur_raw))
-                y = months // 12
-                m = months % 12
-                dur_formatted = f"{y} years and {m} months"
-            except ValueError:
+                fv = float(dur_raw)
+                if fv > 0:
+                    # Database stores decimal years. Convert to days for formatting.
+                    dur_formatted = DurationWidget.format_days(int(fv * 365))
+            except (TypeError, ValueError):
                 dur_formatted = dur_raw
 
         self._sh("duration", dur_formatted or "-")

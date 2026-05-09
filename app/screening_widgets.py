@@ -157,7 +157,8 @@ class ModernCalendarDateEdit(QDateEdit):
             today, menu_bg = "#8ea6bf", "#ffffff"
             weekend_col = "#6b7787"
 
-        arrow = self._arrow_icon_path
+        # Use provided icon file path if available, otherwise fallback to base64
+        arrow = self._arrow_icon_path if self._arrow_icon_path else "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwZDZlZmQiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtNiA5IDYgNiA2LTYiLz48L3N2Zz4="
 
         self.setStyleSheet(f"""
             QDateEdit {{
@@ -175,16 +176,16 @@ class ModernCalendarDateEdit(QDateEdit):
             QDateEdit::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
-                width: 24px;
-                border-left: 1px solid {border};
+                width: 32px;
+                border-left: 1.5px solid {border};
                 background: {d_bg};
                 border-top-right-radius: 6px;
                 border-bottom-right-radius: 6px;
             }}
             QDateEdit::down-arrow {{
                 image: url("{arrow}");
-                width: 10px;
-                height: 10px;
+                width: 14px;
+                height: 14px;
             }}
         """)
 
@@ -659,3 +660,54 @@ class ClickableImageLabel(QLabel):
             dialog.exec()
             return
         super().mousePressEvent(event)
+
+class DurationWidget(QSpinBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setRange(0, 36500)  # Up to 100 years
+        self.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
+        self.setAccelerated(True)
+        self.setMinimumWidth(280)
+        self.setSpecialValueText("")
+
+    @staticmethod
+    def format_days(value: int) -> str:
+        if value <= 0:
+            return ""
+        
+        years = value // 365
+        rem = value % 365
+        months = rem // 30
+        days = rem % 30
+        
+        return f"{years} years, {months} months and {days} days"
+
+    def textFromValue(self, value: int) -> str:
+        return self.format_days(value)
+
+    def stepBy(self, steps: int):
+        """Smart increment based on cursor position: Years, Months, or Days."""
+        cursor = self.lineEdit().cursorPosition()
+        text = self.text()
+        
+        comma_idx = text.find(",")
+        and_idx = text.find(" and ")
+        
+        increment = 1
+        if comma_idx != -1 and cursor <= comma_idx:
+            increment = 365
+        elif and_idx != -1 and cursor >= and_idx + 4:
+            increment = 1
+        elif and_idx != -1:
+            increment = 30
+        elif "year" in text.lower() and cursor <= text.lower().find("year") + 4:
+            increment = 365
+        elif "month" in text.lower() and cursor <= text.lower().find("month") + 5:
+            increment = 30
+        else:
+            increment = 1
+            
+        new_val = max(self.minimum(), min(self.maximum(), self.value() + (steps * increment)))
+        self.setValue(new_val)
+        # Restore cursor position best-effort
+        self.lineEdit().setCursorPosition(cursor)

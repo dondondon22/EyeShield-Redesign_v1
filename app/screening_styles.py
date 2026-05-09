@@ -200,16 +200,19 @@ SCREENING_PAGE_STYLE = """
     QDateEdit::drop-down {
         subcontrol-origin: padding;
         subcontrol-position: center right;
-        width: 28px;
+        width: 32px;
+        border-left: 1px solid #ced4da;
+        border-top-right-radius: 8px;
+        border-bottom-right-radius: 8px;
+        background: #f8f9fa;
+    }
+    QDateEdit::drop-down:hover {
+        background: #e9ecef;
     }
     QDateEdit::down-arrow {
-        image: none;
-        border-left: 4px solid transparent;
-        border-right: 4px solid transparent;
-        border-top: 5px solid #495057;
-        width: 0;
-        height: 0;
-        margin-right: 6px;
+        image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwZDZlZmQiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtNiA5IDYgNiA2LTYiLz48L3N2Zz4=");
+        width: 14px;
+        height: 14px;
     }
 
     QPushButton#primaryAction {

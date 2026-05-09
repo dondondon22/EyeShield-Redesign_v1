@@ -32,14 +32,14 @@ from PySide6.QtGui import QPixmap, QTextCursor
 
 try:
     from .screening_form import ScreeningPage
-    from .screening_widgets import ModernCalendarDateEdit
+    from .screening_widgets import ModernCalendarDateEdit, DurationWidget
     from .ui_feedback import show_warning, apply_dialog_style
     from . import emr_service as emr
     from .auth import UserManager
     from .trusted_hospitals import ReferralHospitalDialog
 except (ImportError, ValueError):
     from screening_form import ScreeningPage
-    from screening_widgets import ModernCalendarDateEdit
+    from screening_widgets import ModernCalendarDateEdit, DurationWidget
     from ui_feedback import show_warning, apply_dialog_style
     import emr_service as emr
     from auth import UserManager
@@ -556,7 +556,7 @@ class DoctorDiagnosisForm(QWidget):
 
     def _refresh_screening_fields_from_dialog(self, values: dict) -> None:
         self._set_combo_value(getattr(self.screening, "diabetes_type", None), values.get("diabetes_type") or "", blank_values={"Select"})
-        self._set_spinbox_value(getattr(self.screening, "diabetes_duration", None), int(values.get("dm_duration_years") or 0))
+        self._set_spinbox_value(getattr(self.screening, "diabetes_duration", None), int(float(values.get("dm_duration_years") or 0) * 365))
         self._set_line_edit_text(getattr(self.screening, "diabetes_diagnosis_date", None), values.get("diagnosis_date") or "")
         self._set_combo_value(
             getattr(self.screening, "treatment_regimen", None),
@@ -659,11 +659,9 @@ class DoctorDiagnosisForm(QWidget):
                     diag_date = QDate.fromString(diagnosis_date, "dd/MM/yyyy")
                     if diag_date.isValid():
                         today = QDate.currentDate()
-                        years = today.year() - diag_date.year()
-                        if (today.month(), today.day()) < (diag_date.month(), diag_date.day()):
-                            years -= 1
-                        years = max(0, years)
-                        dm_txt = f"{years} yrs" if years > 0 else "—"
+                        days_diff = diag_date.daysTo(today)
+                        if days_diff > 0:
+                            dm_txt = DurationWidget.format_days(days_diff)
                 except Exception:
                     pass
 
@@ -673,7 +671,8 @@ class DoctorDiagnosisForm(QWidget):
                     dm = p.get("dm_duration_years")
                 try:
                     fv = float(dm)
-                    dm_txt = f"{int(fv) if fv.is_integer() else round(fv, 1)} yrs" if fv > 0 else "—"
+                    if fv > 0:
+                        dm_txt = DurationWidget.format_days(int(fv * 365))
                 except (TypeError, ValueError):
                     dm_txt = "—"
 
@@ -880,15 +879,13 @@ class DoctorDiagnosisForm(QWidget):
         in_weight.valueChanged.connect(lambda: update_bmi())
         update_bmi()
 
-        in_dm_dur = QSpinBox()
-        in_dm_dur.setRange(0, 80)
-        in_dm_dur.setSuffix(" years")
-        try: in_dm_dur.setValue(int(float(dm_dur_init or 0)))
+        in_dm_dur = DurationWidget()
+        try: in_dm_dur.setValue(int(float(dm_dur_init or 0) * 365))
         except: in_dm_dur.setValue(0)
         in_dm_dur.setSpecialValueText(" ")
 
         in_dm_type = QComboBox()
-        in_dm_type.addItems(["", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational"])
+        in_dm_type.addItems(["", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational", "Other"])
         current_dm_type = str(dm_type_init or "")
         if current_dm_type:
             idx = in_dm_type.findText(current_dm_type)
@@ -1005,7 +1002,7 @@ class DoctorDiagnosisForm(QWidget):
                 visit_details = {
                     "diabetes_type":           (in_dm_type.currentText().strip()
                                                 if in_dm_type.currentText().strip() != "Select" else None),
-                    "dm_duration_years":        float(in_dm_dur.value()) if in_dm_dur.value() > 0 else None,
+                    "dm_duration_years":        float(in_dm_dur.value()) / 365.0 if in_dm_dur.value() > 0 else None,
                     "hba1c":                    None,
                     "diabetes_diagnosis_date":  in_diagnosis_date.date().toString("dd/MM/yyyy") if in_diagnosis_date.date() != QDate(1900, 1, 1) else None,
                     "treatment_regimen":        in_treatment_regimen.currentText().strip() or None,

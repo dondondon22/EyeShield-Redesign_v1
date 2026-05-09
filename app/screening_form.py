@@ -47,7 +47,7 @@ try:
         CALENDAR_STYLE,
     )
     from .screening_worker import _InferenceWorker
-    from .screening_widgets import ClickableImageLabel, ModernCalendarDateEdit
+    from .screening_widgets import ClickableImageLabel, ModernCalendarDateEdit, DurationWidget
     from .screening_results import ResultsWindow
     from .logic_improvements import (
         ScreeningFlowGuard,
@@ -72,21 +72,29 @@ except ImportError:
         CALENDAR_STYLE,
     )
     from screening_worker import _InferenceWorker
-    from screening_widgets import ClickableImageLabel, ModernCalendarDateEdit
+    from screening_widgets import ClickableImageLabel, ModernCalendarDateEdit, DurationWidget
     from screening_results import ResultsWindow
     from logic_improvements import (
         ScreeningFlowGuard,
         DuplicateDetector,
         DuplicateDialog,
     )
-    from app_paths import PATIENT_RECORDS_DB_PATH
+    try:
+        from app_paths import PATIENT_RECORDS_DB_PATH
+    except (ImportError, ModuleNotFoundError):
+        try:
+            from .app_paths import PATIENT_RECORDS_DB_PATH
+        except (ImportError, ModuleNotFoundError):
+            from app.app_paths import PATIENT_RECORDS_DB_PATH
     from auth import UserManager
     import emr_service as emr
     from safety_runtime import get_autosave_draft_path, safe_remove_file, write_activity
     from ui_feedback import apply_dialog_style
     from model_inference import SYSTEM_UNCERTAIN_LABEL, check_image_quality, ImageUngradableError
 except Exception:
-    pass
+    # Fallback definition if everything fails, though app_paths should be reachable
+    from pathlib import Path
+    PATIENT_RECORDS_DB_PATH = Path(__file__).resolve().parent / "patient_records.db"
 
 # Central records DB helpers
 try:
@@ -126,31 +134,8 @@ class SymptomTag(QPushButton):
 
 
 
-class DurationSpinBox(QSpinBox):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setRange(0, 1200)
-        self.setSpecialValueText(" ")
         
-    def textFromValue(self, value: int) -> str:
-        if value == 0:
-            return ""
-        y = value // 12
-        m = value % 12
-        return f"{y} years and {m} months"
-        
-    def valueFromText(self, text: str) -> int:
-        try:
-            # Basic parsing support for manual typing if needed
-            import re
-            parts = re.findall(r'(\d+)', text)
-            if len(parts) >= 2:
-                return int(parts[0]) * 12 + int(parts[1])
-            elif len(parts) == 1:
-                return int(parts[0]) * 12
-        except Exception:
-            pass
-        return super().valueFromText(text)
+
 
 
 class DropZoneLabel(QLabel):
@@ -276,26 +261,37 @@ QDateEdit {
 QDateEdit::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width:24px;
-    border-left:1px solid #d3dae3;
-    background:#f6f8fb;
-    border-top-right-radius:6px;
-    border-bottom-right-radius:6px;
+    width:32px;
+    border-left:1.5px solid #d3dae3;
+    background:#f8fafc;
+    border-top-right-radius:0px;
+    border-bottom-right-radius:0px;
+}
+QDateEdit::drop-down:hover {
+    background:#eff6ff;
 }
 QDateEdit::down-arrow {
-    width:10px;
-    height:10px;
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwZDZlZmQiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtNiA5IDYgNiA2LTYiLz48L3N2Zz4=");
+    width:14px;
+    height:14px;
 }
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width:24px;
-    border-left:1px solid #d3dae3;
-    background:#f6f8fb;
-    border-top-right-radius:6px;
-    border-bottom-right-radius:6px;
+    width:32px;
+    border-left:1.5px solid #d3dae3;
+    background:#f8fafc;
+    border-top-right-radius:0px;
+    border-bottom-right-radius:0px;
 }
-QComboBox::down-arrow { width:10px; height:10px; }
+QComboBox::drop-down:hover {
+    background:#eff6ff;
+}
+QComboBox::down-arrow {
+    image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwZDZlZmQiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtNiA5IDYgNiA2LTYiLz48L3N2Zz4=");
+    width:14px;
+    height:14px;
+}
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width:18px; border:none; background:transparent; }
 QScrollArea { border:none; background:transparent; }
 QScrollBar:vertical { background:#f2f5f8; width:6px; border-radius:3px; }
@@ -645,11 +641,6 @@ class ScreeningPage(QWidget):
         if hasattr(self, "diabetes_diagnosis_date") and hasattr(self.diabetes_diagnosis_date, "apply_theme"):
             self.diabetes_diagnosis_date.apply_theme(dark)
 
-        # Fallback for non-modern date widgets.
-        self._dob_default_style = "QDateEdit{border:1.5px solid #d3dae3;border-radius:6px;}"
-        self._dob_invalid_style = "QDateEdit{border:1.5px solid #ef4444;border-radius:6px;}"
-        self.p_dob.setStyleSheet(self._dob_default_style)
-
     def create_unified_page(self):
         root = QWidget()
         root.setStyleSheet(_REDESIGN_STYLESHEET)
@@ -862,7 +853,6 @@ class ScreeningPage(QWidget):
         if cal is not None:
             cal.clicked.connect(self._on_dob_calendar_selected)
             cal.activated.connect(self._on_dob_calendar_selected)
-        self._apply_calendar_themes()
         c1.addLayout(
             row3(
                 field("First Name", self.p_first_name, "scr_label_name"),
@@ -948,23 +938,25 @@ class ScreeningPage(QWidget):
         self.weight.setSpecialValueText(" ")
         self.weight.valueChanged.connect(self._calculate_bmi)
 
-        self.bmi = QDoubleSpinBox()
-        self.bmi.setRange(0, 100)
-        self.bmi.setDecimals(1)
+        self.bmi = QLineEdit()
         self.bmi.setReadOnly(True)
-        self.bmi.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
-        self.bmi.setSpecialValueText(" ")
         self.bmi.setStyleSheet(
-            "QDoubleSpinBox{background:#f6f8fb;color:#475569;border:1.5px solid #d3dae3;border-radius:6px;padding:6px 10px;}"
+            "QLineEdit{background:#f6f8fb;color:#475569;border:1.5px solid #d3dae3;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:600;}"
         )
+        # Compatibility with existing code that expects a QDoubleSpinBox
+        self.bmi._numeric_value = 0.0
+        self.bmi.value = lambda: self.bmi._numeric_value
+        def _bmi_set_val(v):
+            self.bmi._numeric_value = float(v)
+            if v == 0:
+                self.bmi.clear()
+        self.bmi.setValue = _bmi_set_val
+
         c1.addLayout(row3(field("Height (cm)", self.height), field("Weight (kg)", self.weight), field("BMI", self.bmi)))
 
-        # BMI Classification Label
+        # BMI Classification Label (Hidden, integrated into BMI box)
         self.bmi_classification_label = QLabel(" ")
-        self.bmi_classification_label.setStyleSheet(
-            "QLabel{font-size:10px;font-weight:600;color:#6b7280;margin-top:-4px;margin-left:10px;}"
-        )
-        c1.addWidget(self.bmi_classification_label)
+        self.bmi_classification_label.hide()
 
         # Keep Phone/Email narrower so Address can take more space.
         self.p_phone.setMaximumWidth(190)
@@ -1045,7 +1037,7 @@ class ScreeningPage(QWidget):
         self.diabetes_type = QComboBox()
         self.diabetes_type.setObjectName("diabetesTypeDropdown")
         # Initialize with normal options; will be updated via signal if sex is Female
-        self.diabetes_type.addItems(["", "Type 1", "Type 2", "Type 1 + Type 2"])
+        self.diabetes_type.addItems(["", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational", "Other"])
         self._apply_visible_dropdown_style(self.diabetes_type)
         
         # Connect Sex signal to update Diabetes options
@@ -1060,8 +1052,9 @@ class ScreeningPage(QWidget):
         )
         self.diabetes_diagnosis_date.dateChanged.connect(self._on_diagnosis_date_changed)
         c2.addLayout(row2(field("Diabetes Type", self.diabetes_type, "scr_label_diabetes"), field("Diagnosis Date", self.diabetes_diagnosis_date)))
+        self._apply_calendar_themes()
 
-        self.diabetes_duration = DurationSpinBox()
+        self.diabetes_duration = DurationWidget()
 
         self.diabetes_duration.setReadOnly(True)
         self.diabetes_duration.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
@@ -1435,7 +1428,7 @@ class ScreeningPage(QWidget):
             "fasting_blood_sugar": float(self.fbs.value()) if hasattr(self, "fbs") and self.fbs.value() > 0 else None,
             "random_blood_sugar": float(self.rbs.value()) if hasattr(self, "rbs") and self.rbs.value() > 0 else None,
             "diabetes_type": dm_type or None,
-            "dm_duration_years": dm_duration,
+            "dm_duration_years": dm_duration / 365.0 if dm_duration else None,
             "hba1c": hba1c_val,
             "diabetes_diagnosis_date": self._get_diagnosis_date().toString("dd/MM/yyyy") if self._get_diagnosis_date().isValid() else None,
             "treatment_regimen": (self.treatment_regimen.currentText().strip() if hasattr(self, "treatment_regimen") else "") or None,
@@ -1729,28 +1722,30 @@ class ScreeningPage(QWidget):
         else:
             self.bmi.setValue(0)
 
-        # Update BMI classification
+        # Update BMI classification and display
         bmi_value = self.bmi.value()
         if bmi_value == 0:
-            classification = " "
-            color = "#6b7280"
-        elif bmi_value < 18.5:
-            classification = "Underweight"
-            color = "#3b82f6"
-        elif bmi_value < 25:
-            classification = "Normal Weight"
-            color = "#10b981"
-        elif bmi_value < 30:
-            classification = "Overweight"
-            color = "#f59e0b"
+            self.bmi.clear()
+            classification = ""
+            color = "#475569"
         else:
-            classification = "Obese"
-            color = "#ef4444"
-        
-        self.bmi_classification_label.setText(classification)
-        self.bmi_classification_label.setStyleSheet(
-            f"QLabel{{font-size:10px;font-weight:600;color:{color};margin-top:-4px;}}"
-        )
+            if bmi_value < 18.5:
+                classification = "Underweight"
+                color = "#3b82f6"
+            elif bmi_value < 25:
+                classification = "Normal Weight"
+                color = "#10b981"
+            elif bmi_value < 30:
+                classification = "Overweight"
+                color = "#f59e0b"
+            else:
+                classification = "Obese"
+                color = "#ef4444"
+            
+            self.bmi.setText(f"{bmi_value} - {classification}")
+            self.bmi.setStyleSheet(
+                f"QLineEdit{{background:#f6f8fb;color:{color};border:1.5px solid #d3dae3;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:600;}}"
+            )
 
     def _on_dob_text_changed(self, text):
         digits = "".join(ch for ch in text if ch.isdigit())[:8]
@@ -1901,10 +1896,8 @@ class ScreeningPage(QWidget):
             return
 
         today = QDate.currentDate()
-        months = (today.year() - diag_date.year()) * 12 + today.month() - diag_date.month()
-        if today.day() < diag_date.day():
-            months -= 1
-        self.diabetes_duration.setValue(max(0, months))
+        days = diag_date.daysTo(today)
+        self.diabetes_duration.setValue(max(0, days))
 
     def _update_diabetes_options(self, sex_text: str):
         """Update diabetes type options based on patient sex."""
@@ -1998,7 +1991,7 @@ class ScreeningPage(QWidget):
         self.p_dob = QDateEdit()
         self.p_dob.setCalendarPopup(True)
         self.p_dob.setDisplayFormat("yyyy-MM-dd")
-        self.p_dob.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        # self.p_dob.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         custom_calendar = QCalendarWidget()
         custom_calendar.setGridVisible(True)
         custom_calendar.setStyleSheet(CALENDAR_STYLE)
@@ -2049,7 +2042,7 @@ class ScreeningPage(QWidget):
         self.diabetes_type.addItems(["", "Type 1", "Type 2", "Gestational", "Type 1 + Type 2", "Type 1 + Gestational", "Type 2 + Gestational"])
         clinical_form.addRow("Diabetes Type:", self.diabetes_type)
 
-        self.diabetes_duration = DurationSpinBox()
+        self.diabetes_duration = DurationWidget()
         clinical_form.addRow("Duration:", self.diabetes_duration)
 
         self.clinical_prev_dr_stage = QComboBox()
@@ -2517,6 +2510,28 @@ class ScreeningPage(QWidget):
             _set_enabled("diabetes_duration", False)
         else:
             _set_enabled("diabetes_duration", True)
+
+    def _update_diabetes_options(self, sex_text: str):
+        """Update diabetes type dropdown based on patient sex (e.g. Gestational)."""
+        current_type = self.diabetes_type.currentText()
+        self.diabetes_type.blockSignals(True)
+        self.diabetes_type.clear()
+        
+        # Base options
+        options = ["", "Type 1", "Type 2", "Type 1 + Type 2"]
+        
+        # Add Gestational options if Female
+        if str(sex_text).strip() == "Female":
+            options.extend(["Gestational", "Type 1 + Gestational", "Type 2 + Gestational"])
+            
+        options.append("Other")
+        self.diabetes_type.addItems(options)
+        
+        # Restore selection if it still exists
+        index = self.diabetes_type.findText(current_type)
+        if index >= 0:
+            self.diabetes_type.setCurrentIndex(index)
+        self.diabetes_type.blockSignals(False)
 
     def reset_screening(self, confirm_unsaved: bool = True):
         if self._guard_busy_action("starting a new screening"):
@@ -3047,9 +3062,8 @@ class ScreeningPage(QWidget):
             else:
                 self.diabetes_type.setCurrentIndex(0)
 
-            # Safe int conversion for duration
             try:
-                duration_val = int(float(str(duration or 0)))
+                duration_val = int(float(str(duration or 0)) * 365)
                 self.diabetes_duration.setValue(duration_val)
             except (ValueError, TypeError):
                 self.diabetes_duration.setValue(0)
@@ -3773,7 +3787,7 @@ class ScreeningPage(QWidget):
             "eye": self.p_eye.currentText(),
             "diabetes_type": self.diabetes_type.currentText(),
             "diagnosis_date": self._get_diagnosis_date().toString("dd/MM/yyyy") if self._get_diagnosis_date().isValid() else "",
-            "duration": self.diabetes_duration.value(),
+            "duration": self.diabetes_duration.value() / 365.0,
             "hba1c": 0.0,
             "va_left": self.va_left.text().strip() if hasattr(self, "va_left") else "",
             "va_right": self.va_right.text().strip() if hasattr(self, "va_right") else "",
@@ -3868,7 +3882,7 @@ class ScreeningPage(QWidget):
                 self.diabetes_diagnosis_date.setDate(qd)
             else:
                 self.diabetes_diagnosis_date.setDate(self.min_diagnosis_date)
-        self.diabetes_duration.setValue(int(data.get("duration") or 0))
+        self.diabetes_duration.setValue(int(float(data.get("duration") or 0) * 365))
         # HbA1c removed from UI.
 
         if hasattr(self, "va_left"):
@@ -4208,7 +4222,7 @@ class ScreeningPage(QWidget):
                 "fasting_blood_sugar": float(self.fbs.value()) if hasattr(self, "fbs") and self.fbs.value() > 0 else None,
                 "random_blood_sugar": float(self.rbs.value()) if hasattr(self, "rbs") and self.rbs.value() > 0 else None,
                 "diabetes_type": (self.diabetes_type.currentText().strip() if hasattr(self, "diabetes_type") else "") or None,
-                "dm_duration_years": float(self.diabetes_duration.value()) if hasattr(self, "diabetes_duration") and self.diabetes_duration.value() > 0 else None,
+                "dm_duration_years": (float(self.diabetes_duration.value()) / 365.0) if hasattr(self, "diabetes_duration") and self.diabetes_duration.value() > 0 else None,
                 "hba1c": None,
                 "diabetes_diagnosis_date": self._get_diagnosis_date().toString("dd/MM/yyyy") if self._get_diagnosis_date().isValid() else None,
                 "treatment_regimen": (self.treatment_regimen.currentText().strip() if hasattr(self, "treatment_regimen") else "") or None,
@@ -4353,7 +4367,7 @@ class ScreeningPage(QWidget):
         address = self.p_address.text().strip() if hasattr(self, "p_address") else ""
         eye = self.p_eye.currentText()
         diabetes_type = self.diabetes_type.currentText()
-        duration = self.diabetes_duration.value()
+        duration = (self.diabetes_duration.value() / 365.0) if self.diabetes_duration.value() > 0 else ""
         notes = self.notes.toPlainText().strip()
         result = self.last_result_class
         confidence = self.last_result_conf
